@@ -1,0 +1,23 @@
+[[players]]
+id = "RED"
+type = "random"
+seed = 11
+allow_trade_offers = false
+
+[[players]]
+id = "BLUE"
+type = "random"
+seed = 12
+allow_trade_offers = false
+
+[[players]]
+id = "ORANGE"
+type = "random"
+seed = 13
+allow_trade_offers = false
+
+[[players]]
+id = "WHITE"
+type = "random"
+seed = 14
+allow_trade_offers = false

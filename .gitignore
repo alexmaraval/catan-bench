@@ -23,6 +23,6 @@ venv/
 build/
 dist/
 htmlcov/
+runs/
 .coverage
 .coverage.*
-

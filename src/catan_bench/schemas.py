@@ -25,6 +25,14 @@ class Action:
             data["description"] = self.description
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "Action":
+        return cls(
+            action_type=str(data["action_type"]),
+            payload=dict(data.get("payload") or {}),
+            description=data.get("description") if "description" in data else None,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Event:
@@ -48,6 +56,17 @@ class Event:
             data["actor_player_id"] = self.actor_player_id
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "Event":
+        return cls(
+            kind=str(data["kind"]),
+            payload=dict(data.get("payload") or {}),
+            turn_index=int(data.get("turn_index", 0)),
+            phase=str(data.get("phase", "unknown")),
+            decision_index=data.get("decision_index"),
+            actor_player_id=data.get("actor_player_id"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MemoryEntry:
@@ -67,6 +86,18 @@ class MemoryEntry:
             "decision_index": self.decision_index,
             "tags": list(self.tags),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "MemoryEntry":
+        tags = data.get("tags", ())
+        return cls(
+            player_id=str(data["player_id"]),
+            content=data["content"],
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            decision_index=int(data["decision_index"]),
+            tags=tuple(str(tag) for tag in tags) if tags else (),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +120,19 @@ class DecisionPoint:
         if self.prompt is not None:
             data["prompt"] = self.prompt
         return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "DecisionPoint":
+        return cls(
+            acting_player_id=str(data["acting_player_id"]),
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            legal_actions=tuple(
+                Action.from_dict(action) for action in data.get("legal_actions", ())
+            ),
+            decision_index=int(data.get("decision_index", 0)),
+            prompt=data.get("prompt") if "prompt" in data else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +174,30 @@ class Observation:
             "memory": [entry.to_dict() for entry in self.memory],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "Observation":
+        return cls(
+            game_id=str(data["game_id"]),
+            player_id=str(data["player_id"]),
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            decision_index=int(data["decision_index"]),
+            public_state=dict(data.get("public_state") or {}),
+            private_state=dict(data.get("private_state") or {}),
+            recent_public_events=tuple(
+                Event.from_dict(e) for e in data.get("recent_public_events", ())
+            ),
+            recent_private_events=tuple(
+                Event.from_dict(e) for e in data.get("recent_private_events", ())
+            ),
+            legal_actions=tuple(
+                Action.from_dict(a) for a in data.get("legal_actions", ())
+            ),
+            memory=tuple(
+                MemoryEntry.from_dict(m) for m in data.get("memory", ())
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class PlayerResponse:
@@ -144,6 +212,14 @@ class PlayerResponse:
         if self.reasoning is not None:
             data["reasoning"] = self.reasoning
         return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "PlayerResponse":
+        return cls(
+            action=Action.from_dict(data["action"]),
+            memory_write=data.get("memory_write"),
+            summary=data.get("summary"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +239,20 @@ class TransitionResult:
             "terminal": self.terminal,
             "result_metadata": self.result_metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "TransitionResult":
+        return cls(
+            public_events=tuple(
+                Event.from_dict(e) for e in data.get("public_events", ())
+            ),
+            private_events_by_player={
+                str(pid): tuple(Event.from_dict(e) for e in events)
+                for pid, events in (data.get("private_events_by_player") or {}).items()
+            },
+            terminal=bool(data.get("terminal", False)),
+            result_metadata=dict(data.get("result_metadata") or {}),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,3 +309,15 @@ class GameResult:
             "memory_writes": self.memory_writes,
             "metadata": self.metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "GameResult":
+        return cls(
+            game_id=str(data["game_id"]),
+            winner_ids=tuple(str(w) for w in data.get("winner_ids", ())),
+            total_decisions=int(data["total_decisions"]),
+            public_event_count=int(data["public_event_count"]),
+            private_event_count=int(data["private_event_count"]),
+            memory_writes=int(data["memory_writes"]),
+            metadata=dict(data.get("metadata") or {}),
+        )

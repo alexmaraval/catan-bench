@@ -5,9 +5,6 @@ from pathlib import Path
 import tomllib
 
 
-VALID_PLAYER_IDS = ("RED", "BLUE", "ORANGE", "WHITE")
-
-
 @dataclass(frozen=True, slots=True)
 class GameConfig:
     engine: str = "catanatron"
@@ -76,10 +73,6 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
             raise ValueError("Each [[players]] entry must be a table.")
 
         player_id = str(entry["id"]).upper()
-        if player_id not in VALID_PLAYER_IDS:
-            raise ValueError(
-                f"Unsupported player id {player_id!r}. Expected one of {VALID_PLAYER_IDS}."
-            )
         if player_id in seen_ids:
             raise ValueError(f"Duplicate player id {player_id!r} in players config.")
         seen_ids.add(player_id)

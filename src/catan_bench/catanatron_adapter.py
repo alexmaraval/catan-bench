@@ -43,6 +43,9 @@ class PassiveCatanatronPlayer(CatanatronPlayer):
         )
 
 
+VALID_PLAYER_IDS = ("RED", "BLUE", "ORANGE", "WHITE")
+
+
 class CatanatronEngineAdapter:
     """EngineAdapter implementation backed by a live catanatron Game."""
 
@@ -57,6 +60,12 @@ class CatanatronEngineAdapter:
         catan_map=None,
     ) -> None:
         if game is None:
+            for pid in player_ids:
+                if pid not in VALID_PLAYER_IDS:
+                    raise ValueError(
+                        f"Unsupported player id {pid!r}. "
+                        f"Catanatron supports: {VALID_PLAYER_IDS}."
+                    )
             players = [PassiveCatanatronPlayer(Color[player_id]) for player_id in player_ids]
             game = Game(
                 players,
@@ -67,6 +76,7 @@ class CatanatronEngineAdapter:
             )
 
         self.game = game
+        logger.debug("CatanatronEngineAdapter initialized with %d players", len(self.player_ids))
 
     @property
     def game_id(self) -> str:
@@ -264,6 +274,7 @@ class CatanatronEngineAdapter:
         return None
 
     def apply_action(self, action: Action) -> TransitionResult:
+        logger.debug("Applying action %s for %s", action.action_type, self.game.state.current_color().value)
         state_before = self.game.state.copy()
         public_before = self.public_state()
         private_before = {

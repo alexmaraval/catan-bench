@@ -152,7 +152,7 @@ pip install git+https://github.com/bcollazo/catanatron.git
 Run a benchmark game from the provided TOML configs:
 
 ```bash
-./.venv/bin/python -m catan_bench --game configs/game.toml --players configs/players.toml
+./.venv/bin/python -m catan_bench --game configs/game.toml --players configs/openai-players.toml
 ```
 
 The CLI auto-loads a `.env` file by searching from the players config directory upward for up to four parent directories, so you can keep credentials in a project-local `.env`:

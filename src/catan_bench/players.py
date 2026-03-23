@@ -647,11 +647,33 @@ class LLMPlayer:
             top_p=self.top_p,
             reasoning_enabled=self.reasoning_enabled,
         )
-        response_payload = self._extract_response_json(completion)
+        raw_response_text = self._extract_response_text(completion)
+        try:
+            response_payload = self._parse_response_json(
+                raw_response_text=raw_response_text,
+                completion=completion,
+            )
+        except RuntimeError as exc:
+            trace_attempts.append(
+                PromptTraceAttempt(
+                    messages=tuple(self._json_safe_message(message) for message in messages),
+                    response=self._json_safe_object(
+                        {
+                            "error": {
+                                "type": "invalid_response",
+                                "message": str(exc),
+                            }
+                        }
+                    ),
+                    response_text=raw_response_text,
+                )
+            )
+            raise
         trace_attempts.append(
             PromptTraceAttempt(
                 messages=tuple(self._json_safe_message(message) for message in messages),
                 response=self._json_safe_object(response_payload),
+                response_text=raw_response_text,
             )
         )
         return response_payload
@@ -675,6 +697,7 @@ class LLMPlayer:
                         }
                     }
                 ),
+                response_text=None,
             )
         )
 
@@ -711,7 +734,7 @@ class LLMPlayer:
         return safe_payload
 
     @staticmethod
-    def _extract_response_json(completion: dict[str, object]) -> dict[str, object]:
+    def _extract_response_text(completion: dict[str, object]) -> str:
         choices = completion.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("LLM completion did not include any choices.")
@@ -724,10 +747,20 @@ class LLMPlayer:
         content = message.get("content")
         if not isinstance(content, str):
             raise RuntimeError("LLM completion message content must be a string.")
+        return content
+
+    @staticmethod
+    def _parse_response_json(
+        *, raw_response_text: str, completion: dict[str, object]
+    ) -> dict[str, object]:
+        choices = completion.get("choices")
+        first_choice = choices[0] if isinstance(choices, list) and choices else None
+        message = first_choice.get("message") if isinstance(first_choice, dict) else None
+        content = raw_response_text
         stripped_content = LLMPlayer._strip_markdown_fences(content)
         if not stripped_content:
-            reasoning = message.get("reasoning")
-            finish_reason = first_choice.get("finish_reason")
+            reasoning = message.get("reasoning") if isinstance(message, dict) else None
+            finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
             if isinstance(reasoning, str) and reasoning.strip():
                 raise RuntimeError(
                     "LLM completion did not include JSON content. The provider returned "

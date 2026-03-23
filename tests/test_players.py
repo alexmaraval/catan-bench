@@ -191,6 +191,15 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIsNotNone(prompt_trace)
         assert prompt_trace is not None
         self.assertEqual(prompt_trace.stage, "act")
+        self.assertEqual(
+            prompt_trace.attempts[0].response_text,
+            json.dumps(
+                {
+                    "action_index": 0,
+                    "private_reasoning": "Trading for brick unlocks a road now.",
+                }
+            ),
+        )
 
     def test_llm_player_repairs_one_illegal_action_attempt(self) -> None:
         client = FakeLLMClient(

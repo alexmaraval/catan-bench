@@ -10,7 +10,10 @@ from catan_bench import (
     DecisionPoint,
     Event,
     GameOrchestrator,
+    MemoryResponse,
     PlayerResponse,
+    RecallObservation,
+    ReflectionObservation,
     ScriptedPlayer,
     TransitionResult,
     build_player_replay_timeline,
@@ -162,6 +165,31 @@ class ReplayMockTradeEngine:
         return {"winner_ids": ["BLUE"], "final_vp": {"RED": 6, "BLUE": 10}, "num_turns": 1}
 
 
+class PhasedScriptedPlayer:
+    def __init__(
+        self,
+        *,
+        recall_memories: list[object | None],
+        responses: list[PlayerResponse | Action],
+        reflect_memories: list[object | None],
+    ) -> None:
+        self._recall_memories = list(recall_memories)
+        self._responses = list(responses)
+        self._reflect_memories = list(reflect_memories)
+
+    def recall(self, observation: RecallObservation) -> MemoryResponse:
+        return MemoryResponse(memory=self._recall_memories.pop(0))
+
+    def respond(self, observation) -> PlayerResponse:
+        next_response = self._responses.pop(0)
+        if isinstance(next_response, PlayerResponse):
+            return next_response
+        return PlayerResponse(action=next_response)
+
+    def reflect(self, observation: ReflectionObservation) -> MemoryResponse:
+        return MemoryResponse(memory=self._reflect_memories.pop(0))
+
+
 class ReplayTests(unittest.TestCase):
     def test_build_replay_timeline_formats_semantic_and_generic_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -229,8 +257,9 @@ class ReplayTests(unittest.TestCase):
             orchestrator = GameOrchestrator(
                 ReplayMockTradeEngine(),
                 players={
-                    "RED": ScriptedPlayer(
-                        [
+                    "RED": PhasedScriptedPlayer(
+                        recall_memories=[{"plans": ["scan for brick trades"]}],
+                        responses=[
                             PlayerResponse(
                                 action=Action(
                                     "OFFER_TRADE",
@@ -240,12 +269,13 @@ class ReplayTests(unittest.TestCase):
                                         "want": {"BRICK": 1},
                                     },
                                 ),
-                                memory_write={"plans": ["push the wood-for-brick trade early"]},
                             )
-                        ]
+                        ],
+                        reflect_memories=[{"plans": ["push the wood-for-brick trade early"]}],
                     ),
-                    "BLUE": ScriptedPlayer(
-                        [
+                    "BLUE": PhasedScriptedPlayer(
+                        recall_memories=[{"beliefs": ["RED is offering for brick"]}],
+                        responses=[
                             PlayerResponse(
                                 action=Action(
                                     "ACCEPT_TRADE",
@@ -255,9 +285,9 @@ class ReplayTests(unittest.TestCase):
                                         "want": {"WOOD": 1},
                                     },
                                 ),
-                                memory_write={"beliefs": ["RED is prioritizing brick"]},
                             )
-                        ]
+                        ],
+                        reflect_memories=[{"beliefs": ["RED is prioritizing brick"]}],
                     ),
                 },
                 run_dir=tmpdir,
@@ -285,7 +315,7 @@ class ReplayTests(unittest.TestCase):
             self.assertIn("Public Replay", red_private_html)
             self.assertIn("Private Trade Alert", blue_private_html)
             self.assertIn("Received a trade offer from RED.", blue_private_html)
-            self.assertIn("RED Memory", red_private_html)
+            self.assertIn("RED Memory (reflect)", red_private_html)
             self.assertIn("Player Decision", red_private_html)
             self.assertIn("push the wood-for-brick trade early", red_private_html)
 
@@ -333,9 +363,9 @@ class ReplayTests(unittest.TestCase):
                     }
                 ],
             )
-            self._write_jsonl(run_dir / "players" / "RED" / "memory.jsonl", [])
+            self._write_json(run_dir / "players" / "RED" / "memory.json", {"memory": None})
             self._write_jsonl(run_dir / "players" / "BLUE" / "private_history.jsonl", [])
-            self._write_jsonl(run_dir / "players" / "BLUE" / "memory.jsonl", [])
+            self._write_json(run_dir / "players" / "BLUE" / "memory.json", {"memory": None})
 
             output_path = export_replay_html(run_dir)
             public_html = output_path.read_text(encoding="utf-8")
@@ -353,8 +383,9 @@ class ReplayTests(unittest.TestCase):
             orchestrator = GameOrchestrator(
                 ReplayMockTradeEngine(),
                 players={
-                    "RED": ScriptedPlayer(
-                        [
+                    "RED": PhasedScriptedPlayer(
+                        recall_memories=[{"plans": ["offer early trade"]}],
+                        responses=[
                             PlayerResponse(
                                 action=Action(
                                     "OFFER_TRADE",
@@ -364,12 +395,13 @@ class ReplayTests(unittest.TestCase):
                                         "want": {"BRICK": 1},
                                     },
                                 ),
-                                memory_write={"plans": ["trade before road build"]},
                             )
-                        ]
+                        ],
+                        reflect_memories=[{"plans": ["trade before road build"]}],
                     ),
-                    "BLUE": ScriptedPlayer(
-                        [
+                    "BLUE": PhasedScriptedPlayer(
+                        recall_memories=[{"beliefs": ["RED wants brick"]}],
+                        responses=[
                             PlayerResponse(
                                 action=Action(
                                     "ACCEPT_TRADE",
@@ -380,7 +412,8 @@ class ReplayTests(unittest.TestCase):
                                     },
                                 )
                             )
-                        ]
+                        ],
+                        reflect_memories=[{"beliefs": ["RED will trade again"]}],
                     ),
                 },
                 run_dir=tmpdir,
@@ -392,10 +425,14 @@ class ReplayTests(unittest.TestCase):
             assert run_dir is not None
             timeline = build_player_replay_timeline(run_dir, "BLUE")
 
-            self.assertEqual([item.stream for item in timeline], ["public", "private", "public", "public", "private"])
+            self.assertEqual(
+                [item.stream for item in timeline],
+                ["public", "private", "public", "public", "private", "memory", "memory"],
+            )
             self.assertEqual(timeline[1].title, "Private Trade Alert")
             self.assertEqual(timeline[1].body, "Received a trade offer from RED.")
-            self.assertEqual(timeline[-1].title, "Player Decision")
+            self.assertEqual(timeline[4].title, "Player Decision")
+            self.assertIn("BLUE Memory", timeline[-1].title)
 
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:

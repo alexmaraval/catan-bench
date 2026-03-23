@@ -4,7 +4,8 @@
 [[players]]
 id = "RED"
 type = "llm"
-model = "qwen3:4b"
+#model = "qwen3:4b"
+model = "gemma3:1b"
 api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
@@ -13,7 +14,8 @@ timeout_seconds = 300
 [[players]]
 id = "BLUE"
 type = "llm"
-model = "qwen3:4b"
+#model = "qwen3:4b"
+model = "gemma3:1b"
 api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
@@ -22,7 +24,8 @@ timeout_seconds = 300
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "qwen3:4b"
+#model = "qwen3:4b"
+model = "gemma3:1b"
 api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
@@ -31,7 +34,8 @@ timeout_seconds = 300
 [[players]]
 id = "WHITE"
 type = "llm"
-model = "qwen3:4b"
+#model = "qwen3:4b"
+model = "gemma3:1b"
 api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false

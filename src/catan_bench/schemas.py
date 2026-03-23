@@ -75,17 +75,22 @@ class MemoryEntry:
     turn_index: int
     phase: str
     decision_index: int
+    update_kind: str = "unknown"
     tags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
+        data: dict[str, JsonValue] = {
             "player_id": self.player_id,
             "content": self.content,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
-            "tags": list(self.tags),
         }
+        if self.update_kind != "unknown":
+            data["update_kind"] = self.update_kind
+        if self.tags:
+            data["tags"] = list(self.tags)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, JsonValue]) -> "MemoryEntry":
@@ -96,6 +101,7 @@ class MemoryEntry:
             turn_index=int(data["turn_index"]),
             phase=str(data["phase"]),
             decision_index=int(data["decision_index"]),
+            update_kind=str(data.get("update_kind", "unknown")),
             tags=tuple(str(tag) for tag in tags) if tags else (),
         )
 
@@ -151,7 +157,7 @@ class Observation:
     recent_public_events: tuple[Event, ...] = ()
     recent_private_events: tuple[Event, ...] = ()
     legal_actions: tuple[Action, ...] = ()
-    memory: tuple[MemoryEntry, ...] = ()
+    memory: MemoryEntry | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -171,7 +177,7 @@ class Observation:
                 event.to_dict() for event in self.recent_private_events
             ],
             "legal_actions": [action.to_dict() for action in self.legal_actions],
-            "memory": [entry.to_dict() for entry in self.memory],
+            "memory": None if self.memory is None else self.memory.to_dict(),
         }
 
     @classmethod
@@ -184,6 +190,14 @@ class Observation:
             decision_index=int(data["decision_index"]),
             public_state=dict(data.get("public_state") or {}),
             private_state=dict(data.get("private_state") or {}),
+            game_rules=data.get("game_rules") if "game_rules" in data else None,
+            decision_prompt=data.get("decision_prompt") if "decision_prompt" in data else None,
+            public_history=tuple(
+                Event.from_dict(e) for e in data.get("public_history", ())
+            ),
+            private_history=tuple(
+                Event.from_dict(e) for e in data.get("private_history", ())
+            ),
             recent_public_events=tuple(
                 Event.from_dict(e) for e in data.get("recent_public_events", ())
             ),
@@ -193,10 +207,130 @@ class Observation:
             legal_actions=tuple(
                 Action.from_dict(a) for a in data.get("legal_actions", ())
             ),
-            memory=tuple(
-                MemoryEntry.from_dict(m) for m in data.get("memory", ())
+            memory=(
+                None
+                if data.get("memory") is None
+                else MemoryEntry.from_dict(data["memory"])
             ),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RecallObservation:
+    game_id: str
+    player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    game_rules: str | None = None
+    public_events_since_last_turn: tuple[Event, ...] = ()
+    private_events_since_last_turn: tuple[Event, ...] = ()
+    memory: MemoryEntry | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "game_rules": self.game_rules,
+            "public_events_since_last_turn": [
+                event.to_dict() for event in self.public_events_since_last_turn
+            ],
+            "private_events_since_last_turn": [
+                event.to_dict() for event in self.private_events_since_last_turn
+            ],
+            "memory": None if self.memory is None else self.memory.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "RecallObservation":
+        return cls(
+            game_id=str(data["game_id"]),
+            player_id=str(data["player_id"]),
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            decision_index=int(data["decision_index"]),
+            game_rules=data.get("game_rules") if "game_rules" in data else None,
+            public_events_since_last_turn=tuple(
+                Event.from_dict(event)
+                for event in data.get("public_events_since_last_turn", ())
+            ),
+            private_events_since_last_turn=tuple(
+                Event.from_dict(event)
+                for event in data.get("private_events_since_last_turn", ())
+            ),
+            memory=(
+                None
+                if data.get("memory") is None
+                else MemoryEntry.from_dict(data["memory"])
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReflectionObservation:
+    game_id: str
+    player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    game_rules: str | None = None
+    public_events_this_turn: tuple[Event, ...] = ()
+    private_events_this_turn: tuple[Event, ...] = ()
+    memory: MemoryEntry | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "game_rules": self.game_rules,
+            "public_events_this_turn": [
+                event.to_dict() for event in self.public_events_this_turn
+            ],
+            "private_events_this_turn": [
+                event.to_dict() for event in self.private_events_this_turn
+            ],
+            "memory": None if self.memory is None else self.memory.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "ReflectionObservation":
+        return cls(
+            game_id=str(data["game_id"]),
+            player_id=str(data["player_id"]),
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            decision_index=int(data["decision_index"]),
+            game_rules=data.get("game_rules") if "game_rules" in data else None,
+            public_events_this_turn=tuple(
+                Event.from_dict(event) for event in data.get("public_events_this_turn", ())
+            ),
+            private_events_this_turn=tuple(
+                Event.from_dict(event) for event in data.get("private_events_this_turn", ())
+            ),
+            memory=(
+                None
+                if data.get("memory") is None
+                else MemoryEntry.from_dict(data["memory"])
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryResponse:
+    memory: JsonValue | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {"memory": self.memory}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "MemoryResponse":
+        return cls(memory=data.get("memory"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +352,7 @@ class PlayerResponse:
         return cls(
             action=Action.from_dict(data["action"]),
             memory_write=data.get("memory_write"),
-            summary=data.get("summary"),
+            reasoning=data.get("reasoning") if "reasoning" in data else None,
         )
 
 
@@ -275,6 +409,7 @@ class PromptTrace:
     decision_index: int
     model: str
     temperature: float
+    stage: str
     attempts: tuple[PromptTraceAttempt, ...]
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -283,6 +418,7 @@ class PromptTrace:
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
+            "stage": self.stage,
             "model": self.model,
             "temperature": self.temperature,
             "attempts": [attempt.to_dict() for attempt in self.attempts],

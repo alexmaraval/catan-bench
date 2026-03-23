@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
@@ -41,8 +42,18 @@ def _resolve_run_dir(base_run_dir: str | Path | None, *, game_id: str) -> Path |
     return Path(base_run_dir) / run_name
 
 
+@dataclass(slots=True)
+class _ActiveControlWindow:
+    player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    public_event_start: int
+    private_event_start: int
+
+
 class GameOrchestrator:
-    """Coordinates the engine, player adapters, and append-only logs."""
+    """Coordinates the engine, player adapters, and run-scoped logs."""
 
     def __init__(
         self,
@@ -68,6 +79,9 @@ class GameOrchestrator:
         self.max_decisions = max_decisions
         self.reporter = reporter
         self._decision_phase_counts: dict[str, int] = {}
+        self._active_control_window: _ActiveControlWindow | None = None
+        self._public_event_cursor_by_player: dict[str, int] = {}
+        self._private_event_cursor_by_player: dict[str, int] = {}
 
     def run(self) -> GameResult:
         self._prepare_run()
@@ -131,17 +145,18 @@ class GameOrchestrator:
                 f"No player adapter registered for {decision.acting_player_id!r}."
             )
 
-        observation = self.observation_builder.build(
+        self._ensure_control_window(player=player, decision=decision)
+        observation = self.observation_builder.build_action(
             engine=self.engine,
             decision=decision,
-            event_log=self.event_log,
             memory_store=self.memory_store,
         )
         self._decision_phase_counts[decision.phase] = (
             self._decision_phase_counts.get(decision.phase, 0) + 1
         )
         response = player.respond(observation)
-        self._append_player_prompt_trace(player)
+        self._append_player_prompt_traces(player)
+
         engine_resolve_action = getattr(self.engine, "resolve_action", None)
         if callable(engine_resolve_action):
             action = engine_resolve_action(
@@ -164,17 +179,6 @@ class GameOrchestrator:
             (self._private_decision_event(decision=decision, action=action, response=response),),
         )
 
-        if response.memory_write is not None:
-            self.memory_store.append(
-                MemoryEntry(
-                    player_id=decision.acting_player_id,
-                    content=response.memory_write,
-                    turn_index=decision.turn_index,
-                    phase=decision.phase,
-                    decision_index=decision.decision_index,
-                )
-            )
-
         if self.reporter is not None:
             self.reporter.on_step(
                 decision=decision,
@@ -182,6 +186,17 @@ class GameOrchestrator:
                 response=response,
                 transition=transition,
             )
+
+        next_decision = None
+        if not transition.terminal and not self.engine.is_terminal():
+            next_decision = self.engine.current_decision()
+        if self._should_end_control_window(
+            decision=decision,
+            action=action,
+            transition_terminal=transition.terminal,
+            next_decision=next_decision,
+        ):
+            self._reflect_active_window(player=player, decision=decision)
 
         return transition
 
@@ -197,7 +212,14 @@ class GameOrchestrator:
         self.event_log.reset(self.engine.player_ids)
         self.memory_store.reset(self.engine.player_ids)
         self.prompt_trace_store.reset(self.engine.player_ids)
-        self._decision_phase_counts: dict[str, int] = {}
+        self._decision_phase_counts = {}
+        self._active_control_window = None
+        self._public_event_cursor_by_player = {
+            player_id: 0 for player_id in self.engine.player_ids
+        }
+        self._private_event_cursor_by_player = {
+            player_id: 0 for player_id in self.engine.player_ids
+        }
 
         if self.run_dir is not None:
             write_json(
@@ -212,6 +234,116 @@ class GameOrchestrator:
                     },
                 },
             )
+
+    def _ensure_control_window(self, *, player: Player, decision: DecisionPoint) -> None:
+        active = self._active_control_window
+        if active is not None and active.player_id == decision.acting_player_id:
+            return
+
+        player_id = decision.acting_player_id
+        public_cursor = self._public_event_cursor_by_player.get(player_id, 0)
+        private_cursor = self._private_event_cursor_by_player.get(player_id, 0)
+        recall = getattr(player, "recall", None)
+        if callable(recall):
+            recall_observation = self.observation_builder.build_recall(
+                engine=self.engine,
+                decision=decision,
+                event_log=self.event_log,
+                memory_store=self.memory_store,
+                public_event_start=public_cursor,
+                private_event_start=private_cursor,
+            )
+            recall_response = recall(recall_observation)
+            self._append_player_prompt_traces(player)
+            self._write_memory(
+                player_id=player_id,
+                memory=recall_response.memory,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                update_kind="recall",
+            )
+
+        self._active_control_window = _ActiveControlWindow(
+            player_id=player_id,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            public_event_start=len(self.event_log.public_events),
+            private_event_start=len(
+                self.event_log.private_events_by_player.get(player_id, ())
+            ),
+        )
+
+    def _reflect_active_window(self, *, player: Player, decision: DecisionPoint) -> None:
+        active = self._active_control_window
+        if active is None:
+            return
+
+        reflect = getattr(player, "reflect", None)
+        if callable(reflect):
+            reflection_observation = self.observation_builder.build_reflection(
+                engine=self.engine,
+                player_id=active.player_id,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                event_log=self.event_log,
+                memory_store=self.memory_store,
+                public_event_start=active.public_event_start,
+                private_event_start=active.private_event_start,
+            )
+            reflection_response = reflect(reflection_observation)
+            self._append_player_prompt_traces(player)
+            self._write_memory(
+                player_id=active.player_id,
+                memory=reflection_response.memory,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                update_kind="reflect",
+            )
+
+        self._public_event_cursor_by_player[active.player_id] = len(self.event_log.public_events)
+        self._private_event_cursor_by_player[active.player_id] = len(
+            self.event_log.private_events_by_player.get(active.player_id, ())
+        )
+        self._active_control_window = None
+
+    def _write_memory(
+        self,
+        *,
+        player_id: str,
+        memory,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        update_kind: str,
+    ) -> None:
+        self.memory_store.set(
+            MemoryEntry(
+                player_id=player_id,
+                content=memory,
+                turn_index=turn_index,
+                phase=phase,
+                decision_index=decision_index,
+                update_kind=update_kind,
+            )
+        )
+
+    @staticmethod
+    def _should_end_control_window(
+        *,
+        decision: DecisionPoint,
+        action: Action,
+        transition_terminal: bool,
+        next_decision: DecisionPoint | None,
+    ) -> bool:
+        if transition_terminal or action.action_type == "END_TURN":
+            return True
+        if next_decision is None:
+            return True
+        return next_decision.acting_player_id != decision.acting_player_id
 
     @staticmethod
     def _resolve_action(
@@ -261,7 +393,9 @@ class GameOrchestrator:
             "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
             "trade_metrics": trade_metrics,
             "trade_event_share": (
-                0.0 if total_decisions == 0 else round(sum(trade_metrics.values()) / total_decisions, 4)
+                0.0
+                if total_decisions == 0
+                else round(sum(trade_metrics.values()) / total_decisions, 4)
             ),
         }
 
@@ -275,8 +409,6 @@ class GameOrchestrator:
         }
         if response.reasoning is not None:
             payload["reasoning"] = response.reasoning
-        if response.memory_write is not None:
-            payload["memory_write"] = response.memory_write
 
         return Event(
             kind="player_decision",
@@ -287,7 +419,13 @@ class GameOrchestrator:
             actor_player_id=decision.acting_player_id,
         )
 
-    def _append_player_prompt_trace(self, player: Player) -> None:
+    def _append_player_prompt_traces(self, player: Player) -> None:
+        take_prompt_traces = getattr(player, "take_prompt_traces", None)
+        if callable(take_prompt_traces):
+            for prompt_trace in take_prompt_traces():
+                self.prompt_trace_store.append(prompt_trace)
+            return
+
         take_last_prompt_trace = getattr(player, "take_last_prompt_trace", None)
         if not callable(take_last_prompt_trace):
             return

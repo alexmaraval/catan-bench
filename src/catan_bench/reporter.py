@@ -66,10 +66,6 @@ class TerminalReporter:
         pad = " " * max(0, 8 - len(pid))
         self._put(f"  {self._player(pid)}{pad}  {summary}")
 
-        if response.memory_write is not None:
-            label = _c("[memory]", _DIM, on=self._colour)
-            self._put(f"            {label}  {response.memory_write}")
-
     def on_game_end(self, result: GameResult) -> None:
         bar = _c("─" * 4 + " Game over " + "─" * 31, _DIM, on=self._colour)
         self._put(f"\n{bar}")

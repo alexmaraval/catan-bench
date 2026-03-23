@@ -122,7 +122,7 @@ def build_player_replay_timeline(
             )
         )
 
-    for index, entry in enumerate(_read_jsonl(run_path / "players" / player_id / "memory.jsonl")):
+    for index, entry in enumerate(_read_memory_entries(run_path, player_id)):
         combined.append(
             (
                 _timeline_sort_key(
@@ -265,6 +265,19 @@ def _read_jsonl(path: Path) -> list[dict[str, JsonValue]]:
     return entries
 
 
+def _read_memory_entries(run_path: Path, player_id: str) -> list[dict[str, JsonValue]]:
+    trace_path = run_path / "players" / player_id / "memory_trace.jsonl"
+    if trace_path.exists():
+        return _read_jsonl(trace_path)
+
+    snapshot_path = run_path / "players" / player_id / "memory.json"
+    if snapshot_path.exists():
+        snapshot = _read_json(snapshot_path)
+        if "content" in snapshot:
+            return [snapshot]
+    return []
+
+
 def _player_ids_from_metadata(metadata: dict[str, JsonValue]) -> list[str]:
     return [str(player_id) for player_id in metadata.get("player_ids", [])]
 
@@ -355,12 +368,17 @@ def _timeline_item_from_memory_entry(
     entry: dict[str, JsonValue], *, player_id: str
 ) -> ReplayTimelineItem:
     content = entry.get("content")
-    payload = {"content": content, "tags": entry.get("tags", [])}
+    update_kind = _as_optional_str(entry.get("update_kind")) or "memory"
+    payload = {
+        "content": content,
+        "tags": entry.get("tags", []),
+        "update_kind": update_kind,
+    }
     return ReplayTimelineItem(
         speaker_type="memory",
         speaker_id=player_id,
         variant="memory",
-        title=f"{player_id} Memory",
+        title=f"{player_id} Memory ({update_kind})",
         body=_format_memory_content(content),
         turn_index=int(entry.get("turn_index", 0)),
         phase=str(entry.get("phase", "unknown")),

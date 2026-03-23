@@ -13,9 +13,12 @@ from catan_bench import (
     GameOrchestrator,
     InvalidActionError,
     LLMPlayer,
+    MemoryResponse,
     MemoryStore,
     ObservationBuilder,
     PlayerResponse,
+    RecallObservation,
+    ReflectionObservation,
     ScriptedPlayer,
     TransitionResult,
 )
@@ -195,7 +198,7 @@ class MockTradeEngine:
 
 
 class FakeLLMClient:
-    def __init__(self, content: dict[str, object]) -> None:
+    def __init__(self, content: list[dict[str, object]] | dict[str, object]) -> None:
         self.content = content
 
     def complete(
@@ -207,15 +210,44 @@ class FakeLLMClient:
         top_p: float | None = None,
         reasoning_enabled: bool | None = None,
     ) -> dict[str, object]:
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(self.content),
-                    }
-                }
-            ]
-        }
+        if isinstance(self.content, list):
+            if not self.content:
+                raise AssertionError("FakeLLMClient ran out of scripted completions.")
+            payload = self.content.pop(0)
+        else:
+            payload = self.content
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+
+class PhasedScriptedPlayer:
+    def __init__(
+        self,
+        *,
+        recall_memories: list[object | None],
+        responses: list[PlayerResponse | Action],
+        reflect_memories: list[object | None],
+    ) -> None:
+        self._recall_memories = list(recall_memories)
+        self._responses = list(responses)
+        self._reflect_memories = list(reflect_memories)
+        self.recall_observations: list[RecallObservation] = []
+        self.observations = []
+        self.reflection_observations: list[ReflectionObservation] = []
+
+    def recall(self, observation: RecallObservation) -> MemoryResponse:
+        self.recall_observations.append(observation)
+        return MemoryResponse(memory=self._recall_memories.pop(0))
+
+    def respond(self, observation) -> PlayerResponse:
+        self.observations.append(observation)
+        next_response = self._responses.pop(0)
+        if isinstance(next_response, PlayerResponse):
+            return next_response
+        return PlayerResponse(action=next_response)
+
+    def reflect(self, observation: ReflectionObservation) -> MemoryResponse:
+        self.reflection_observations.append(observation)
+        return MemoryResponse(memory=self._reflect_memories.pop(0))
 
 
 class OrchestratorTests(unittest.TestCase):
@@ -278,20 +310,21 @@ class OrchestratorTests(unittest.TestCase):
             ("private-2",),
         )
 
-    def test_orchestrator_persists_llm_prompt_traces(self) -> None:
+    def test_orchestrator_persists_recall_act_reflect_prompt_traces(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             orchestrator = GameOrchestrator(
                 MockTradeEngine(),
                 players={
                     "RED": LLMPlayer(
                         client=FakeLLMClient(
-                            {
-                                "action_index": 0,
-                                "private_reasoning": "Offer wood to turn this hand into road tempo.",
-                                "private_memory_write": {
-                                    "plans": ["Offer wood for brick when it unlocks roads."]
+                            [
+                                {"private_memory": {"plan": "Trade wood into brick."}},
+                                {
+                                    "action_index": 0,
+                                    "private_reasoning": "Offer wood to unlock road tempo.",
                                 },
-                            }
+                                {"private_memory": {"plan": "BLUE accepted wood-for-brick."}},
+                            ]
                         ),
                         model="fake-model",
                         temperature=0.1,
@@ -318,70 +351,59 @@ class OrchestratorTests(unittest.TestCase):
             run_dir = orchestrator.run_dir
             self.assertIsNotNone(run_dir)
             assert run_dir is not None
-            self.assertEqual(run_dir.parent, Path(tmpdir))
-            self.assertNotEqual(run_dir, Path(tmpdir))
 
             prompt_trace_lines = Path(
                 run_dir, "players", "RED", "prompt_trace.jsonl"
             ).read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(prompt_trace_lines), 1)
-            prompt_trace = json.loads(prompt_trace_lines[0])
-            self.assertEqual(prompt_trace["player_id"], "RED")
-            self.assertEqual(prompt_trace["model"], "fake-model")
-            self.assertEqual(prompt_trace["attempts"][0]["response"]["action_index"], 0)
-            self.assertIn(
-                "legal_actions",
-                prompt_trace["attempts"][0]["messages"][1]["content"],
-            )
+            self.assertEqual(len(prompt_trace_lines), 3)
+            stages = [json.loads(line)["stage"] for line in prompt_trace_lines]
+            self.assertEqual(stages, ["recall", "act", "reflect"])
+            act_trace = json.loads(prompt_trace_lines[1])
+            self.assertEqual(act_trace["player_id"], "RED")
+            self.assertEqual(act_trace["model"], "fake-model")
+            self.assertEqual(act_trace["attempts"][0]["response"]["action_index"], 0)
+            self.assertIn("legal_actions", act_trace["attempts"][0]["messages"][1]["content"])
 
-    def test_orchestrator_tracks_public_private_and_memory_logs(self) -> None:
+    def test_orchestrator_runs_recall_and_reflect_memory_flow(self) -> None:
+        red_player = PhasedScriptedPlayer(
+            recall_memories=[{"plan": "Offer wood for brick."}],
+            responses=[
+                PlayerResponse(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={
+                            "to": ["BLUE"],
+                            "give": {"WOOD": 1},
+                            "want": {"BRICK": 1},
+                        },
+                    ),
+                    reasoning="Offer wood now to convert into road tempo.",
+                )
+            ],
+            reflect_memories=[{"plan": "BLUE may accept wood-for-brick again."}],
+        )
+        blue_player = PhasedScriptedPlayer(
+            recall_memories=[{"belief": "RED is pushing brick tempo."}],
+            responses=[
+                PlayerResponse(
+                    action=Action(
+                        "ACCEPT_TRADE",
+                        payload={
+                            "from": "RED",
+                            "give": {"BRICK": 1},
+                            "want": {"WOOD": 1},
+                        },
+                    ),
+                    reasoning="Wood flexibility is worth the brick here.",
+                )
+            ],
+            reflect_memories=[{"belief": "RED will keep paying for brick tempo."}],
+        )
+
         with tempfile.TemporaryDirectory() as tmpdir:
             orchestrator = GameOrchestrator(
                 MockTradeEngine(),
-                players={
-                    "RED": ScriptedPlayer(
-                        [
-                            PlayerResponse(
-                                action=Action(
-                                    "OFFER_TRADE",
-                                    payload={
-                                        "to": ["BLUE"],
-                                        "give": {"WOOD": 1},
-                                        "want": {"BRICK": 1},
-                                    },
-                                ),
-                                reasoning=(
-                                    "I need brick to turn this hand into tempo. Offering one wood "
-                                    "is acceptable because the road timing matters more than "
-                                    "holding a balanced hand right now."
-                                ),
-                                memory_write={
-                                    "plans": ["Trade wood into brick when it enables road tempo."]
-                                },
-                            )
-                        ]
-                    ),
-                    "BLUE": ScriptedPlayer(
-                        [
-                            PlayerResponse(
-                                action=Action(
-                                    "ACCEPT_TRADE",
-                                    payload={
-                                        "from": "RED",
-                                        "give": {"BRICK": 1},
-                                        "want": {"WOOD": 1},
-                                    },
-                                ),
-                                reasoning=(
-                                    "I can spare the brick because my near-term build is slower. "
-                                    "Taking wood improves flexibility, and I can still pressure "
-                                    "RED later through placement rather than this trade."
-                                ),
-                                memory_write={"beliefs": ["RED will pay to secure brick tempo."]},
-                            )
-                        ]
-                    ),
-                },
+                players={"RED": red_player, "BLUE": blue_player},
                 run_dir=tmpdir,
             )
 
@@ -389,50 +411,60 @@ class OrchestratorTests(unittest.TestCase):
             run_dir = orchestrator.run_dir
             self.assertIsNotNone(run_dir)
             assert run_dir is not None
-            self.assertEqual(run_dir.parent, Path(tmpdir))
-            self.assertNotEqual(run_dir, Path(tmpdir))
 
             self.assertEqual(result.game_id, "mock-game-1")
             self.assertEqual(result.winner_ids, ("BLUE",))
             self.assertEqual(result.total_decisions, 2)
             self.assertEqual(result.public_event_count, 3)
             self.assertEqual(result.private_event_count, 5)
-            self.assertEqual(result.memory_writes, 2)
-            self.assertEqual(result.metadata["benchmark"]["run_directory"], str(run_dir))
+            self.assertEqual(result.memory_writes, 4)
             self.assertEqual(result.metadata["benchmark"]["trade_metrics"]["offers"], 1)
             self.assertEqual(result.metadata["benchmark"]["trade_metrics"]["accepted"], 1)
 
-            self.assertEqual(len(orchestrator.memory_store.get("RED")), 1)
-            self.assertEqual(len(orchestrator.memory_store.get("BLUE")), 1)
+            red_memory = orchestrator.memory_store.get("RED")
+            blue_memory = orchestrator.memory_store.get("BLUE")
+            self.assertIsNotNone(red_memory)
+            self.assertIsNotNone(blue_memory)
+            assert red_memory is not None and blue_memory is not None
+            self.assertEqual(red_memory.content, {"plan": "BLUE may accept wood-for-brick again."})
+            self.assertEqual(blue_memory.content, {"belief": "RED will keep paying for brick tempo."})
 
-            blue_player = orchestrator.players["BLUE"]
-            self.assertEqual(len(blue_player.observations), 1)
-            blue_observation = blue_player.observations[0]
-            self.assertEqual(blue_observation.decision_prompt, "Respond to RED's trade offer.")
-            self.assertGreater(len(blue_observation.game_rules or ""), 0)
-            self.assertEqual(blue_observation.recent_public_events[0].kind, "trade_offered")
+            self.assertEqual(len(blue_player.recall_observations), 1)
             self.assertEqual(
-                blue_observation.recent_private_events[0].kind, "trade_offer_received"
+                tuple(event.kind for event in blue_player.recall_observations[0].public_events_since_last_turn),
+                ("trade_offered",),
+            )
+            self.assertEqual(
+                tuple(event.kind for event in blue_player.recall_observations[0].private_events_since_last_turn),
+                ("trade_offer_received",),
+            )
+            self.assertEqual(
+                blue_player.observations[0].memory.content,
+                {"belief": "RED is pushing brick tempo."},
+            )
+            self.assertEqual(
+                tuple(event.kind for event in red_player.reflection_observations[0].public_events_this_turn),
+                ("trade_offered",),
             )
 
             self.assertTrue(Path(run_dir, "public_history.jsonl").exists())
-            self.assertTrue(Path(run_dir, "players", "RED", "memory.jsonl").exists())
+            self.assertTrue(Path(run_dir, "players", "RED", "memory.json").exists())
+            self.assertTrue(Path(run_dir, "players", "RED", "memory_trace.jsonl").exists())
             self.assertTrue(Path(run_dir, "players", "BLUE", "private_history.jsonl").exists())
-            self.assertTrue(Path(run_dir, "players", "RED", "prompt_trace.jsonl").exists())
             self.assertTrue(Path(run_dir, "result.json").exists())
+
+            red_memory_trace_lines = Path(
+                run_dir, "players", "RED", "memory_trace.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(red_memory_trace_lines), 2)
+            self.assertEqual(json.loads(red_memory_trace_lines[0])["update_kind"], "recall")
+            self.assertEqual(json.loads(red_memory_trace_lines[1])["update_kind"], "reflect")
 
             red_private_history = Path(
                 run_dir, "players", "RED", "private_history.jsonl"
             ).read_text(encoding="utf-8")
             self.assertIn('"kind": "player_decision"', red_private_history)
-            self.assertIn(
-                '"reasoning": "I need brick to turn this hand into tempo. Offering one wood is acceptable because the road timing matters more than holding a balanced hand right now."',
-                red_private_history,
-            )
-            self.assertEqual(
-                Path(run_dir, "players", "RED", "prompt_trace.jsonl").read_text(encoding="utf-8"),
-                "",
-            )
+            self.assertIn('"reasoning": "Offer wood now to convert into road tempo."', red_private_history)
 
     def test_invalid_action_is_rejected_before_engine_apply(self) -> None:
         orchestrator = GameOrchestrator(

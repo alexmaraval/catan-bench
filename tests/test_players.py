@@ -3,7 +3,15 @@ from __future__ import annotations
 import json
 import unittest
 
-from catan_bench import Action, Event, LLMPlayer, MemoryEntry, Observation
+from catan_bench import (
+    Action,
+    Event,
+    LLMPlayer,
+    MemoryEntry,
+    Observation,
+    RecallObservation,
+    ReflectionObservation,
+)
 from catan_bench.llm import LLMRequestTooLargeError
 
 
@@ -93,19 +101,54 @@ class OversizeThenSuccessClient:
 
 
 class LLMPlayerTests(unittest.TestCase):
-    def test_llm_player_returns_action_and_private_memory_write(self) -> None:
+    def test_llm_player_recall_returns_consolidated_memory(self) -> None:
+        client = FakeLLMClient({"private_memory": {"belief": "BLUE is short on wood"}})
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        response = player.recall(
+            RecallObservation(
+                game_id="game-1",
+                player_id="RED",
+                turn_index=3,
+                phase="play_turn",
+                decision_index=12,
+                game_rules="Rules",
+                public_events_since_last_turn=(
+                    Event(kind="dice_rolled", payload={"roll": 8}, turn_index=3, phase="play_turn"),
+                ),
+                private_events_since_last_turn=(
+                    Event(
+                        kind="trade_offer_received",
+                        payload={"from": "BLUE"},
+                        turn_index=3,
+                        phase="play_turn",
+                    ),
+                ),
+                memory=MemoryEntry(
+                    player_id="RED",
+                    content={"belief": "BLUE needs wood"},
+                    turn_index=2,
+                    phase="play_turn",
+                    decision_index=8,
+                ),
+            )
+        )
+
+        prompt_trace = player.take_last_prompt_trace()
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
+
+        self.assertEqual(response.memory, {"belief": "BLUE is short on wood"})
+        self.assertEqual(payload["current_memory"], {"belief": "BLUE needs wood"})
+        self.assertIn("public_events_since_last_turn", payload)
+        self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "recall")
+
+    def test_llm_player_returns_action_and_reasoning(self) -> None:
         client = FakeLLMClient(
             {
                 "action_index": 0,
-                "action": {
-                    "action_type": "OFFER_TRADE",
-                    "payload": {"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
-                },
-                "private_reasoning": (
-                    "Trading for brick unlocks a road now, and keeping extra wood is less "
-                    "useful than expanding before BLUE can contest the lane."
-                ),
-                "private_memory_write": {"belief": "BLUE is short on wood"},
+                "private_reasoning": "Trading for brick unlocks a road now.",
             }
         )
         player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
@@ -120,17 +163,6 @@ class LLMPlayerTests(unittest.TestCase):
             private_state={"resources": {"WOOD": 2, "BRICK": 0}},
             game_rules="Rules",
             decision_prompt="Choose an action for your turn.",
-            public_history=(
-                Event(kind="dice_rolled", payload={"roll": 8}, turn_index=3, phase="play_turn"),
-            ),
-            private_history=(
-                Event(
-                    kind="private_state_changed",
-                    payload={"resources": {"WOOD": 2}},
-                    turn_index=3,
-                    phase="play_turn",
-                ),
-            ),
             legal_actions=(
                 Action(
                     "OFFER_TRADE",
@@ -138,29 +170,27 @@ class LLMPlayerTests(unittest.TestCase):
                 ),
                 Action("END_TURN"),
             ),
-            memory=(
-                MemoryEntry(
-                    player_id="RED",
-                    content={"belief": "BLUE needs wood"},
-                    turn_index=2,
-                    phase="play_turn",
-                    decision_index=8,
-                ),
+            memory=MemoryEntry(
+                player_id="RED",
+                content={"belief": "BLUE needs wood"},
+                turn_index=2,
+                phase="play_turn",
+                decision_index=8,
             ),
         )
 
         response = player.respond(observation)
         prompt_trace = player.take_last_prompt_trace()
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
 
         self.assertEqual(response.action.action_type, "OFFER_TRADE")
         self.assertEqual(response.action.payload["offer"], {"WOOD": 1})
-        self.assertIn("unlocks a road now", response.reasoning or "")
-        self.assertEqual(response.memory_write, {"belief": "BLUE is short on wood"})
-        self.assertEqual(client.calls[0]["model"], "fake-model")
-        self.assertIn("public_history", client.calls[0]["messages"][1]["content"])
+        self.assertEqual(response.reasoning, "Trading for brick unlocks a road now.")
+        self.assertEqual(payload["private_memory"], {"belief": "BLUE needs wood"})
+        self.assertNotIn("public_history", payload)
         self.assertIsNotNone(prompt_trace)
-        self.assertEqual(len(prompt_trace.attempts), 1)
-        self.assertEqual(prompt_trace.attempts[0].response["action_index"], 0)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "act")
 
     def test_llm_player_repairs_one_illegal_action_attempt(self) -> None:
         client = FakeLLMClient(
@@ -171,12 +201,10 @@ class LLMPlayerTests(unittest.TestCase):
                         "payload": {"node_id": 19},
                     },
                     "private_reasoning": "Node 19 would be strong if it were legal.",
-                    "private_memory_write": {"plan": "Prioritize strong ore spots."},
                 },
                 {
                     "action_index": 1,
                     "private_reasoning": "Node 22 is the best remaining legal ore setup.",
-                    "private_memory_write": {"plan": "Claim ore access early."},
                 },
             ]
         )
@@ -204,12 +232,50 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertIn("illegal action", client.calls[1]["messages"][-1]["content"])
         self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "act")
         self.assertEqual(len(prompt_trace.attempts), 2)
-        self.assertEqual(
-            prompt_trace.attempts[0].response["action"]["payload"],
-            {"node_id": 19},
+
+    def test_llm_player_repairs_malformed_action_shape(self) -> None:
+        client = FakeLLMClient(
+            [
+                {
+                    "private_reasoning": "Take a strong opening spot.",
+                    "note": "missing action fields",
+                },
+                {
+                    "action_index": 1,
+                    "private_reasoning": "Choose the legal fallback opening.",
+                },
+            ]
         )
-        self.assertEqual(prompt_trace.attempts[1].response["action_index"], 1)
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="RED",
+            turn_index=0,
+            phase="build_initial_settlement",
+            decision_index=0,
+            public_state={},
+            private_state={},
+            legal_actions=(
+                Action("BUILD_SETTLEMENT", payload={"node_id": 10}),
+                Action("BUILD_SETTLEMENT", payload={"node_id": 22}),
+            ),
+        )
+
+        response = player.respond(observation)
+        prompt_trace = player.take_last_prompt_trace()
+
+        self.assertEqual(response.action.payload, {"node_id": 22})
+        self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(len(prompt_trace.attempts), 2)
+        self.assertIn(
+            "must include an `action_index` or an `action` object",
+            client.calls[1]["messages"][-1]["content"],
+        )
 
     def test_llm_player_repairs_trade_template_selected_by_index(self) -> None:
         client = FakeLLMClient(
@@ -217,12 +283,10 @@ class LLMPlayerTests(unittest.TestCase):
                 {
                     "action_index": 0,
                     "private_reasoning": "I want to trade.",
-                    "private_memory_write": {"plan": "Look for profitable trades."},
                 },
                 {
                     "action_index": 1,
                     "private_reasoning": "No concrete trade is available, so end the turn.",
-                    "private_memory_write": {"plan": "Only trade with concrete offers."},
                 },
             ]
         )
@@ -248,9 +312,8 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(response.action.action_type, "END_TURN")
         self.assertEqual(len(client.calls), 2)
         self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
         self.assertEqual(len(prompt_trace.attempts), 2)
-        self.assertEqual(prompt_trace.attempts[0].response["action_index"], 0)
-        self.assertEqual(prompt_trace.attempts[1].response["action_index"], 1)
 
     def test_llm_player_parses_json_wrapped_in_markdown_fences(self) -> None:
         client = FakeLLMClient(
@@ -273,7 +336,6 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         response = player.respond(observation)
-
         self.assertEqual(response.action.action_type, "END_TURN")
         self.assertEqual(response.reasoning, "Take the safe action.")
 
@@ -301,8 +363,36 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         response = player.respond(observation)
-
         self.assertEqual(response.action.action_type, "END_TURN")
+
+    def test_llm_player_accepts_top_level_action_type_payload_shape(self) -> None:
+        client = FakeLLMClient(
+            {
+                "action_type": "BUILD_ROAD",
+                "payload": {"edge_id": 3},
+                "reasoning": "The top-level shape is still clear enough.",
+            }
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="RED",
+            turn_index=1,
+            phase="play_turn",
+            decision_index=3,
+            public_state={},
+            private_state={},
+            legal_actions=(
+                Action("BUILD_ROAD", payload={"edge_id": 3}),
+                Action("END_TURN"),
+            ),
+        )
+
+        response = player.respond(observation)
+
+        self.assertEqual(response.action.action_type, "BUILD_ROAD")
+        self.assertEqual(response.reasoning, "The top-level shape is still clear enough.")
 
     def test_llm_player_falls_back_to_first_legal_action_after_failed_repair(self) -> None:
         client = FakeLLMClient(
@@ -320,7 +410,6 @@ class LLMPlayerTests(unittest.TestCase):
                         "payload": {"node_id": 77},
                     },
                     "private_reasoning": "Second attempt is still illegal.",
-                    "private_memory_write": {"plan": "Fallback gracefully if needed."},
                 },
             ]
         )
@@ -344,7 +433,7 @@ class LLMPlayerTests(unittest.TestCase):
 
         self.assertEqual(response.action.payload, {"node_id": 10})
         self.assertEqual(response.reasoning, "Second attempt is still illegal.")
-        self.assertEqual(response.memory_write, {"plan": "Fallback gracefully if needed."})
+        self.assertIsNone(response.memory_write)
 
     def test_llm_player_passes_optional_sampling_and_reasoning_flags(self) -> None:
         client = FakeLLMClient({"action_index": 0, "private_reasoning": "Safe opening."})
@@ -406,117 +495,121 @@ class LLMPlayerTests(unittest.TestCase):
         ):
             player.respond(observation)
 
-    def test_llm_player_bounds_prompt_history_and_memory(self) -> None:
-        client = FakeLLMClient({"action_index": 0, "private_reasoning": "Take the legal move."})
+    def test_llm_player_bounds_recall_event_window(self) -> None:
+        client = FakeLLMClient({"private_memory": {"note": "keep the latest events"}})
         player = LLMPlayer(
             client=client,
             model="fake-model",
             temperature=0.1,
             prompt_history_limit=2,
-            prompt_memory_limit=1,
         )
 
-        observation = Observation(
-            game_id="game-1",
-            player_id="RED",
-            turn_index=4,
-            phase="play_turn",
-            decision_index=7,
-            public_state={},
-            private_state={},
-            public_history=tuple(
-                Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
-                for index in range(5)
-            ),
-            private_history=tuple(
-                Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
-                for index in range(4)
-            ),
-            legal_actions=(Action("END_TURN"),),
-            memory=tuple(
-                MemoryEntry(
+        player.recall(
+            RecallObservation(
+                game_id="game-1",
+                player_id="RED",
+                turn_index=4,
+                phase="play_turn",
+                decision_index=7,
+                public_events_since_last_turn=tuple(
+                    Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
+                    for index in range(5)
+                ),
+                private_events_since_last_turn=tuple(
+                    Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
+                    for index in range(4)
+                ),
+                memory=MemoryEntry(
                     player_id="RED",
-                    content={"note": f"memory-{index}"},
-                    turn_index=index,
+                    content={"note": "older-memory"},
+                    turn_index=3,
                     phase="play_turn",
-                    decision_index=index,
-                )
-                for index in range(3)
-            ),
+                    decision_index=6,
+                ),
+            )
         )
-
-        player.respond(observation)
 
         payload = json.loads(client.calls[0]["messages"][1]["content"])
         self.assertEqual(
-            [event["kind"] for event in payload["public_history"]],
-            ["public-3", "public-4"],
+            [event["kind"] for event in payload["public_events_since_last_turn"]],
+            ["public-0", "public-1", "public-2", "public-3", "public-4"],
         )
-        self.assertEqual(
-            [event["kind"] for event in payload["private_history"]],
-            ["private-2", "private-3"],
-        )
-        self.assertEqual(len(payload["private_memory"]), 1)
-        self.assertEqual(payload["private_memory"][0]["content"], {"note": "memory-2"})
-        self.assertEqual(payload["context_window"]["public_history_available"], 5)
-        self.assertEqual(payload["context_window"]["public_history_included"], 2)
+        self.assertEqual(payload["current_memory"], {"note": "older-memory"})
 
-    def test_llm_player_retries_with_compact_prompt_after_oversized_request(self) -> None:
-        client = OversizeThenSuccessClient(
-            {"action_index": 0, "private_reasoning": "Compact retry succeeded."}
-        )
+    def test_llm_player_retries_recall_with_compact_prompt_after_oversized_request(self) -> None:
+        client = OversizeThenSuccessClient({"private_memory": {"plan": "Compact retry worked."}})
         player = LLMPlayer(
             client=client,
             model="fake-model",
             temperature=0.1,
             prompt_history_limit=6,
-            prompt_memory_limit=5,
         )
 
-        observation = Observation(
-            game_id="game-1",
-            player_id="RED",
-            turn_index=6,
-            phase="play_turn",
-            decision_index=11,
-            public_state={},
-            private_state={},
-            public_history=tuple(
-                Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
-                for index in range(8)
-            ),
-            private_history=tuple(
-                Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
-                for index in range(8)
-            ),
-            legal_actions=(Action("END_TURN"),),
-            memory=tuple(
-                MemoryEntry(
-                    player_id="RED",
-                    content={"note": f"memory-{index}"},
-                    turn_index=index,
-                    phase="play_turn",
-                    decision_index=index,
-                )
-                for index in range(7)
-            ),
+        response = player.recall(
+            RecallObservation(
+                game_id="game-1",
+                player_id="RED",
+                turn_index=6,
+                phase="play_turn",
+                decision_index=11,
+                public_events_since_last_turn=tuple(
+                    Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
+                    for index in range(8)
+                ),
+                private_events_since_last_turn=tuple(
+                    Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
+                    for index in range(8)
+                ),
+            )
         )
-
-        response = player.respond(observation)
         prompt_trace = player.take_last_prompt_trace()
 
-        self.assertEqual(response.action.action_type, "END_TURN")
+        self.assertEqual(response.memory, {"plan": "Compact retry worked."})
         self.assertEqual(len(client.calls), 2)
         first_payload = json.loads(client.calls[0]["messages"][1]["content"])
         second_payload = json.loads(client.calls[1]["messages"][1]["content"])
-        self.assertEqual(first_payload["context_window"]["public_history_included"], 6)
-        self.assertEqual(second_payload["context_window"]["public_history_included"], 3)
-        self.assertEqual(second_payload["context_window"]["private_memory_included"], 2)
+        self.assertEqual(first_payload["context_window"]["public_events_included"], 8)
+        self.assertEqual(second_payload["context_window"]["public_events_included"], 3)
         self.assertTrue(second_payload["context_window"]["compact_retry"])
         self.assertIsNotNone(prompt_trace)
         assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "recall")
         self.assertEqual(prompt_trace.attempts[0].response["error"]["type"], "request_too_large")
-        self.assertEqual(prompt_trace.attempts[1].response["action_index"], 0)
+
+    def test_llm_player_reflect_returns_final_memory(self) -> None:
+        client = FakeLLMClient({"private_memory": {"plan": "Trade first, build next."}})
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        response = player.reflect(
+            ReflectionObservation(
+                game_id="game-1",
+                player_id="RED",
+                turn_index=3,
+                phase="play_turn",
+                decision_index=14,
+                public_events_this_turn=(
+                    Event(kind="trade_offered", turn_index=3, phase="play_turn"),
+                    Event(kind="trade_confirmed", turn_index=3, phase="play_turn"),
+                ),
+                private_events_this_turn=(
+                    Event(kind="player_decision", turn_index=3, phase="play_turn"),
+                ),
+                memory=MemoryEntry(
+                    player_id="RED",
+                    content={"plan": "Look for brick trades."},
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=12,
+                    update_kind="recall",
+                ),
+            )
+        )
+        prompt_trace = player.take_last_prompt_trace()
+
+        self.assertEqual(response.memory, {"plan": "Trade first, build next."})
+        self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "reflect")
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ License-File: LICENSE
 Requires-Dist: python-dotenv>=1.0.1
 Dynamic: license-file
 
-# catan-bench v0.1.0
+# catan-bench v0.2.0
 
 `catan-bench` is an early harness for benchmarking LLM players in multi-player Settlers of Catan.
 
@@ -96,7 +96,7 @@ For LLM-backed players, `prompt_trace.jsonl` records the exact prompt messages a
 
 The harness is modeled around **decision points**, not just turns, so it can support trade responses, robber choices, initial placements, and other non-standard turn interactions.
 
-## What is implemented in v0.1.0
+## What is implemented in v0.2.0
 
 - Core dataclasses for actions, events, observations, decisions, memory entries, and game results.
 - A protocol-based engine interface.

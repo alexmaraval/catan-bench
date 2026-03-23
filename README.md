@@ -1,8 +1,8 @@
-# catan-bench v0.1.0
+# catan-bench v0.2.0
 
 `catan-bench` is an early harness for benchmarking LLM players in multi-player Settlers of Catan.
 
-Version `0.1.0` focuses on the benchmark core:
+Version `0.2.0` adds LLM player support on top of the benchmark core:
 
 - a game orchestrator that owns full engine state,
 - player-scoped observations with public and private information,
@@ -11,9 +11,10 @@ Version `0.1.0` focuses on the benchmark core:
 - rule/instruction bundles suitable for LLM prompting,
 - action validation before the engine applies a move,
 - a live `catanatron` engine adapter,
+- an `LLMPlayer` backed by an OpenAI-compatible chat client,
+- prompt trace recording for every LLM decision,
 - static HTML replay export from completed run artifacts.
 
-This version now includes a first-pass `catanatron` integration through `CatanatronEngineAdapter`.
 The adapter targets the current GitHub version of `catanatron`, not the older PyPI release, because the GitHub version includes the domestic trade flow needed for this benchmark.
 
 The previous long-form research summary and roadmap were moved to [docs/PROJECT_NOTES.md](/Users/alexandremaraval/Documents/Projects/catan-bench/docs/PROJECT_NOTES.md).
@@ -63,7 +64,7 @@ For LLM-backed players, `prompt_trace.jsonl` records the exact prompt messages a
 
 The harness is modeled around **decision points**, not just turns, so it can support trade responses, robber choices, initial placements, and other non-standard turn interactions.
 
-## What is implemented in v0.1.0
+## What is implemented in v0.2.0
 
 - Core dataclasses for actions, events, observations, decisions, memory entries, and game results.
 - A protocol-based engine interface.

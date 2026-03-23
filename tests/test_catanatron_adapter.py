@@ -12,6 +12,110 @@ from catan_bench import Action
 
 @unittest.skipIf(CatanatronEngineAdapter is None, "catanatron dependency is not installed")
 class CatanatronAdapterTests(unittest.TestCase):
+    def test_resolve_action_canonicalizes_unique_move_robber_coordinate(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        legal_actions = (
+            Action(
+                "MOVE_ROBBER",
+                payload={"coordinate": [1, -1, 0], "victim": "BLUE"},
+            ),
+            Action(
+                "BUILD_ROAD",
+                payload={"edge": [0, 1]},
+            ),
+        )
+
+        resolved = adapter.resolve_action(
+            proposed_action=Action(
+                "MOVE_ROBBER",
+                payload={"coordinate": [1, -1, 0], "victim": "RED"},
+            ),
+            legal_actions=legal_actions,
+        )
+
+        self.assertEqual(resolved, legal_actions[0])
+
+    def test_resolve_action_rejects_ambiguous_move_robber_coordinate(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        legal_actions = (
+            Action(
+                "MOVE_ROBBER",
+                payload={"coordinate": [1, -1, 0], "victim": "BLUE"},
+            ),
+            Action(
+                "MOVE_ROBBER",
+                payload={"coordinate": [1, -1, 0], "victim": "ORANGE"},
+            ),
+        )
+
+        with self.assertRaises(ValueError):
+            adapter.resolve_action(
+                proposed_action=Action(
+                    "MOVE_ROBBER",
+                    payload={"coordinate": [1, -1, 0], "victim": "RED"},
+                ),
+                legal_actions=legal_actions,
+            )
+
+    def test_resolve_action_canonicalizes_trade_response_by_action_type(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        legal_actions = (
+            Action(
+                "ACCEPT_TRADE",
+                payload={
+                    "offer": {"WOOD": 1},
+                    "request": {"BRICK": 1},
+                    "offering_player_id": "RED",
+                },
+            ),
+            Action(
+                "REJECT_TRADE",
+                payload={
+                    "offer": {"WOOD": 1},
+                    "request": {"BRICK": 1},
+                    "offering_player_id": "RED",
+                },
+            ),
+        )
+
+        resolved = adapter.resolve_action(
+            proposed_action=Action("ACCEPT_TRADE", payload={}),
+            legal_actions=legal_actions,
+        )
+
+        self.assertEqual(resolved, legal_actions[0])
+
+    def test_resolve_action_canonicalizes_confirm_trade_by_accepting_player(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        legal_actions = (
+            Action(
+                "CONFIRM_TRADE",
+                payload={
+                    "offer": {"WOOD": 1},
+                    "request": {"BRICK": 1},
+                    "accepting_player_id": "BLUE",
+                },
+            ),
+            Action(
+                "CONFIRM_TRADE",
+                payload={
+                    "offer": {"WOOD": 1},
+                    "request": {"BRICK": 1},
+                    "accepting_player_id": "ORANGE",
+                },
+            ),
+        )
+
+        resolved = adapter.resolve_action(
+            proposed_action=Action(
+                "CONFIRM_TRADE",
+                payload={"with_player_id": "ORANGE"},
+            ),
+            legal_actions=legal_actions,
+        )
+
+        self.assertEqual(resolved, legal_actions[1])
+
     def test_initial_decision_exposes_player_scoped_state(self) -> None:
         adapter = CatanatronEngineAdapter(seed=7)
 

@@ -1,23 +1,35 @@
 [[players]]
 id = "RED"
-type = "random"
+type = "llm"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+temperature = 0.7
 seed = 11
-allow_trade_offers = false
+allow_trade_offers = true
 
 [[players]]
 id = "BLUE"
-type = "random"
+type = "llm"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+temperature = 0.7
 seed = 12
-allow_trade_offers = false
+allow_trade_offers = true
 
 [[players]]
 id = "ORANGE"
-type = "random"
+type = "llm"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+temperature = 0.7
 seed = 13
-allow_trade_offers = false
+allow_trade_offers = true
 
 [[players]]
 id = "WHITE"
-type = "random"
+type = "llm"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+temperature = 0.7
 seed = 14
-allow_trade_offers = false
+allow_trade_offers = true

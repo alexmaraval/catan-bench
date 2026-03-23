@@ -13,6 +13,7 @@ from catan_bench import (
     PlayerResponse,
     ScriptedPlayer,
     TransitionResult,
+    build_player_replay_timeline,
     build_replay_timeline,
     export_replay_html,
 )
@@ -238,7 +239,129 @@ class ReplayTests(unittest.TestCase):
                                         "give": {"WOOD": 1},
                                         "want": {"BRICK": 1},
                                     },
-                                )
+                                ),
+                                memory_write={"plans": ["push the wood-for-brick trade early"]},
+                            )
+                        ]
+                    ),
+                    "BLUE": ScriptedPlayer(
+                        [
+                            PlayerResponse(
+                                action=Action(
+                                    "ACCEPT_TRADE",
+                                    payload={
+                                        "from": "RED",
+                                        "give": {"BRICK": 1},
+                                        "want": {"WOOD": 1},
+                                    },
+                                ),
+                                memory_write={"beliefs": ["RED is prioritizing brick"]},
+                            )
+                        ]
+                    ),
+                },
+                run_dir=tmpdir,
+            )
+
+            orchestrator.run()
+            output_path = export_replay_html(tmpdir)
+            html = output_path.read_text(encoding="utf-8")
+            red_private_html = Path(tmpdir, "players", "RED", "replay.html").read_text(
+                encoding="utf-8"
+            )
+            blue_private_html = Path(tmpdir, "players", "BLUE", "replay.html").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertEqual(output_path, Path(tmpdir) / "replay.html")
+            self.assertIn("mock-game-1", html)
+            self.assertIn("RED offered 1 wood for 1 brick.", html)
+            self.assertIn("RED Personal View", html)
+            self.assertIn("Trade Confirmed", html)
+            self.assertLess(html.index("RED · Trade Offered"), html.index("Trade Confirmed"))
+            self.assertIn("Public Replay", red_private_html)
+            self.assertIn("Private Trade Alert", blue_private_html)
+            self.assertIn("Received a trade offer from RED.", blue_private_html)
+            self.assertIn("RED Memory", red_private_html)
+            self.assertIn("Player Decision", red_private_html)
+            self.assertIn("push the wood-for-brick trade early", red_private_html)
+
+    def test_export_replay_html_handles_in_progress_run_without_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            self._write_json(
+                run_dir / "metadata.json",
+                {
+                    "game_id": "live-game",
+                    "player_ids": ["RED", "BLUE"],
+                    "player_adapter_types": {"RED": "LLMPlayer", "BLUE": "LLMPlayer"},
+                },
+            )
+            self._write_jsonl(
+                run_dir / "public_history.jsonl",
+                [
+                    {
+                        "kind": "trade_offered",
+                        "payload": {
+                            "offering_player_id": "RED",
+                            "offer": {"WOOD": 1},
+                            "request": {"BRICK": 1},
+                        },
+                        "turn_index": 4,
+                        "phase": "play_turn",
+                        "decision_index": 12,
+                        "actor_player_id": "RED",
+                    }
+                ],
+            )
+            self._write_jsonl(
+                run_dir / "players" / "RED" / "private_history.jsonl",
+                [
+                    {
+                        "kind": "player_decision",
+                        "payload": {
+                            "decision_prompt": "Offer a trade.",
+                            "action": {"action_type": "OFFER_TRADE", "payload": {}},
+                        },
+                        "turn_index": 4,
+                        "phase": "play_turn",
+                        "decision_index": 12,
+                        "actor_player_id": "RED",
+                    }
+                ],
+            )
+            self._write_jsonl(run_dir / "players" / "RED" / "memory.jsonl", [])
+            self._write_jsonl(run_dir / "players" / "BLUE" / "private_history.jsonl", [])
+            self._write_jsonl(run_dir / "players" / "BLUE" / "memory.jsonl", [])
+
+            output_path = export_replay_html(run_dir)
+            public_html = output_path.read_text(encoding="utf-8")
+            red_html = Path(run_dir, "players", "RED", "replay.html").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertEqual(output_path, run_dir / "replay.html")
+            self.assertIn("in-progress game", public_html)
+            self.assertIn("Decisions:</strong> 13", public_html)
+            self.assertIn("while the game is still in progress", red_html)
+
+    def test_build_player_replay_timeline_includes_public_private_and_memory_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                ReplayMockTradeEngine(),
+                players={
+                    "RED": ScriptedPlayer(
+                        [
+                            PlayerResponse(
+                                action=Action(
+                                    "OFFER_TRADE",
+                                    payload={
+                                        "to": ["BLUE"],
+                                        "give": {"WOOD": 1},
+                                        "want": {"BRICK": 1},
+                                    },
+                                ),
+                                memory_write={"plans": ["trade before road build"]},
                             )
                         ]
                     ),
@@ -261,21 +384,21 @@ class ReplayTests(unittest.TestCase):
             )
 
             orchestrator.run()
-            output_path = export_replay_html(tmpdir)
-            html = output_path.read_text(encoding="utf-8")
+            timeline = build_player_replay_timeline(tmpdir, "BLUE")
 
-            self.assertEqual(output_path, Path(tmpdir) / "replay.html")
-            self.assertIn("mock-game-1", html)
-            self.assertIn("RED offered 1 wood for 1 brick.", html)
-            self.assertIn("Trade Confirmed", html)
-            self.assertLess(html.index("RED · Trade Offered"), html.index("Trade Confirmed"))
+            self.assertEqual([item.stream for item in timeline], ["public", "private", "public", "public", "private"])
+            self.assertEqual(timeline[1].title, "Private Trade Alert")
+            self.assertEqual(timeline[1].body, "Received a trade offer from RED.")
+            self.assertEqual(timeline[-1].title, "Player Decision")
 
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     @classmethod
     def _write_jsonl(cls, path: Path, payloads: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         lines = [json.dumps(payload, sort_keys=True) for payload in payloads]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

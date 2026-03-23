@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Mapping
 
 from .observations import ObservationBuilder
 from .players import Player
-from .schemas import Action, GameResult, MemoryEntry
-from .storage import EventLog, MemoryStore, write_json
+from .schemas import Action, DecisionPoint, Event, GameResult, MemoryEntry, PlayerResponse
+from .storage import EventLog, MemoryStore, PromptTraceStore, write_json
 
 
 class MissingPlayerError(KeyError):
@@ -15,6 +16,9 @@ class MissingPlayerError(KeyError):
 
 class InvalidActionError(ValueError):
     """Raised when a player returns an action that is not currently legal."""
+
+
+logger = logging.getLogger(__name__)
 
 
 class GameOrchestrator:
@@ -28,6 +32,7 @@ class GameOrchestrator:
         observation_builder: ObservationBuilder | None = None,
         event_log: EventLog | None = None,
         memory_store: MemoryStore | None = None,
+        prompt_trace_store: PromptTraceStore | None = None,
         run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
     ) -> None:
@@ -36,8 +41,10 @@ class GameOrchestrator:
         self.observation_builder = observation_builder or ObservationBuilder()
         self.event_log = event_log or EventLog(run_dir)
         self.memory_store = memory_store or MemoryStore(run_dir)
+        self.prompt_trace_store = prompt_trace_store or PromptTraceStore(run_dir)
         self.run_dir = Path(run_dir) if run_dir is not None else None
         self.max_decisions = max_decisions
+        self._decision_phase_counts: dict[str, int] = {}
 
     def run(self) -> GameResult:
         self._prepare_run()
@@ -45,6 +52,12 @@ class GameOrchestrator:
         total_decisions = 0
         while not self.engine.is_terminal():
             if total_decisions >= self.max_decisions:
+                logger.warning(
+                    "Stopping game %s after %s decisions because max_decisions=%s was reached.",
+                    self.engine.game_id,
+                    total_decisions,
+                    self.max_decisions,
+                )
                 raise RuntimeError(
                     f"Stopped after {self.max_decisions} decisions without a terminal state."
                 )
@@ -52,6 +65,7 @@ class GameOrchestrator:
             total_decisions += 1
 
         metadata = dict(self.engine.result())
+        metadata["benchmark"] = self._benchmark_metadata(total_decisions=total_decisions)
         result = GameResult(
             game_id=self.engine.game_id,
             winner_ids=self._winner_ids_from_metadata(metadata),
@@ -86,7 +100,11 @@ class GameOrchestrator:
             event_log=self.event_log,
             memory_store=self.memory_store,
         )
+        self._decision_phase_counts[decision.phase] = (
+            self._decision_phase_counts.get(decision.phase, 0) + 1
+        )
         response = player.respond(observation)
+        self._append_player_prompt_trace(player)
         engine_resolve_action = getattr(self.engine, "resolve_action", None)
         if callable(engine_resolve_action):
             action = engine_resolve_action(
@@ -103,6 +121,11 @@ class GameOrchestrator:
         self.event_log.append_public(transition.public_events)
         for player_id, events in transition.private_events_by_player.items():
             self.event_log.append_private(player_id, events)
+
+        self.event_log.append_private(
+            decision.acting_player_id,
+            (self._private_decision_event(decision=decision, action=action, response=response),),
+        )
 
         if response.memory_write is not None:
             self.memory_store.append(
@@ -128,6 +151,8 @@ class GameOrchestrator:
 
         self.event_log.reset(self.engine.player_ids)
         self.memory_store.reset(self.engine.player_ids)
+        self.prompt_trace_store.reset(self.engine.player_ids)
+        self._decision_phase_counts: dict[str, int] = {}
 
         if self.run_dir is not None:
             write_json(
@@ -166,3 +191,60 @@ class GameOrchestrator:
             return (winner_id,)
 
         return ()
+
+    def _benchmark_metadata(self, *, total_decisions: int) -> dict[str, object]:
+        public_events = self.event_log.public_events
+        trade_kinds = {
+            "trade_offered": "offers",
+            "trade_accepted": "accepted",
+            "trade_rejected": "rejected",
+            "trade_confirmed": "confirmed",
+            "trade_cancelled": "cancelled",
+        }
+        trade_metrics = {
+            metric: 0 for metric in ("offers", "accepted", "rejected", "confirmed", "cancelled")
+        }
+        for event in public_events:
+            metric_name = trade_kinds.get(event.kind)
+            if metric_name is not None:
+                trade_metrics[metric_name] += 1
+
+        return {
+            "history_window": self.observation_builder.recent_event_window,
+            "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
+            "trade_metrics": trade_metrics,
+            "trade_event_share": (
+                0.0 if total_decisions == 0 else round(sum(trade_metrics.values()) / total_decisions, 4)
+            ),
+        }
+
+    @staticmethod
+    def _private_decision_event(
+        *, decision: DecisionPoint, action: Action, response: PlayerResponse
+    ) -> Event:
+        payload = {
+            "decision_prompt": decision.prompt,
+            "action": action.to_dict(),
+        }
+        if response.reasoning is not None:
+            payload["reasoning"] = response.reasoning
+        if response.memory_write is not None:
+            payload["memory_write"] = response.memory_write
+
+        return Event(
+            kind="player_decision",
+            payload=payload,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            actor_player_id=decision.acting_player_id,
+        )
+
+    def _append_player_prompt_trace(self, player: Player) -> None:
+        take_last_prompt_trace = getattr(player, "take_last_prompt_trace", None)
+        if not callable(take_last_prompt_trace):
+            return
+        prompt_trace = take_last_prompt_trace()
+        if prompt_trace is None:
+            return
+        self.prompt_trace_store.append(prompt_trace)

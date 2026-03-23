@@ -82,7 +82,7 @@ class OpenAICompatibleChatClient:
 
     def _retry_delay(self, exc: error.HTTPError, attempt_index: int) -> float:
         """Return seconds to sleep before the next attempt, respecting Retry-After."""
-        retry_after = exc.headers.get("Retry-After")
+        retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
         if retry_after is not None:
             try:
                 return float(retry_after) + 0.5

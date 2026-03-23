@@ -3,4 +3,5 @@ engine = "catanatron"
 seed = 12
 discard_limit = 7
 vps_to_win = 10
-run_dir = "runs/quickstart"
+history_window = 100
+run_dir = "runs/llm-test"

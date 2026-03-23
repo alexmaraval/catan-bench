@@ -12,7 +12,14 @@ license = { file = "LICENSE" }
 authors = [
   { name = "Alexandre Maraval" }
 ]
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.0.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

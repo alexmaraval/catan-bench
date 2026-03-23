@@ -6,6 +6,10 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Agents
+.claude/
+.codex/
+
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]

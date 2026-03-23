@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .schemas import Action, DecisionPoint, Event, JsonValue, TransitionResult
+
+logger = logging.getLogger(__name__)
 
 RESOURCE_ORDER = ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
 DEV_CARD_ORDER = (
@@ -163,8 +166,24 @@ class CatanatronEngineAdapter:
         self, *, proposed_action: Action, legal_actions: tuple[Action, ...]
     ) -> Action:
         for legal_action in legal_actions:
+            if self._is_trade_template(legal_action):
+                continue
             if legal_action.matches(proposed_action):
                 return legal_action
+
+        canonical_robber_action = self._canonicalize_move_robber_action(
+            proposed_action=proposed_action,
+            legal_actions=legal_actions,
+        )
+        if canonical_robber_action is not None:
+            return canonical_robber_action
+
+        canonical_trade_action = self._canonicalize_trade_resolution_action(
+            proposed_action=proposed_action,
+            legal_actions=legal_actions,
+        )
+        if canonical_trade_action is not None:
+            return canonical_trade_action
 
         if proposed_action.action_type == "OFFER_TRADE" and self._can_offer_trade():
             native_action = self._action_to_native(proposed_action)
@@ -176,6 +195,73 @@ class CatanatronEngineAdapter:
         raise ValueError(
             f"Action {proposed_action.to_dict()} is not currently valid in catanatron."
         )
+
+    @staticmethod
+    def _is_trade_template(action: Action) -> bool:
+        return action.action_type == "OFFER_TRADE" and action.payload == {
+            "offer": {},
+            "request": {},
+        }
+
+    @staticmethod
+    def _canonicalize_move_robber_action(
+        *, proposed_action: Action, legal_actions: tuple[Action, ...]
+    ) -> Action | None:
+        if proposed_action.action_type != "MOVE_ROBBER":
+            return None
+
+        coordinate = proposed_action.payload.get("coordinate")
+        if not isinstance(coordinate, list) or len(coordinate) != 3:
+            return None
+
+        matching_coordinates = [
+            legal_action
+            for legal_action in legal_actions
+            if legal_action.action_type == "MOVE_ROBBER"
+            and legal_action.payload.get("coordinate") == coordinate
+        ]
+        if len(matching_coordinates) == 1:
+            return matching_coordinates[0]
+        return None
+
+    @staticmethod
+    def _canonicalize_trade_resolution_action(
+        *, proposed_action: Action, legal_actions: tuple[Action, ...]
+    ) -> Action | None:
+        if proposed_action.action_type not in {
+            "ACCEPT_TRADE",
+            "REJECT_TRADE",
+            "CONFIRM_TRADE",
+            "CANCEL_TRADE",
+        }:
+            return None
+
+        matching_actions = [
+            legal_action
+            for legal_action in legal_actions
+            if legal_action.action_type == proposed_action.action_type
+        ]
+        if not matching_actions:
+            return None
+
+        if len(matching_actions) == 1:
+            return matching_actions[0]
+
+        if proposed_action.action_type != "CONFIRM_TRADE":
+            return None
+
+        accepting_player_id = proposed_action.payload.get("accepting_player_id")
+        if not isinstance(accepting_player_id, str):
+            accepting_player_id = proposed_action.payload.get("player_id")
+        if not isinstance(accepting_player_id, str):
+            accepting_player_id = proposed_action.payload.get("with_player_id")
+        if not isinstance(accepting_player_id, str):
+            return None
+
+        for legal_action in matching_actions:
+            if legal_action.payload.get("accepting_player_id") == accepting_player_id:
+                return legal_action
+        return None
 
     def apply_action(self, action: Action) -> TransitionResult:
         state_before = self.game.state.copy()
@@ -678,12 +764,10 @@ class CatanatronEngineAdapter:
 
     @staticmethod
     def _trade_offering_player_id(state) -> str | None:
-        if not getattr(state, "is_resolving_trade", False):
+        if not state.is_resolving_trade:
             return None
-        current_trade = getattr(state, "current_trade", None)
-        if not current_trade:
-            return None
-        if len(current_trade) <= 10:
+        current_trade = state.current_trade
+        if not current_trade or len(current_trade) <= 10:
             return None
         offering_player_index = current_trade[10]
         if offering_player_index is None:

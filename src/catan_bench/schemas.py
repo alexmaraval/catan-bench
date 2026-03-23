@@ -100,6 +100,10 @@ class Observation:
     decision_index: int
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
+    game_rules: str | None = None
+    decision_prompt: str | None = None
+    public_history: tuple[Event, ...] = ()
+    private_history: tuple[Event, ...] = ()
     recent_public_events: tuple[Event, ...] = ()
     recent_private_events: tuple[Event, ...] = ()
     legal_actions: tuple[Action, ...] = ()
@@ -114,6 +118,10 @@ class Observation:
             "decision_index": self.decision_index,
             "public_state": self.public_state,
             "private_state": self.private_state,
+            "game_rules": self.game_rules,
+            "decision_prompt": self.decision_prompt,
+            "public_history": [event.to_dict() for event in self.public_history],
+            "private_history": [event.to_dict() for event in self.private_history],
             "recent_public_events": [event.to_dict() for event in self.recent_public_events],
             "recent_private_events": [
                 event.to_dict() for event in self.recent_private_events
@@ -127,14 +135,14 @@ class Observation:
 class PlayerResponse:
     action: Action
     memory_write: JsonValue | None = None
-    summary: str | None = None
+    reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         data: dict[str, JsonValue] = {"action": self.action.to_dict()}
         if self.memory_write is not None:
             data["memory_write"] = self.memory_write
-        if self.summary is not None:
-            data["summary"] = self.summary
+        if self.reasoning is not None:
+            data["reasoning"] = self.reasoning
         return data
 
 
@@ -154,6 +162,40 @@ class TransitionResult:
             },
             "terminal": self.terminal,
             "result_metadata": self.result_metadata,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PromptTraceAttempt:
+    messages: tuple[dict[str, JsonValue], ...]
+    response: dict[str, JsonValue]
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "messages": [dict(message) for message in self.messages],
+            "response": self.response,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PromptTrace:
+    player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    model: str
+    temperature: float
+    attempts: tuple[PromptTraceAttempt, ...]
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "player_id": self.player_id,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "model": self.model,
+            "temperature": self.temperature,
+            "attempts": [attempt.to_dict() for attempt in self.attempts],
         }
 
 

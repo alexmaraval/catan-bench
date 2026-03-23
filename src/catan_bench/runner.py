@@ -5,9 +5,13 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from dotenv import load_dotenv
+
 from .config import GameConfig, PlayerConfig, load_game_config, load_player_configs
+from .llm import OpenAICompatibleChatClient
+from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
-from .players import FirstLegalPlayer, RandomLegalPlayer
+from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -32,17 +36,27 @@ def build_engine(game_config: GameConfig, players: Sequence[PlayerConfig]):
     )
 
 
-def build_players(players: Sequence[PlayerConfig]):
+def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | None = None):
     built_players = {}
     for player_config in players:
+        allow_trade_offers = player_config.allow_trade_offers
         if player_config.type == "random":
             built_players[player_config.id] = RandomLegalPlayer(
                 seed=player_config.seed,
-                allow_trade_offers=player_config.allow_trade_offers,
+                allow_trade_offers=allow_trade_offers,
             )
         elif player_config.type == "first_legal":
             built_players[player_config.id] = FirstLegalPlayer(
-                allow_trade_offers=player_config.allow_trade_offers,
+                allow_trade_offers=allow_trade_offers,
+            )
+        elif player_config.type == "llm":
+            built_players[player_config.id] = LLMPlayer(
+                client=OpenAICompatibleChatClient(
+                    api_base=player_config.api_base,
+                    api_key_env=player_config.api_key_env,
+                ),
+                model=player_config.model or "",
+                temperature=player_config.temperature,
             )
         else:  # pragma: no cover - validated in config loading.
             raise ValueError(f"Unsupported player type {player_config.type!r}.")
@@ -53,16 +67,39 @@ def build_players(players: Sequence[PlayerConfig]):
 def run_from_config_files(
     *, game_config_path: str | Path, players_config_path: str | Path
 ):
+    _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
     player_configs = load_player_configs(players_config_path)
     engine = build_engine(game_config, player_configs)
-    players = build_players(player_configs)
+    players = build_players(player_configs, game_config)
     orchestrator = GameOrchestrator(
         engine,
         players,
+        observation_builder=ObservationBuilder(
+            recent_event_window=game_config.history_window,
+        ),
         run_dir=game_config.run_dir,
     )
     return orchestrator.run()
+
+
+def _load_local_env(start_dir: Path) -> None:
+    env_path = _find_dotenv(start_dir)
+    if env_path is None:
+        return
+    load_dotenv(env_path, override=False)
+
+
+def _find_dotenv(start_dir: Path, *, max_depth: int = 4) -> Path | None:
+    current = start_dir
+    for _ in range(max_depth + 1):
+        candidate = current / ".env"
+        if candidate.is_file():
+            return candidate
+        if current.parent == current:
+            return None
+        current = current.parent
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:

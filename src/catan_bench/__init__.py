@@ -21,6 +21,11 @@ from .schemas import (
     PromptTraceAttempt,
     RecallObservation,
     ReflectionObservation,
+    TradeChatObservation,
+    TradeChatOpenResponse,
+    TradeChatQuote,
+    TradeChatReplyResponse,
+    TradeChatSelectionResponse,
     TransitionResult,
 )
 from .storage import EventLog, MemoryStore, PromptTraceStore
@@ -72,6 +77,11 @@ __all__ = [
     "ReplayTimelineItem",
     "ReflectionObservation",
     "ScriptedPlayer",
+    "TradeChatObservation",
+    "TradeChatOpenResponse",
+    "TradeChatQuote",
+    "TradeChatReplyResponse",
+    "TradeChatSelectionResponse",
     "TransitionResult",
     "CATAN_RULES_SUMMARY",
     "build_engine",

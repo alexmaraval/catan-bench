@@ -262,6 +262,24 @@ def _describe(event: object) -> str | None:
         return f"{a} ↔ {b}: {_res(p.get('offer'))} for {_res(p.get('request'))}"
     if kind == "trade_cancelled":
         return "trade cancelled"
+    if kind == "trade_chat_opened":
+        requested = _res(p.get("requested_resources"))
+        return f"opened trade chat for {requested}"
+    if kind == "trade_chat_message":
+        message = p.get("message")
+        if isinstance(message, str) and message.strip():
+            return f"said: {message.strip()}"
+        offer = p.get("offer")
+        request = p.get("request")
+        if isinstance(offer, dict) and isinstance(request, dict):
+            return f"quoted {_res(offer)} for {_res(request)}"
+        return "spoke in trade chat"
+    if kind == "trade_chat_quote_selected":
+        return f"selected {p.get('selected_player_id')}'s quote"
+    if kind == "trade_chat_no_deal":
+        return "ended trade chat with no deal"
+    if kind == "trade_chat_closed":
+        return None
 
     if kind == "development_card_played":
         action_p = p.get("action") if isinstance(p.get("action"), dict) else {}

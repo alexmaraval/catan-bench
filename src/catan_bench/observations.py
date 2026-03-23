@@ -29,8 +29,17 @@ class ObservationBuilder:
         engine: EngineAdapter,
         decision: DecisionPoint,
         memory_store: MemoryStore,
+        event_log: EventLog | None = None,
     ) -> Observation:
         player_id = decision.acting_player_id
+        recent_public_events = ()
+        recent_private_events = ()
+        if event_log is not None:
+            recent_public_events = event_log.recent_public(self.recent_event_window)
+            recent_private_events = event_log.recent_private(
+                player_id,
+                self.recent_event_window,
+            )
         return Observation(
             game_id=engine.game_id,
             player_id=player_id,
@@ -42,6 +51,8 @@ class ObservationBuilder:
             game_rules=self.game_rules,
             decision_prompt=decision.prompt,
             legal_actions=tuple(decision.legal_actions),
+            recent_public_events=recent_public_events,
+            recent_private_events=recent_private_events,
             memory=memory_store.get(player_id),
         )
 

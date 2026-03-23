@@ -650,7 +650,7 @@ class GameOrchestrator:
                 requested_resources=open_response.requested_resources,
                 quotes=tuple(quotes),
             )
-            if reply.message is None and (not reply.owner_gives or not reply.owner_gets):
+            if not reply.owner_gives or not reply.owner_gets:
                 continue
             quote = TradeChatQuote(
                 player_id=other_player_id,
@@ -683,6 +683,12 @@ class GameOrchestrator:
             (quote for quote in quotes if quote.player_id == selection.selected_player_id),
             None,
         )
+
+        if selected_quote is None and selection.selected_player_id is not None:
+            logger.warning(
+                "Trade chat selection references unknown player %r; treating as no deal",
+                selection.selected_player_id,
+            )
 
         if selected_quote is None:
             no_deal_event = Event(
@@ -884,8 +890,11 @@ class GameOrchestrator:
         )
 
     def _trade_chat_transcript(self, turn_index: int) -> tuple[Event, ...]:
-        events = self.event_log.recent_public(self.trading_chat_history_limit)
-        return tuple(event for event in events if event.turn_index == turn_index)
+        all_events = self.event_log.recent_public()
+        turn_events = tuple(event for event in all_events if event.turn_index == turn_index)
+        if self.trading_chat_history_limit is None:
+            return turn_events
+        return turn_events[-self.trading_chat_history_limit :]
 
     def _trade_chat_participants(self, owner_player_id: str) -> tuple[str, ...]:
         return tuple(player_id for player_id in self.engine.player_ids if player_id != owner_player_id)

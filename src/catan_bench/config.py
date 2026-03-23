@@ -13,6 +13,10 @@ class GameConfig:
     vps_to_win: int = 10
     run_dir: Path | None = None
     history_window: int | None = 40
+    trading_chat_enabled: bool = False
+    trading_chat_max_failed_attempts_per_turn: int = 4
+    trading_chat_message_chars: int = 160
+    trading_chat_history_limit: int | None = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,8 +50,16 @@ def load_game_config(path: str | Path) -> GameConfig:
     vps_to_win = int(payload.get("vps_to_win", 10))
     run_dir = payload.get("run_dir")
     history_window = payload.get("history_window", 40)
+    trading_chat_enabled = bool(payload.get("trading_chat_enabled", False))
+    trading_chat_max_failed_attempts_per_turn = int(
+        payload.get("trading_chat_max_failed_attempts_per_turn", 4)
+    )
+    trading_chat_message_chars = int(payload.get("trading_chat_message_chars", 160))
+    trading_chat_history_limit = payload.get("trading_chat_history_limit", 16)
     if history_window is not None:
         history_window = int(history_window)
+    if trading_chat_history_limit is not None:
+        trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
         run_dir = Path(run_dir)
 
@@ -58,6 +70,10 @@ def load_game_config(path: str | Path) -> GameConfig:
         vps_to_win=vps_to_win,
         run_dir=run_dir,
         history_window=history_window,
+        trading_chat_enabled=trading_chat_enabled,
+        trading_chat_max_failed_attempts_per_turn=trading_chat_max_failed_attempts_per_turn,
+        trading_chat_message_chars=trading_chat_message_chars,
+        trading_chat_history_limit=trading_chat_history_limit,
     )
 
 

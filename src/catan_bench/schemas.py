@@ -322,6 +322,101 @@ class ReflectionObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class TradeChatQuote:
+    player_id: str
+    message: str | None = None
+    owner_gives: dict[str, JsonValue] = field(default_factory=dict)
+    owner_gets: dict[str, JsonValue] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {
+            "player_id": self.player_id,
+            "owner_gives": self.owner_gives,
+            "owner_gets": self.owner_gets,
+        }
+        if self.message is not None:
+            data["message"] = self.message
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "TradeChatQuote":
+        return cls(
+            player_id=str(data["player_id"]),
+            message=data.get("message") if "message" in data else None,
+            owner_gives=dict(data.get("owner_gives") or {}),
+            owner_gets=dict(data.get("owner_gets") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TradeChatObservation:
+    game_id: str
+    player_id: str
+    owner_player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    stage: str
+    attempt_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    transcript: tuple[Event, ...] = ()
+    requested_resources: dict[str, JsonValue] = field(default_factory=dict)
+    other_player_ids: tuple[str, ...] = ()
+    quotes: tuple[TradeChatQuote, ...] = ()
+    game_rules: str | None = None
+    memory: MemoryEntry | None = None
+    message_char_limit: int = 160
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "owner_player_id": self.owner_player_id,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "stage": self.stage,
+            "attempt_index": self.attempt_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
+            "transcript": [event.to_dict() for event in self.transcript],
+            "requested_resources": self.requested_resources,
+            "other_player_ids": list(self.other_player_ids),
+            "quotes": [quote.to_dict() for quote in self.quotes],
+            "game_rules": self.game_rules,
+            "memory": None if self.memory is None else self.memory.to_dict(),
+            "message_char_limit": self.message_char_limit,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "TradeChatObservation":
+        return cls(
+            game_id=str(data["game_id"]),
+            player_id=str(data["player_id"]),
+            owner_player_id=str(data["owner_player_id"]),
+            turn_index=int(data["turn_index"]),
+            phase=str(data["phase"]),
+            decision_index=int(data["decision_index"]),
+            stage=str(data["stage"]),
+            attempt_index=int(data["attempt_index"]),
+            public_state=dict(data.get("public_state") or {}),
+            private_state=dict(data.get("private_state") or {}),
+            transcript=tuple(Event.from_dict(event) for event in data.get("transcript", ())),
+            requested_resources=dict(data.get("requested_resources") or {}),
+            other_player_ids=tuple(str(player_id) for player_id in data.get("other_player_ids", ())),
+            quotes=tuple(TradeChatQuote.from_dict(quote) for quote in data.get("quotes", ())),
+            game_rules=data.get("game_rules") if "game_rules" in data else None,
+            memory=(
+                None
+                if data.get("memory") is None
+                else MemoryEntry.from_dict(data["memory"])
+            ),
+            message_char_limit=int(data.get("message_char_limit", 160)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryResponse:
     memory: JsonValue | None = None
 
@@ -354,6 +449,61 @@ class PlayerResponse:
             memory_write=data.get("memory_write"),
             reasoning=data.get("reasoning") if "reasoning" in data else None,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TradeChatOpenResponse:
+    open_chat: bool = False
+    message: str | None = None
+    requested_resources: dict[str, JsonValue] = field(default_factory=dict)
+    reasoning: str | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {
+            "open_chat": self.open_chat,
+            "requested_resources": self.requested_resources,
+        }
+        if self.message is not None:
+            data["message"] = self.message
+        if self.reasoning is not None:
+            data["reasoning"] = self.reasoning
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class TradeChatReplyResponse:
+    message: str | None = None
+    owner_gives: dict[str, JsonValue] = field(default_factory=dict)
+    owner_gets: dict[str, JsonValue] = field(default_factory=dict)
+    reasoning: str | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {
+            "owner_gives": self.owner_gives,
+            "owner_gets": self.owner_gets,
+        }
+        if self.message is not None:
+            data["message"] = self.message
+        if self.reasoning is not None:
+            data["reasoning"] = self.reasoning
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class TradeChatSelectionResponse:
+    selected_player_id: str | None = None
+    message: str | None = None
+    reasoning: str | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        data: dict[str, JsonValue] = {}
+        if self.selected_player_id is not None:
+            data["selected_player_id"] = self.selected_player_id
+        if self.message is not None:
+            data["message"] = self.message
+        if self.reasoning is not None:
+            data["reasoning"] = self.reasoning
+        return data
 
 
 @dataclass(frozen=True, slots=True)

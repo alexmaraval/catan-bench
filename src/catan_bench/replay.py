@@ -402,7 +402,21 @@ def _format_public_event_body(
         return f"{offering_player} cancelled the current trade offer."
     if kind == "dice_rolled":
         result = payload.get("result")
-        return f"Rolled the dice: {json.dumps(result, sort_keys=True)}."
+        if isinstance(result, (int, float)):
+            return f"Rolled {result}."
+        if isinstance(result, list) and all(isinstance(v, (int, float)) for v in result):
+            total = sum(int(v) for v in result)
+            breakdown = " + ".join(str(v) for v in result)
+            return f"Rolled {total} ({breakdown})."
+        if isinstance(result, dict):
+            total = result.get("total")
+            values = result.get("values") or result.get("dice") or result.get("rolls")
+            if isinstance(total, int) and isinstance(values, list):
+                breakdown = " + ".join(str(v) for v in values)
+                return f"Rolled {total} ({breakdown})."
+            if isinstance(total, int):
+                return f"Rolled {total}."
+        return f"Rolled {json.dumps(result, sort_keys=True)}."
     if kind == "settlement_built":
         return f"Built a settlement on node {payload.get('node_id')}."
     if kind == "city_built":
@@ -436,9 +450,9 @@ def _format_private_event_body(*, kind: str, payload: dict[str, JsonValue]) -> s
     if kind == "player_decision":
         action = _as_dict(payload.get("action"))
         action_type = _as_optional_str(action.get("action_type")) or "UNKNOWN_ACTION"
-        decision_prompt = _as_optional_str(payload.get("decision_prompt"))
-        if decision_prompt is not None:
-            return f"Chose {action_type} after prompt: {decision_prompt}"
+        description = _as_optional_str(action.get("description"))
+        if description:
+            return f"Chose {action_type}: {description}"
         return f"Chose {action_type}."
     if kind == "trade_offer_received":
         return f"Received a trade offer from {payload.get('from')}."
@@ -450,11 +464,20 @@ def _format_private_event_body(*, kind: str, payload: dict[str, JsonValue]) -> s
                 parts.append(f"{resource}: {prefix}{delta}")
         return "Resources changed: " + ", ".join(parts) + "." if parts else "Resources changed."
     if kind == "private_state_changed":
-        changed_fields = ", ".join(sorted(payload.keys()))
-        if changed_fields:
-            return f"Private state changed in: {changed_fields}."
-        return "Private state changed."
+        diffs: list[str] = []
+        _collect_state_diffs(payload, [], diffs)
+        return "State: " + ", ".join(diffs) + "." if diffs else "Private state changed."
     return json.dumps(payload, sort_keys=True)
+
+
+def _collect_state_diffs(obj: JsonValue, path: list[str], out: list[str]) -> None:
+    if isinstance(obj, dict):
+        if "before" in obj and "after" in obj:
+            label = ".".join(path) if path else "value"
+            out.append(f"{label}: {obj['before']} → {obj['after']}")
+        else:
+            for key, value in sorted(obj.items()):
+                _collect_state_diffs(value, path + [key], out)
 
 
 def _format_memory_content(content: JsonValue) -> str:
@@ -475,7 +498,10 @@ def _format_resource_map(resource_map: dict[str, JsonValue]) -> str:
         return "nothing"
     parts = []
     for resource, amount in sorted(resource_map.items()):
-        parts.append(f"{amount} {str(resource).lower()}")
+        name = str(resource).lower()
+        if isinstance(amount, int) and amount != 1:
+            name = name + "s"
+        parts.append(f"{amount} {name}")
     return ", ".join(parts)
 
 
@@ -520,7 +546,7 @@ def _render_html(
 
     bubbles = "\n".join(_render_item(item) for item in timeline)
     player_legend = "\n".join(
-        f'<li class="legend__item"><span class="legend__swatch legend__swatch--{escape(color)}"></span>{escape(player_id)}</li>'
+        f'<li class="legend__item" data-player-id="{escape(player_id)}"><span class="legend__swatch legend__swatch--{escape(color)}"></span>{escape(player_id)}</li>'
         for player_id, color in _player_colors(player_ids).items()
     )
     nav = "\n".join(
@@ -602,6 +628,12 @@ def _render_html(
     .filters button {{
       cursor: pointer;
       font: inherit;
+      transition: background 120ms, color 120ms, border-color 120ms;
+    }}
+    .filters button.filter--active {{
+      background: var(--ink);
+      color: var(--panel);
+      border-color: var(--ink);
     }}
     .nav__link {{
       color: inherit;
@@ -619,6 +651,17 @@ def _render_html(
       background: rgba(255,255,255,0.72);
       border-radius: 999px;
       border: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      transition: background 120ms, color 120ms, border-color 120ms;
+    }}
+    .legend__item--active {{
+      background: var(--ink);
+      color: var(--panel);
+      border-color: var(--ink);
+    }}
+    .legend__item--active .legend__swatch {{
+      border-color: rgba(255,255,255,0.4);
     }}
     .legend__swatch {{
       width: 14px;
@@ -674,11 +717,29 @@ def _render_html(
     details {{
       margin-top: 10px;
     }}
+    details summary {{
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--muted);
+    }}
     pre {{
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      margin: 10px 0 0;
+      margin: 8px 0 0;
       font-size: 0.84rem;
+    }}
+    .memory-note {{
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 0.88rem;
+      font-style: italic;
+      color: var(--muted);
+    }}
+    .memory-note__label {{
+      font-style: normal;
+      font-weight: 700;
     }}
     @keyframes rise {{
       from {{ opacity: 0; transform: translateY(8px); }}
@@ -709,17 +770,47 @@ def _render_html(
   <script>
     const buttons = document.querySelectorAll('[data-filter-value]');
     const items = document.querySelectorAll('.item');
+    const legendItems = document.querySelectorAll('.legend__item[data-player-id]');
+
+    function applyFilter(attr, value) {{
+      for (const item of items) {{
+        if (value === 'all') {{
+          item.dataset.hidden = 'false';
+        }} else {{
+          const itemValue = item.getAttribute('data-' + attr);
+          item.dataset.hidden = itemValue === value ? 'false' : 'true';
+        }}
+      }}
+    }}
+
+    function resetToShowAll() {{
+      for (const b of buttons) b.classList.remove('filter--active');
+      for (const l of legendItems) l.classList.remove('legend__item--active');
+      if (buttons.length > 0) buttons[0].classList.add('filter--active');
+      applyFilter('all', 'all');
+    }}
+
+    if (buttons.length > 0) buttons[0].classList.add('filter--active');
+
     for (const button of buttons) {{
       button.addEventListener('click', () => {{
-        const attr = button.dataset.filterAttr;
-        const value = button.dataset.filterValue;
-        for (const item of items) {{
-          if (value === 'all') {{
-            item.dataset.hidden = 'false';
-            continue;
-          }}
-          const itemValue = item.dataset[attr];
-          item.dataset.hidden = itemValue === value ? 'false' : 'true';
+        for (const b of buttons) b.classList.remove('filter--active');
+        for (const l of legendItems) l.classList.remove('legend__item--active');
+        button.classList.add('filter--active');
+        applyFilter(button.dataset.filterAttr, button.dataset.filterValue);
+      }});
+    }}
+
+    for (const li of legendItems) {{
+      li.addEventListener('click', () => {{
+        const isActive = li.classList.contains('legend__item--active');
+        if (isActive) {{
+          resetToShowAll();
+        }} else {{
+          for (const b of buttons) b.classList.remove('filter--active');
+          for (const l of legendItems) l.classList.remove('legend__item--active');
+          li.classList.add('legend__item--active');
+          applyFilter('actor-player-id', li.dataset.playerId);
         }}
       }});
     }}
@@ -730,20 +821,33 @@ def _render_html(
 
 
 def _render_item(item: ReplayTimelineItem) -> str:
-    meta_bits = [f"Turn {item.turn_index}", item.phase.replace("_", " ")]
+    meta_bits = [f"Turn {item.turn_index}", item.phase.replace("_", " ").title()]
     if item.decision_index is not None:
         meta_bits.append(f"Decision {item.decision_index}")
     meta = " · ".join(meta_bits)
-    payload = escape(json.dumps(item.raw_payload, indent=2, sort_keys=True))
+    payload_json = escape(json.dumps(item.raw_payload, indent=2, sort_keys=True))
+
+    extra = ""
+    if item.event_kind == "player_decision":
+        memory_write = item.raw_payload.get("memory_write")
+        reasoning = item.raw_payload.get("reasoning")
+        decision_prompt = item.raw_payload.get("decision_prompt")
+        if memory_write is not None:
+            extra += f'\n        <div class="memory-note"><span class="memory-note__label">Memory note:</span> {escape(str(memory_write))}</div>'
+        if reasoning is not None:
+            extra += f'\n        <details>\n          <summary>Reasoning</summary>\n          <pre>{escape(str(reasoning))}</pre>\n        </details>'
+        if decision_prompt is not None:
+            extra += f'\n        <details>\n          <summary>Decision prompt</summary>\n          <pre>{escape(str(decision_prompt))}</pre>\n        </details>'
+
     return f"""
-    <article class="item" data-speaker-type="{escape(item.speaker_type)}" data-stream="{escape(item.stream)}" data-hidden="false">
+    <article class="item" data-speaker-type="{escape(item.speaker_type)}" data-stream="{escape(item.stream)}" data-actor-player-id="{escape(item.actor_player_id or '')}" data-hidden="false">
       <div class="meta">{escape(meta)}</div>
       <div class="bubble bubble--{escape(item.variant)}">
         <div class="title">{escape(item.title)}</div>
-        <div class="body">{escape(item.body)}</div>
+        <div class="body">{escape(item.body)}</div>{extra}
         <details>
           <summary>Raw entry</summary>
-          <pre>{payload}</pre>
+          <pre>{payload_json}</pre>
         </details>
       </div>
     </article>"""

@@ -12,6 +12,7 @@ from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
+from .reporter import TerminalReporter
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -79,6 +80,7 @@ def run_from_config_files(
             recent_event_window=game_config.history_window,
         ),
         run_dir=game_config.run_dir,
+        reporter=TerminalReporter(),
     )
     return orchestrator.run()
 

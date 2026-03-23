@@ -14,7 +14,7 @@ from catan_bench.runner import _find_dotenv, build_players, run_from_config_file
 class ConfigAndRunnerTests(unittest.TestCase):
     def test_load_example_configs(self) -> None:
         game_config = load_game_config("configs/game.toml")
-        player_configs = load_player_configs("configs/players.toml")
+        player_configs = load_player_configs("configs/openai-players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
         self.assertEqual(game_config.seed, 12)
@@ -22,7 +22,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(player_configs[0].id, "RED")
 
     def test_build_players_from_config(self) -> None:
-        player_configs = load_player_configs("configs/players.toml")
+        player_configs = load_player_configs("configs/openai-players.toml")
         players = build_players(player_configs)
 
         self.assertEqual(set(players.keys()), {"RED", "BLUE", "ORANGE", "WHITE"})
@@ -30,7 +30,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
     def test_runner_executes_game_from_toml_configs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             game_toml = Path(tmpdir) / "game.toml"
-            players_toml = Path(tmpdir) / "players.toml"
+            players_toml = Path(tmpdir) / "openai-players.toml"
             run_dir = Path(tmpdir) / "run"
 
             game_toml.write_text(
@@ -88,7 +88,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
     def test_load_llm_player_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            players_toml = Path(tmpdir) / "players.toml"
+            players_toml = Path(tmpdir) / "openai-players.toml"
             players_toml.write_text(
                 (
                     "[[players]]\n"
@@ -113,7 +113,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config_dir = Path(tmpdir) / "configs"
             config_dir.mkdir()
             game_toml = config_dir / "game.toml"
-            players_toml = config_dir / "players.toml"
+            players_toml = config_dir / "openai-players.toml"
             env_file = config_dir / ".env"
 
             game_toml.write_text(
@@ -158,7 +158,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config_dir = Path(tmpdir) / "configs"
             config_dir.mkdir()
             game_toml = config_dir / "game.toml"
-            players_toml = config_dir / "players.toml"
+            players_toml = config_dir / "openai-players.toml"
             env_file = config_dir / ".env"
 
             game_toml.write_text(

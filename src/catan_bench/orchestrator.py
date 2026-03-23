@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from .engine import EngineAdapter
 from .observations import ObservationBuilder
 from .players import Player
 from .schemas import Action, DecisionPoint, Event, GameResult, MemoryEntry, PlayerResponse
 from .storage import EventLog, MemoryStore, PromptTraceStore, write_json
+
+if TYPE_CHECKING:
+    from .reporter import TerminalReporter
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class GameOrchestrator:
         prompt_trace_store: PromptTraceStore | None = None,
         run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
+        reporter: TerminalReporter | None = None,
     ) -> None:
         self.engine = engine
         self.players = dict(players)
@@ -47,11 +51,14 @@ class GameOrchestrator:
         self.prompt_trace_store = prompt_trace_store or PromptTraceStore(run_dir)
         self.run_dir = Path(run_dir) if run_dir is not None else None
         self.max_decisions = max_decisions
+        self.reporter = reporter
         self._decision_phase_counts: dict[str, int] = {}
 
     def run(self) -> GameResult:
         self._prepare_run()
         logger.info("Starting game %s with players %s", self.engine.game_id, list(self.players))
+        if self.reporter is not None:
+            self.reporter.on_game_start(self.engine.game_id, list(self.engine.player_ids))
 
         total_decisions = 0
         while not self.engine.is_terminal():
@@ -85,6 +92,9 @@ class GameOrchestrator:
 
         if self.run_dir is not None:
             write_json(self.run_dir / "result.json", result.to_dict())
+
+        if self.reporter is not None:
+            self.reporter.on_game_end(result)
 
         return result
 
@@ -148,6 +158,14 @@ class GameOrchestrator:
                     phase=decision.phase,
                     decision_index=decision.decision_index,
                 )
+            )
+
+        if self.reporter is not None:
+            self.reporter.on_step(
+                decision=decision,
+                action=action,
+                response=response,
+                transition=transition,
             )
 
         return transition

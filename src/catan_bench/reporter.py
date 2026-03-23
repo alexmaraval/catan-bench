@@ -1,11 +1,21 @@
 """Terminal reporter: prints a live human-readable game summary to stderr."""
 from __future__ import annotations
 
+import json
+import shutil
 import sys
+import textwrap
 from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
-    from .schemas import Action, DecisionPoint, GameResult, PlayerResponse, TransitionResult
+    from .schemas import (
+        Action,
+        DecisionPoint,
+        GameResult,
+        PlayerResponse,
+        PromptTrace,
+        TransitionResult,
+    )
 
 # ── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -85,6 +95,123 @@ class TerminalReporter:
 
     def _put(self, text: str) -> None:
         print(text, file=self._file, flush=True)
+
+
+class DebugTerminalReporter(TerminalReporter):
+    """Interactive terminal reporter that prints prompt traces and pauses after each one."""
+
+    def __init__(
+        self,
+        *,
+        file: TextIO | None = None,
+        input_file: TextIO | None = None,
+    ) -> None:
+        super().__init__(file=file)
+        self._input_file = input_file or sys.stdin
+
+    def on_prompt_trace(self, trace: PromptTrace) -> None:
+        header = (
+            f" Debug {trace.player_id} "
+            f"[turn={trace.turn_index} phase={trace.phase} decision={trace.decision_index} "
+            f"stage={trace.stage}] "
+        )
+        bar = _c("─" * 3 + header + "─" * max(0, 24 - len(header)), _DIM, on=self._colour)
+        self._put(f"\n{bar}")
+        self._put(f"  model  {trace.model}")
+        self._put(f"  temperature  {trace.temperature}")
+        for attempt_index, attempt in enumerate(trace.attempts, start=1):
+            self._put(f"  attempt {attempt_index}")
+            self._put_split_columns(
+                left_title="prompt",
+                left_lines=self._render_attempt_messages(attempt.messages),
+                right_title="answer",
+                right_lines=self._render_attempt_response(attempt.response_text, attempt.response),
+            )
+            self._wait_for_next()
+
+    def _wait_for_next(self) -> None:
+        while True:
+            self._put("  Press N then Enter to continue.")
+            raw_value = self._input_file.readline()
+            if raw_value == "":
+                return
+            if raw_value.strip().upper() == "N":
+                return
+            self._put("  Input not recognized. Use N to continue.")
+
+    def _put_split_columns(
+        self,
+        *,
+        left_title: str,
+        left_lines: list[str],
+        right_title: str,
+        right_lines: list[str],
+    ) -> None:
+        total_width = self._available_width()
+        gutter = "   |   "
+        column_width = max(24, (total_width - len(gutter) - 2) // 2)
+        self._put(
+            f"  {left_title.upper():<{column_width}}{gutter}{right_title.upper():<{column_width}}"
+        )
+        self._put(
+            f"  {'-' * column_width}{gutter}{'-' * column_width}"
+        )
+        wrapped_left = self._wrap_lines(left_lines, width=column_width)
+        wrapped_right = self._wrap_lines(right_lines, width=column_width)
+        row_count = max(len(wrapped_left), len(wrapped_right))
+        for row_index in range(row_count):
+            left = wrapped_left[row_index] if row_index < len(wrapped_left) else ""
+            right = wrapped_right[row_index] if row_index < len(wrapped_right) else ""
+            self._put(f"  {left:<{column_width}}{gutter}{right:<{column_width}}")
+
+    def _available_width(self) -> int:
+        if getattr(self._file, "isatty", lambda: False)():
+            return max(72, shutil.get_terminal_size(fallback=(120, 24)).columns)
+        return 120
+
+    @staticmethod
+    def _render_attempt_messages(messages: tuple[dict[str, object], ...]) -> list[str]:
+        rendered: list[str] = []
+        for message in messages:
+            role = str(message.get("role", "unknown"))
+            content = message.get("content")
+            rendered.append(f"[{role}]")
+            if isinstance(content, str):
+                rendered.extend(content.splitlines() or [""])
+            else:
+                rendered.extend(json.dumps(content, indent=2, sort_keys=True).splitlines())
+            rendered.append("")
+        if rendered and rendered[-1] == "":
+            rendered.pop()
+        return rendered
+
+    @staticmethod
+    def _render_attempt_response(
+        response_text: str | None, parsed_response: dict[str, object]
+    ) -> list[str]:
+        if response_text is not None:
+            return response_text.splitlines() or [""]
+        return json.dumps(parsed_response, indent=2, sort_keys=True).splitlines()
+
+    @staticmethod
+    def _wrap_lines(lines: list[str], *, width: int) -> list[str]:
+        wrapped: list[str] = []
+        for line in lines:
+            if not line:
+                wrapped.append("")
+                continue
+            wrapped.extend(
+                textwrap.wrap(
+                    line,
+                    width=width,
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+                or [""]
+            )
+        return wrapped
 
 
 # ── Event description ─────────────────────────────────────────────────────────

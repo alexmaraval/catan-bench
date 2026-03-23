@@ -543,12 +543,16 @@ class TransitionResult:
 class PromptTraceAttempt:
     messages: tuple[dict[str, JsonValue], ...]
     response: dict[str, JsonValue]
+    response_text: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
+        data: dict[str, JsonValue] = {
             "messages": [dict(message) for message in self.messages],
             "response": self.response,
         }
+        if self.response_text is not None:
+            data["response_text"] = self.response_text
+        return data
 
 
 @dataclass(frozen=True, slots=True)

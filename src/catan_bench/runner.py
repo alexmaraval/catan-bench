@@ -32,7 +32,7 @@ from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
-from .reporter import TerminalReporter
+from .reporter import DebugTerminalReporter, TerminalReporter
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -87,7 +87,10 @@ def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | Non
 
 
 def run_from_config_files(
-    *, game_config_path: str | Path, players_config_path: str | Path
+    *,
+    game_config_path: str | Path,
+    players_config_path: str | Path,
+    debug: bool = False,
 ):
     _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
@@ -107,7 +110,7 @@ def run_from_config_files(
         ),
         trading_chat_message_chars=game_config.trading_chat_message_chars,
         trading_chat_history_limit=game_config.trading_chat_history_limit,
-        reporter=TerminalReporter(),
+        reporter=DebugTerminalReporter() if debug else TerminalReporter(),
     )
     return orchestrator.run()
 
@@ -137,11 +140,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--game", required=True, help="Path to game TOML config.")
     parser.add_argument("--players", required=True, help="Path to player TOML config.")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print each player prompt/answer and pause for N before continuing.",
+    )
     args = parser.parse_args(argv)
 
     result = run_from_config_files(
         game_config_path=args.game,
         players_config_path=args.players,
+        debug=args.debug,
     )
     print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     return 0

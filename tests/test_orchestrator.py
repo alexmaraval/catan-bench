@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ from catan_bench import (
     TradeChatSelectionResponse,
     TransitionResult,
 )
+from catan_bench.reporter import DebugTerminalReporter
 
 
 class MockTradeEngine:
@@ -703,7 +705,58 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(act_trace["player_id"], "RED")
             self.assertEqual(act_trace["model"], "fake-model")
             self.assertEqual(act_trace["attempts"][0]["response"]["action_index"], 0)
+            self.assertIn("response_text", act_trace["attempts"][0])
             self.assertIn("legal_actions", act_trace["attempts"][0]["messages"][1]["content"])
+
+    def test_orchestrator_streams_prompt_traces_to_debug_reporter(self) -> None:
+        output = io.StringIO()
+        debug_input = io.StringIO("n\nn\nn\n")
+
+        orchestrator = GameOrchestrator(
+            MockTradeEngine(),
+            players={
+                "RED": LLMPlayer(
+                    client=FakeLLMClient(
+                        [
+                            {"private_memory": {"plan": "Trade wood into brick."}},
+                            {
+                                "action_index": 0,
+                                "private_reasoning": "Offer wood to unlock road tempo.",
+                            },
+                            {"private_memory": {"plan": "BLUE accepted wood-for-brick."}},
+                        ]
+                    ),
+                    model="fake-model",
+                    temperature=0.1,
+                ),
+                "BLUE": ScriptedPlayer(
+                    [
+                        PlayerResponse(
+                            action=Action(
+                                "ACCEPT_TRADE",
+                                payload={
+                                    "from": "RED",
+                                    "give": {"BRICK": 1},
+                                    "want": {"WOOD": 1},
+                                },
+                            )
+                        )
+                    ]
+                ),
+            },
+            reporter=DebugTerminalReporter(file=output, input_file=debug_input),
+        )
+
+        orchestrator.step()
+
+        rendered = output.getvalue()
+        self.assertIn("stage=recall", rendered)
+        self.assertIn("stage=act", rendered)
+        self.assertIn("stage=reflect", rendered)
+        self.assertIn('"action_index": 0', rendered)
+        self.assertIn("PROMPT", rendered)
+        self.assertIn("ANSWER", rendered)
+        self.assertIn("Press N then Enter to continue.", rendered)
 
     def test_orchestrator_runs_recall_and_reflect_memory_flow(self) -> None:
         red_player = PhasedScriptedPlayer(

@@ -974,6 +974,7 @@ class GameOrchestrator:
         if callable(take_prompt_traces):
             for prompt_trace in take_prompt_traces():
                 self.prompt_trace_store.append(prompt_trace)
+                self._report_prompt_trace(prompt_trace)
             return
 
         take_last_prompt_trace = getattr(player, "take_last_prompt_trace", None)
@@ -983,3 +984,11 @@ class GameOrchestrator:
         if prompt_trace is None:
             return
         self.prompt_trace_store.append(prompt_trace)
+        self._report_prompt_trace(prompt_trace)
+
+    def _report_prompt_trace(self, prompt_trace) -> None:
+        if self.reporter is None:
+            return
+        on_prompt_trace = getattr(self.reporter, "on_prompt_trace", None)
+        if callable(on_prompt_trace):
+            on_prompt_trace(prompt_trace)

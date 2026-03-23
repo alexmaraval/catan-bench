@@ -8,7 +8,8 @@ from pathlib import Path
 
 from catan_bench import GameResult
 from catan_bench.config import load_game_config, load_player_configs
-from catan_bench.runner import _find_dotenv, build_players, run_from_config_files
+from catan_bench.reporter import DebugTerminalReporter
+from catan_bench.runner import _find_dotenv, build_players, main, run_from_config_files
 
 
 class _StubEngine:
@@ -112,6 +113,64 @@ class ConfigAndRunnerTests(unittest.TestCase):
             self.assertEqual(result.winner_ids, ("RED",))
             run_mock.assert_called_once()
             self.assertIsInstance(load_game_config(game_toml).run_dir, Path)
+
+    def test_runner_uses_debug_reporter_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            game_toml.write_text("[game]\nengine = \"catanatron\"\n", encoding="utf-8")
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    "id = \"RED\"\n"
+                    "type = \"random\"\n\n"
+                    "[[players]]\n"
+                    "id = \"BLUE\"\n"
+                    "type = \"random\"\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
+                with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
+                    orchestrator_cls.return_value.run.return_value = GameResult(
+                        game_id="mock-game",
+                        winner_ids=("RED",),
+                        total_decisions=1,
+                        public_event_count=0,
+                        private_event_count=0,
+                        memory_writes=0,
+                        metadata={},
+                    )
+                    run_from_config_files(
+                        game_config_path=game_toml,
+                        players_config_path=players_toml,
+                        debug=True,
+                    )
+
+            reporter = orchestrator_cls.call_args.kwargs["reporter"]
+            self.assertIsInstance(reporter, DebugTerminalReporter)
+
+    def test_main_parses_debug_flag(self) -> None:
+        with patch("catan_bench.runner.run_from_config_files") as run_mock:
+            run_mock.return_value = GameResult(
+                game_id="mock-game",
+                winner_ids=("RED",),
+                total_decisions=1,
+                public_event_count=0,
+                private_event_count=0,
+                memory_writes=0,
+                metadata={},
+            )
+
+            exit_code = main(["--game", "game.toml", "--players", "players.toml", "--debug"])
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            game_config_path="game.toml",
+            players_config_path="players.toml",
+            debug=True,
+        )
 
     def test_load_llm_player_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

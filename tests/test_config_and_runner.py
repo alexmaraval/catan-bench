@@ -22,8 +22,31 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(game_config.engine, "catanatron")
         self.assertEqual(game_config.seed, 12)
+        self.assertFalse(game_config.trading_chat_enabled)
         self.assertEqual(len(player_configs), 4)
         self.assertEqual(player_configs[0].id, "RED")
+
+    def test_load_game_config_with_trading_chat_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    "engine = \"catanatron\"\n"
+                    "trading_chat_enabled = true\n"
+                    "trading_chat_max_failed_attempts_per_turn = 2\n"
+                    "trading_chat_message_chars = 90\n"
+                    "trading_chat_history_limit = 6\n"
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_game_config(game_toml)
+
+            self.assertTrue(config.trading_chat_enabled)
+            self.assertEqual(config.trading_chat_max_failed_attempts_per_turn, 2)
+            self.assertEqual(config.trading_chat_message_chars, 90)
+            self.assertEqual(config.trading_chat_history_limit, 6)
 
     def test_build_players_from_config(self) -> None:
         player_configs = load_player_configs("configs/openai-players.toml")

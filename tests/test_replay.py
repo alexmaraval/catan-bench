@@ -252,6 +252,83 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(timeline[1].speaker_type, "player")
             self.assertEqual(timeline[1].body, "Offer 1 sheep for 1 ore.")
 
+    def test_build_replay_timeline_formats_trade_chat_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            self._write_json(
+                run_dir / "metadata.json",
+                {
+                    "game_id": "chat-game",
+                    "player_ids": ["RED", "WHITE", "ORANGE"],
+                    "player_adapter_types": {
+                        "RED": "LLMPlayer",
+                        "WHITE": "LLMPlayer",
+                        "ORANGE": "LLMPlayer",
+                    },
+                },
+            )
+            self._write_jsonl(
+                run_dir / "public_history.jsonl",
+                [
+                    {
+                        "kind": "trade_chat_opened",
+                        "payload": {
+                            "owner_player_id": "RED",
+                            "requested_resources": {"WOOD": 1},
+                            "message": "I need 1 wood. What is your market?",
+                        },
+                        "turn_index": 3,
+                        "phase": "play_turn",
+                        "decision_index": 8,
+                        "actor_player_id": "RED",
+                    },
+                    {
+                        "kind": "trade_chat_message",
+                        "payload": {
+                            "owner_player_id": "RED",
+                            "speaker_player_id": "ORANGE",
+                            "message": "I can do 1 wood for 1 sheep.",
+                            "offer": {"SHEEP": 1},
+                            "request": {"WOOD": 1},
+                        },
+                        "turn_index": 3,
+                        "phase": "play_turn",
+                        "decision_index": 8,
+                        "actor_player_id": "ORANGE",
+                    },
+                    {
+                        "kind": "trade_chat_quote_selected",
+                        "payload": {
+                            "owner_player_id": "RED",
+                            "selected_player_id": "ORANGE",
+                            "offer": {"SHEEP": 1},
+                            "request": {"WOOD": 1},
+                        },
+                        "turn_index": 3,
+                        "phase": "play_turn",
+                        "decision_index": 8,
+                        "actor_player_id": "RED",
+                    },
+                ],
+            )
+            self._write_json(
+                run_dir / "result.json",
+                {
+                    "game_id": "chat-game",
+                    "winner_ids": ["RED"],
+                    "total_decisions": 9,
+                    "metadata": {"num_turns": 3},
+                },
+            )
+
+            timeline = build_replay_timeline(run_dir)
+
+            self.assertEqual(timeline[0].speaker_type, "event")
+            self.assertIn("opened a trade chat", timeline[0].body)
+            self.assertEqual(timeline[1].speaker_id, "ORANGE")
+            self.assertIn("I can do 1 wood for 1 sheep.", timeline[1].body)
+            self.assertIn("selected ORANGE's quote", timeline[2].body)
+
     def test_export_replay_html_creates_transcript_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             orchestrator = GameOrchestrator(

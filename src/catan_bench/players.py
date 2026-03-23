@@ -18,6 +18,10 @@ from .schemas import (
     PromptTraceAttempt,
     RecallObservation,
     ReflectionObservation,
+    TradeChatObservation,
+    TradeChatOpenResponse,
+    TradeChatReplyResponse,
+    TradeChatSelectionResponse,
 )
 
 
@@ -279,6 +283,68 @@ class LLMPlayer:
         )
         return response
 
+    def open_trade_chat(self, observation: TradeChatObservation) -> TradeChatOpenResponse:
+        trace_attempts: list[PromptTraceAttempt] = []
+        messages = self._messages_for_trade_chat_open(observation)
+        response_payload = self._complete_and_trace(
+            messages=messages,
+            trace_attempts=trace_attempts,
+        )
+        response = self._trade_chat_open_response_from_payload(response_payload)
+        self._prompt_traces.append(
+            self._prompt_trace_for(
+                player_id=observation.player_id,
+                turn_index=observation.turn_index,
+                phase=observation.phase,
+                decision_index=observation.decision_index,
+                stage="trade_chat_open",
+                attempts=trace_attempts,
+            )
+        )
+        return response
+
+    def respond_trade_chat(self, observation: TradeChatObservation) -> TradeChatReplyResponse:
+        trace_attempts: list[PromptTraceAttempt] = []
+        messages = self._messages_for_trade_chat_reply(observation)
+        response_payload = self._complete_and_trace(
+            messages=messages,
+            trace_attempts=trace_attempts,
+        )
+        response = self._trade_chat_reply_response_from_payload(response_payload)
+        self._prompt_traces.append(
+            self._prompt_trace_for(
+                player_id=observation.player_id,
+                turn_index=observation.turn_index,
+                phase=observation.phase,
+                decision_index=observation.decision_index,
+                stage="trade_chat_reply",
+                attempts=trace_attempts,
+            )
+        )
+        return response
+
+    def select_trade_chat_offer(
+        self, observation: TradeChatObservation
+    ) -> TradeChatSelectionResponse:
+        trace_attempts: list[PromptTraceAttempt] = []
+        messages = self._messages_for_trade_chat_select(observation)
+        response_payload = self._complete_and_trace(
+            messages=messages,
+            trace_attempts=trace_attempts,
+        )
+        response = self._trade_chat_selection_response_from_payload(response_payload)
+        self._prompt_traces.append(
+            self._prompt_trace_for(
+                player_id=observation.player_id,
+                turn_index=observation.turn_index,
+                phase=observation.phase,
+                decision_index=observation.decision_index,
+                stage="trade_chat_select",
+                attempts=trace_attempts,
+            )
+        )
+        return response
+
     def take_last_prompt_trace(self) -> PromptTrace | None:
         if not self._prompt_traces:
             return None
@@ -387,6 +453,8 @@ class LLMPlayer:
             "context_window": {
                 "compact_retry": compact,
             },
+            "recent_public_events": [event.to_dict() for event in observation.recent_public_events],
+            "recent_private_events": [event.to_dict() for event in observation.recent_private_events],
             "legal_actions": indexed_legal_actions,
             "response_contract": {
                 "action_index": "preferred integer index into legal_actions",
@@ -398,6 +466,134 @@ class LLMPlayer:
                     "required concise private explanation under 30 words; kept in your private "
                     "history"
                 ),
+            },
+        }
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, sort_keys=True)},
+        ]
+
+    def _messages_for_trade_chat_open(
+        self, observation: TradeChatObservation
+    ) -> list[dict[str, object]]:
+        system_prompt = "\n\n".join(
+            part
+            for part in (
+                observation.game_rules,
+                (
+                    "Public negotiation stage. You are the active player and may choose whether "
+                    "to open a public trade room for one bilateral trade attempt. Return strict "
+                    "JSON with keys `open_chat`, `message`, `requested_resources`, and optional "
+                    "`private_reasoning`. If you do not want to trade now, return "
+                    "`{\"open_chat\": false}`. If you open the room, keep `message` short and "
+                    "public, and set `requested_resources` to the exact resources you want to "
+                    "receive from another player."
+                ),
+            )
+            if part
+        )
+        user_payload = {
+            "player_id": observation.player_id,
+            "owner_player_id": observation.owner_player_id,
+            "turn_index": observation.turn_index,
+            "phase": observation.phase,
+            "decision_index": observation.decision_index,
+            "attempt_index": observation.attempt_index,
+            "public_state": observation.public_state,
+            "private_state": observation.private_state,
+            "private_memory": self._memory_content(observation.memory),
+            "other_player_ids": list(observation.other_player_ids),
+            "transcript": [event.to_dict() for event in observation.transcript],
+            "message_char_limit": observation.message_char_limit,
+            "response_contract": {
+                "open_chat": "boolean",
+                "message": "required short public request if open_chat is true",
+                "requested_resources": "required resource-count map if open_chat is true",
+                "private_reasoning": "optional concise private summary under 30 words",
+            },
+        }
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, sort_keys=True)},
+        ]
+
+    def _messages_for_trade_chat_reply(
+        self, observation: TradeChatObservation
+    ) -> list[dict[str, object]]:
+        system_prompt = "\n\n".join(
+            part
+            for part in (
+                observation.game_rules,
+                (
+                    "Public negotiation stage. The owner has requested a bilateral trade. "
+                    "Return strict JSON with keys `message`, `owner_gives`, `owner_gets`, and "
+                    "optional `private_reasoning`. To decline, return empty resource maps and an "
+                    "optional short message. Any non-empty quote must be bilateral with the "
+                    "owner only, where `owner_gives` are resources the owner pays and "
+                    "`owner_gets` are resources you give the owner."
+                ),
+            )
+            if part
+        )
+        user_payload = {
+            "player_id": observation.player_id,
+            "owner_player_id": observation.owner_player_id,
+            "turn_index": observation.turn_index,
+            "phase": observation.phase,
+            "decision_index": observation.decision_index,
+            "attempt_index": observation.attempt_index,
+            "public_state": observation.public_state,
+            "private_state": observation.private_state,
+            "private_memory": self._memory_content(observation.memory),
+            "requested_resources": observation.requested_resources,
+            "transcript": [event.to_dict() for event in observation.transcript],
+            "message_char_limit": observation.message_char_limit,
+            "response_contract": {
+                "message": "optional short public quote or decline",
+                "owner_gives": "resource-count map the owner would pay",
+                "owner_gets": "resource-count map the owner would receive",
+                "private_reasoning": "optional concise private summary under 30 words",
+            },
+        }
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, sort_keys=True)},
+        ]
+
+    def _messages_for_trade_chat_select(
+        self, observation: TradeChatObservation
+    ) -> list[dict[str, object]]:
+        system_prompt = "\n\n".join(
+            part
+            for part in (
+                observation.game_rules,
+                (
+                    "Public negotiation stage. Review the quotes and select exactly one player "
+                    "to trade with, or choose no deal. Return strict JSON with keys "
+                    "`selected_player_id`, `message`, and optional `private_reasoning`. Use "
+                    "null for `selected_player_id` if no quote is acceptable."
+                ),
+            )
+            if part
+        )
+        user_payload = {
+            "player_id": observation.player_id,
+            "owner_player_id": observation.owner_player_id,
+            "turn_index": observation.turn_index,
+            "phase": observation.phase,
+            "decision_index": observation.decision_index,
+            "attempt_index": observation.attempt_index,
+            "public_state": observation.public_state,
+            "private_state": observation.private_state,
+            "private_memory": self._memory_content(observation.memory),
+            "requested_resources": observation.requested_resources,
+            "quotes": [quote.to_dict() for quote in observation.quotes],
+            "transcript": [event.to_dict() for event in observation.transcript],
+            "message_char_limit": observation.message_char_limit,
+            "response_contract": {
+                "selected_player_id": "player id from the provided quotes, or null for no deal",
+                "message": "optional short public selection message",
+                "private_reasoning": "optional concise private summary under 30 words",
             },
         }
         return [
@@ -484,6 +680,59 @@ class LLMPlayer:
         reasoning = self._coerce_reasoning(response_payload)
         return PlayerResponse(action=action, reasoning=reasoning)
 
+    def _trade_chat_open_response_from_payload(
+        self, response_payload: dict[str, object]
+    ) -> TradeChatOpenResponse:
+        open_chat = bool(response_payload.get("open_chat", False))
+        message = self._coerce_public_message(response_payload.get("message"))
+        requested_resources = self._coerce_resource_map(
+            response_payload.get("requested_resources")
+            or response_payload.get("request")
+            or response_payload.get("owner_gets")
+        )
+        if not open_chat or not requested_resources:
+            return TradeChatOpenResponse(open_chat=False, reasoning=self._coerce_reasoning(response_payload))
+        return TradeChatOpenResponse(
+            open_chat=True,
+            message=message,
+            requested_resources=requested_resources,
+            reasoning=self._coerce_reasoning(response_payload),
+        )
+
+    def _trade_chat_reply_response_from_payload(
+        self, response_payload: dict[str, object]
+    ) -> TradeChatReplyResponse:
+        return TradeChatReplyResponse(
+            message=self._coerce_public_message(response_payload.get("message")),
+            owner_gives=self._coerce_resource_map(
+                response_payload.get("owner_gives")
+                or response_payload.get("offer")
+                or response_payload.get("give")
+            ),
+            owner_gets=self._coerce_resource_map(
+                response_payload.get("owner_gets")
+                or response_payload.get("request")
+                or response_payload.get("want")
+            ),
+            reasoning=self._coerce_reasoning(response_payload),
+        )
+
+    def _trade_chat_selection_response_from_payload(
+        self, response_payload: dict[str, object]
+    ) -> TradeChatSelectionResponse:
+        selected_player_id = response_payload.get("selected_player_id")
+        if not isinstance(selected_player_id, str):
+            selected_player_id = response_payload.get("player_id")
+        if isinstance(selected_player_id, str):
+            selected_player_id = selected_player_id.upper()
+        else:
+            selected_player_id = None
+        return TradeChatSelectionResponse(
+            selected_player_id=selected_player_id,
+            message=self._coerce_public_message(response_payload.get("message")),
+            reasoning=self._coerce_reasoning(response_payload),
+        )
+
     @staticmethod
     def _action_from_payload(
         observation: Observation, response_payload: dict[str, object]
@@ -569,6 +818,32 @@ class LLMPlayer:
         return None
 
     @staticmethod
+    def _coerce_public_message(value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise RuntimeError("Public chat message fields must be strings when present.")
+        stripped = value.strip()
+        return stripped or None
+
+    @staticmethod
+    def _coerce_resource_map(value: object) -> dict[str, JsonValue]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise RuntimeError("Resource maps must decode to JSON objects.")
+        result: dict[str, JsonValue] = {}
+        for resource, amount in value.items():
+            if not isinstance(resource, str):
+                raise RuntimeError("Resource map keys must be strings.")
+            if not isinstance(amount, int):
+                raise RuntimeError("Resource map values must be integers.")
+            if amount <= 0:
+                continue
+            result[resource] = amount
+        return result
+
+    @staticmethod
     def _is_legal_response_action(
         action: Action, legal_actions: tuple[Action, ...]
     ) -> bool:
@@ -647,11 +922,33 @@ class LLMPlayer:
             top_p=self.top_p,
             reasoning_enabled=self.reasoning_enabled,
         )
-        response_payload = self._extract_response_json(completion)
+        raw_response_text = self._extract_response_text(completion)
+        try:
+            response_payload = self._parse_response_json(
+                raw_response_text=raw_response_text,
+                completion=completion,
+            )
+        except RuntimeError as exc:
+            trace_attempts.append(
+                PromptTraceAttempt(
+                    messages=tuple(self._json_safe_message(message) for message in messages),
+                    response=self._json_safe_object(
+                        {
+                            "error": {
+                                "type": "invalid_response",
+                                "message": str(exc),
+                            }
+                        }
+                    ),
+                    response_text=raw_response_text,
+                )
+            )
+            raise
         trace_attempts.append(
             PromptTraceAttempt(
                 messages=tuple(self._json_safe_message(message) for message in messages),
                 response=self._json_safe_object(response_payload),
+                response_text=raw_response_text,
             )
         )
         return response_payload
@@ -675,6 +972,7 @@ class LLMPlayer:
                         }
                     }
                 ),
+                response_text=None,
             )
         )
 
@@ -711,7 +1009,7 @@ class LLMPlayer:
         return safe_payload
 
     @staticmethod
-    def _extract_response_json(completion: dict[str, object]) -> dict[str, object]:
+    def _extract_response_text(completion: dict[str, object]) -> str:
         choices = completion.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("LLM completion did not include any choices.")
@@ -724,10 +1022,20 @@ class LLMPlayer:
         content = message.get("content")
         if not isinstance(content, str):
             raise RuntimeError("LLM completion message content must be a string.")
+        return content
+
+    @staticmethod
+    def _parse_response_json(
+        *, raw_response_text: str, completion: dict[str, object]
+    ) -> dict[str, object]:
+        choices = completion.get("choices")
+        first_choice = choices[0] if isinstance(choices, list) and choices else None
+        message = first_choice.get("message") if isinstance(first_choice, dict) else None
+        content = raw_response_text
         stripped_content = LLMPlayer._strip_markdown_fences(content)
         if not stripped_content:
-            reasoning = message.get("reasoning")
-            finish_reason = first_choice.get("finish_reason")
+            reasoning = message.get("reasoning") if isinstance(message, dict) else None
+            finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
             if isinstance(reasoning, str) and reasoning.strip():
                 raise RuntimeError(
                     "LLM completion did not include JSON content. The provider returned "

@@ -21,6 +21,11 @@ EVENT_KIND_TITLES = {
     "trade_rejected": "Trade Rejected",
     "trade_confirmed": "Trade Confirmed",
     "trade_cancelled": "Trade Cancelled",
+    "trade_chat_opened": "Trade Chat Opened",
+    "trade_chat_message": "Trade Chat",
+    "trade_chat_quote_selected": "Trade Quote Selected",
+    "trade_chat_no_deal": "Trade Chat No Deal",
+    "trade_chat_closed": "Trade Chat Closed",
     "turn_ended": "Turn Ended",
     "development_card_played": "Development Card Played",
     "action_taken": "Action",
@@ -30,7 +35,7 @@ EVENT_KIND_TITLES = {
     "private_state_changed": "Private State Changed",
     "memory_note": "Memory Note",
 }
-SYSTEM_EVENT_KINDS = {"trade_confirmed"}
+SYSTEM_EVENT_KINDS = {"trade_confirmed", "trade_chat_opened", "trade_chat_no_deal", "trade_chat_closed"}
 SPECIAL_EVENT_KINDS = {
     "dice_rolled",
     "robber_moved",
@@ -418,6 +423,41 @@ def _format_public_event_body(
     if kind == "trade_cancelled":
         offering_player = _as_optional_str(payload.get("offering_player_id")) or actor_player_id
         return f"{offering_player} cancelled the current trade offer."
+    if kind == "trade_chat_opened":
+        owner_player_id = _as_optional_str(payload.get("owner_player_id")) or actor_player_id
+        requested = _format_resource_map(_as_dict(payload.get("requested_resources")))
+        message = _as_optional_str(payload.get("message"))
+        if message:
+            return f"{owner_player_id} opened a trade chat for {requested}: {message}"
+        return f"{owner_player_id} opened a trade chat for {requested}."
+    if kind == "trade_chat_message":
+        message = _as_optional_str(payload.get("message"))
+        offer = _as_dict(payload.get("offer"))
+        request = _as_dict(payload.get("request"))
+        if offer and request and message:
+            return f"{message} Offer: {_format_resource_map(offer)} for {_format_resource_map(request)}."
+        if offer and request:
+            return (
+                f"Quoted {_format_resource_map(offer)} for {_format_resource_map(request)}."
+            )
+        if message:
+            return message
+        return "Spoke in trade chat."
+    if kind == "trade_chat_quote_selected":
+        owner_player_id = _as_optional_str(payload.get("owner_player_id")) or actor_player_id
+        selected_player_id = _as_optional_str(payload.get("selected_player_id"))
+        offer = _format_resource_map(_as_dict(payload.get("offer")))
+        request = _format_resource_map(_as_dict(payload.get("request")))
+        return f"{owner_player_id} selected {selected_player_id}'s quote: {offer} for {request}."
+    if kind == "trade_chat_no_deal":
+        owner_player_id = _as_optional_str(payload.get("owner_player_id")) or actor_player_id
+        message = _as_optional_str(payload.get("message"))
+        if message:
+            return f"{owner_player_id} passed on all quotes: {message}"
+        return f"{owner_player_id} passed on all quotes."
+    if kind == "trade_chat_closed":
+        owner_player_id = _as_optional_str(payload.get("owner_player_id")) or actor_player_id
+        return f"{owner_player_id}'s trade chat closed."
     if kind == "dice_rolled":
         result = payload.get("result")
         if isinstance(result, (int, float)):

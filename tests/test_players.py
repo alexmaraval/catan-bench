@@ -11,6 +11,8 @@ from catan_bench import (
     Observation,
     RecallObservation,
     ReflectionObservation,
+    TradeChatObservation,
+    TradeChatQuote,
 )
 from catan_bench.llm import LLMRequestTooLargeError
 
@@ -191,6 +193,15 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIsNotNone(prompt_trace)
         assert prompt_trace is not None
         self.assertEqual(prompt_trace.stage, "act")
+        self.assertEqual(
+            prompt_trace.attempts[0].response_text,
+            json.dumps(
+                {
+                    "action_index": 0,
+                    "private_reasoning": "Trading for brick unlocks a road now.",
+                }
+            ),
+        )
 
     def test_llm_player_repairs_one_illegal_action_attempt(self) -> None:
         client = FakeLLMClient(
@@ -610,6 +621,137 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIsNotNone(prompt_trace)
         assert prompt_trace is not None
         self.assertEqual(prompt_trace.stage, "reflect")
+
+    def test_llm_player_open_trade_chat_returns_request(self) -> None:
+        client = FakeLLMClient(
+            {
+                "open_chat": True,
+                "message": "I am looking for 1 wood. What is your market?",
+                "requested_resources": {"WOOD": 1},
+                "private_reasoning": "Need wood to unlock the road line.",
+            }
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        response = player.open_trade_chat(
+            TradeChatObservation(
+                game_id="game-1",
+                player_id="RED",
+                owner_player_id="RED",
+                turn_index=5,
+                phase="play_turn",
+                decision_index=9,
+                stage="open",
+                attempt_index=1,
+                public_state={"scores": {"RED": 3, "WHITE": 2, "ORANGE": 2}},
+                private_state={"resources": {"SHEEP": 2}},
+                other_player_ids=("WHITE", "ORANGE"),
+                message_char_limit=120,
+                memory=MemoryEntry(
+                    player_id="RED",
+                    content={"plan": "Buy the missing wood if needed"},
+                    turn_index=4,
+                    phase="play_turn",
+                    decision_index=7,
+                ),
+            )
+        )
+
+        prompt_trace = player.take_last_prompt_trace()
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
+
+        self.assertTrue(response.open_chat)
+        self.assertEqual(response.requested_resources, {"WOOD": 1})
+        self.assertEqual(response.message, "I am looking for 1 wood. What is your market?")
+        self.assertEqual(payload["other_player_ids"], ["WHITE", "ORANGE"])
+        self.assertEqual(payload["private_memory"], {"plan": "Buy the missing wood if needed"})
+        self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.stage, "trade_chat_open")
+
+    def test_llm_player_trade_chat_reply_and_selection_parse_quotes(self) -> None:
+        client = FakeLLMClient(
+            [
+                {
+                    "message": "I can do 1 wood for 1 sheep.",
+                    "owner_gives": {"SHEEP": 1},
+                    "owner_gets": {"WOOD": 1},
+                    "private_reasoning": "Competitive quote.",
+                },
+                {
+                    "selected_player_id": "ORANGE",
+                    "message": "Taking ORANGE's offer.",
+                    "private_reasoning": "Best price on the table.",
+                },
+            ]
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        reply = player.respond_trade_chat(
+            TradeChatObservation(
+                game_id="game-1",
+                player_id="ORANGE",
+                owner_player_id="RED",
+                turn_index=5,
+                phase="play_turn",
+                decision_index=9,
+                stage="reply",
+                attempt_index=1,
+                public_state={},
+                private_state={"resources": {"WOOD": 1}},
+                requested_resources={"WOOD": 1},
+                transcript=(
+                    Event(
+                        kind="trade_chat_message",
+                        payload={"message": "Looking for 1 wood.", "speaker_player_id": "RED"},
+                        turn_index=5,
+                        phase="play_turn",
+                    ),
+                ),
+            )
+        )
+        reply_trace = player.take_last_prompt_trace()
+
+        selection = player.select_trade_chat_offer(
+            TradeChatObservation(
+                game_id="game-1",
+                player_id="RED",
+                owner_player_id="RED",
+                turn_index=5,
+                phase="play_turn",
+                decision_index=9,
+                stage="select",
+                attempt_index=1,
+                public_state={},
+                private_state={"resources": {"SHEEP": 2}},
+                requested_resources={"WOOD": 1},
+                quotes=(
+                    TradeChatQuote(
+                        player_id="WHITE",
+                        message="I can do 1 wood for 2 sheep.",
+                        owner_gives={"SHEEP": 2},
+                        owner_gets={"WOOD": 1},
+                    ),
+                    TradeChatQuote(
+                        player_id="ORANGE",
+                        message="I can do 1 wood for 1 sheep.",
+                        owner_gives={"SHEEP": 1},
+                        owner_gets={"WOOD": 1},
+                    ),
+                ),
+            )
+        )
+        selection_trace = player.take_last_prompt_trace()
+
+        self.assertEqual(reply.owner_gives, {"SHEEP": 1})
+        self.assertEqual(reply.owner_gets, {"WOOD": 1})
+        self.assertEqual(selection.selected_player_id, "ORANGE")
+        self.assertEqual(selection.message, "Taking ORANGE's offer.")
+        self.assertIsNotNone(reply_trace)
+        self.assertIsNotNone(selection_trace)
+        assert reply_trace is not None and selection_trace is not None
+        self.assertEqual(reply_trace.stage, "trade_chat_reply")
+        self.assertEqual(selection_trace.stage, "trade_chat_select")
 
 
 if __name__ == "__main__":

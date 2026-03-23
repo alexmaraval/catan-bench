@@ -12,6 +12,7 @@ src/catan_bench/orchestrator.py
 src/catan_bench/players.py
 src/catan_bench/prompts.py
 src/catan_bench/replay.py
+src/catan_bench/reporter.py
 src/catan_bench/runner.py
 src/catan_bench/schemas.py
 src/catan_bench/storage.py

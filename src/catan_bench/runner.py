@@ -2,17 +2,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Sequence
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency in lean test envs.
+    def load_dotenv(path: str | Path, override: bool = False):  # type: ignore[no-redef]
+        loaded = False
+        env_path = Path(path)
+        if not env_path.is_file():
+            return loaded
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            if override or key not in os.environ:
+                os.environ[key] = value.strip()
+                loaded = True
+        return loaded
 
 from .config import GameConfig, PlayerConfig, load_game_config, load_player_configs
 from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
-from .reporter import TerminalReporter
+from .reporter import DebugTerminalReporter, TerminalReporter
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -67,7 +87,10 @@ def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | Non
 
 
 def run_from_config_files(
-    *, game_config_path: str | Path, players_config_path: str | Path
+    *,
+    game_config_path: str | Path,
+    players_config_path: str | Path,
+    debug: bool = False,
 ):
     _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
@@ -81,7 +104,13 @@ def run_from_config_files(
             recent_event_window=game_config.history_window,
         ),
         run_dir=game_config.run_dir,
-        reporter=TerminalReporter(),
+        trading_chat_enabled=game_config.trading_chat_enabled,
+        trading_chat_max_failed_attempts_per_turn=(
+            game_config.trading_chat_max_failed_attempts_per_turn
+        ),
+        trading_chat_message_chars=game_config.trading_chat_message_chars,
+        trading_chat_history_limit=game_config.trading_chat_history_limit,
+        reporter=DebugTerminalReporter() if debug else TerminalReporter(),
     )
     return orchestrator.run()
 
@@ -111,11 +140,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--game", required=True, help="Path to game TOML config.")
     parser.add_argument("--players", required=True, help="Path to player TOML config.")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print each player prompt/answer and pause for N before continuing.",
+    )
     args = parser.parse_args(argv)
 
     result = run_from_config_files(
         game_config_path=args.game,
         players_config_path=args.players,
+        debug=args.debug,
     )
     print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     return 0

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: catan-bench
-Version: 0.1.0
+Version: 0.2.0
 Summary: Harness for benchmarking LLM players in multi-player Settlers of Catan.
 Author: Alexandre Maraval
 License: MIT License

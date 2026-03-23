@@ -11,6 +11,10 @@ from catan_bench.config import load_game_config, load_player_configs
 from catan_bench.runner import _find_dotenv, build_players, run_from_config_files
 
 
+class _StubEngine:
+    game_id = "mock-game"
+
+
 class ConfigAndRunnerTests(unittest.TestCase):
     def test_load_example_configs(self) -> None:
         game_config = load_game_config("configs/game.toml")
@@ -66,7 +70,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("catan_bench.runner.build_engine", return_value=object()):
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
                 with patch("catan_bench.runner.GameOrchestrator.run") as run_mock:
                     run_mock.return_value = GameResult(
                         game_id="mock-game",
@@ -94,7 +98,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     "[[players]]\n"
                     "id = \"RED\"\n"
                     "type = \"llm\"\n"
-                    "model = \"gpt-4o-mini\"\n\n"
+                    "model = \"gpt-4o-mini\"\n"
+                    "prompt_history_limit = 10\n"
+                    "prompt_memory_limit = 4\n\n"
                     "[[players]]\n"
                     "id = \"BLUE\"\n"
                     "type = \"random\"\n\n"
@@ -107,6 +113,8 @@ class ConfigAndRunnerTests(unittest.TestCase):
             self.assertEqual(configs[0].type, "llm")
             self.assertEqual(configs[0].model, "gpt-4o-mini")
             self.assertEqual(configs[0].api_key_env, "OPENAI_API_KEY")
+            self.assertEqual(configs[0].prompt_history_limit, 10)
+            self.assertEqual(configs[0].prompt_memory_limit, 4)
 
     def test_runner_loads_dotenv_from_config_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -135,7 +143,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             env_file.write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
 
             with patch.dict("os.environ", {}, clear=True):
-                with patch("catan_bench.runner.build_engine", return_value=object()):
+                with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
                     with patch("catan_bench.runner.GameOrchestrator.run") as run_mock:
                         run_mock.return_value = GameResult(
                             game_id="mock-game",
@@ -180,7 +188,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             env_file.write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
 
             with patch.dict("os.environ", {"OPENAI_API_KEY": "from-shell"}, clear=True):
-                with patch("catan_bench.runner.build_engine", return_value=object()):
+                with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
                     with patch("catan_bench.runner.GameOrchestrator.run") as run_mock:
                         run_mock.return_value = GameResult(
                             game_id="mock-game",

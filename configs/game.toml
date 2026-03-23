@@ -4,4 +4,4 @@ seed = 12
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
-run_dir = "runs/llm-test"
+run_dir = "runs/0.2.0/dev/"

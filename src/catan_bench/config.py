@@ -20,11 +20,15 @@ class PlayerConfig:
     id: str
     type: str = "random"
     seed: int | None = None
-    allow_trade_offers: bool = False
     model: str | None = None
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     temperature: float = 0.2
+    top_p: float | None = None
+    reasoning_enabled: bool | None = None
+    prompt_history_limit: int | None = 12
+    prompt_memory_limit: int | None = 8
+    timeout_seconds: float = 60.0
 
 
 def load_game_config(path: str | Path) -> GameConfig:
@@ -85,7 +89,6 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
             )
 
         seed = entry.get("seed")
-        allow_trade_offers = bool(entry.get("allow_trade_offers", False))
         model = entry.get("model")
         if model is not None:
             model = str(model)
@@ -94,16 +97,37 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
         api_base = str(entry.get("api_base", "https://api.openai.com/v1"))
         api_key_env = str(entry.get("api_key_env", "OPENAI_API_KEY"))
         temperature = float(entry.get("temperature", 0.2))
+        top_p = entry.get("top_p")
+        if top_p is not None:
+            top_p = float(top_p)
+        reasoning_enabled = entry.get("reasoning_enabled")
+        if reasoning_enabled is not None:
+            reasoning_enabled = bool(reasoning_enabled)
+        prompt_history_limit = entry.get("prompt_history_limit", 12)
+        if prompt_history_limit is not None:
+            prompt_history_limit = int(prompt_history_limit)
+            if prompt_history_limit < 0:
+                raise ValueError("`prompt_history_limit` must be non-negative when provided.")
+        prompt_memory_limit = entry.get("prompt_memory_limit", 8)
+        if prompt_memory_limit is not None:
+            prompt_memory_limit = int(prompt_memory_limit)
+            if prompt_memory_limit < 0:
+                raise ValueError("`prompt_memory_limit` must be non-negative when provided.")
+        timeout_seconds = float(entry.get("timeout_seconds", 60.0))
         configs.append(
             PlayerConfig(
                 id=player_id,
                 type=player_type,
                 seed=None if seed is None else int(seed),
-                allow_trade_offers=allow_trade_offers,
                 model=model,
                 api_base=api_base,
                 api_key_env=api_key_env,
                 temperature=temperature,
+                top_p=top_p,
+                reasoning_enabled=reasoning_enabled,
+                prompt_history_limit=prompt_history_limit,
+                prompt_memory_limit=prompt_memory_limit,
+                timeout_seconds=timeout_seconds,
             )
         )
 

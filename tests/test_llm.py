@@ -6,7 +6,7 @@ import unittest
 from urllib import error
 from unittest.mock import patch
 
-from catan_bench.llm import OpenAICompatibleChatClient
+from catan_bench.llm import LLMRequestTooLargeError, OpenAICompatibleChatClient
 
 
 class _FakeHTTPResponse:
@@ -89,3 +89,28 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
 
         self.assertEqual(len(attempts), 1)
         self.assertEqual(sleep_mock.call_count, 0)
+
+    def test_complete_raises_specific_error_for_payload_too_large(self) -> None:
+        def fake_urlopen(req, timeout):
+            raise error.HTTPError(
+                req.full_url,
+                413,
+                "Payload Too Large",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"request_too_large"}'),
+            )
+
+        client = OpenAICompatibleChatClient(
+            api_key_env="OPENAI_API_KEY",
+            max_attempts=3,
+            retry_backoff_seconds=0.01,
+        )
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                with self.assertRaises(LLMRequestTooLargeError):
+                    client.complete(
+                        model="fake-model",
+                        messages=[{"role": "user", "content": "{}"}],
+                        temperature=0.1,
+                    )

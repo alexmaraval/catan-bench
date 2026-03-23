@@ -264,16 +264,19 @@ class ReplayTests(unittest.TestCase):
             )
 
             orchestrator.run()
-            output_path = export_replay_html(tmpdir)
+            run_dir = orchestrator.run_dir
+            self.assertIsNotNone(run_dir)
+            assert run_dir is not None
+            output_path = export_replay_html(run_dir)
             html = output_path.read_text(encoding="utf-8")
-            red_private_html = Path(tmpdir, "players", "RED", "replay.html").read_text(
+            red_private_html = Path(run_dir, "players", "RED", "replay.html").read_text(
                 encoding="utf-8"
             )
-            blue_private_html = Path(tmpdir, "players", "BLUE", "replay.html").read_text(
+            blue_private_html = Path(run_dir, "players", "BLUE", "replay.html").read_text(
                 encoding="utf-8"
             )
 
-            self.assertEqual(output_path, Path(tmpdir) / "replay.html")
+            self.assertEqual(output_path, run_dir / "replay.html")
             self.assertIn("mock-game-1", html)
             self.assertIn("RED offered 1 wood for 1 brick.", html)
             self.assertIn("RED Personal View", html)
@@ -384,7 +387,10 @@ class ReplayTests(unittest.TestCase):
             )
 
             orchestrator.run()
-            timeline = build_player_replay_timeline(tmpdir, "BLUE")
+            run_dir = orchestrator.run_dir
+            self.assertIsNotNone(run_dir)
+            assert run_dir is not None
+            timeline = build_player_replay_timeline(run_dir, "BLUE")
 
             self.assertEqual([item.stream for item in timeline], ["public", "private", "public", "public", "private"])
             self.assertEqual(timeline[1].title, "Private Trade Alert")

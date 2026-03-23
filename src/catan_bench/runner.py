@@ -40,24 +40,25 @@ def build_engine(game_config: GameConfig, players: Sequence[PlayerConfig]):
 def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | None = None):
     built_players = {}
     for player_config in players:
-        allow_trade_offers = player_config.allow_trade_offers
         if player_config.type == "random":
             built_players[player_config.id] = RandomLegalPlayer(
                 seed=player_config.seed,
-                allow_trade_offers=allow_trade_offers,
             )
         elif player_config.type == "first_legal":
-            built_players[player_config.id] = FirstLegalPlayer(
-                allow_trade_offers=allow_trade_offers,
-            )
+            built_players[player_config.id] = FirstLegalPlayer()
         elif player_config.type == "llm":
             built_players[player_config.id] = LLMPlayer(
                 client=OpenAICompatibleChatClient(
                     api_base=player_config.api_base,
                     api_key_env=player_config.api_key_env,
+                    timeout_seconds=player_config.timeout_seconds,
                 ),
                 model=player_config.model or "",
                 temperature=player_config.temperature,
+                top_p=player_config.top_p,
+                reasoning_enabled=player_config.reasoning_enabled,
+                prompt_history_limit=player_config.prompt_history_limit,
+                prompt_memory_limit=player_config.prompt_memory_limit,
             )
         else:  # pragma: no cover - validated in config loading.
             raise ValueError(f"Unsupported player type {player_config.type!r}.")

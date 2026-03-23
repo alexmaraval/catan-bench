@@ -6,8 +6,17 @@ import random
 from collections import deque
 from typing import Iterable, Protocol
 
-from .llm import LLMClient
-from .schemas import Action, JsonValue, Observation, PlayerResponse, PromptTrace, PromptTraceAttempt
+from .llm import LLMClient, LLMRequestTooLargeError
+from .schemas import (
+    Action,
+    Event,
+    JsonValue,
+    MemoryEntry,
+    Observation,
+    PlayerResponse,
+    PromptTrace,
+    PromptTraceAttempt,
+)
 
 
 class Player(Protocol):
@@ -50,10 +59,7 @@ def _materialize_default_trade_offer() -> Action:
 class FirstLegalPlayer:
     """Simple deterministic baseline that always picks the first legal action."""
 
-    def __init__(
-        self, *, allow_trade_offers: bool = False, record_observations: bool = False
-    ) -> None:
-        self.allow_trade_offers = allow_trade_offers
+    def __init__(self, *, record_observations: bool = False) -> None:
         self.record_observations = record_observations
         self.observations: list[Observation] = []
 
@@ -64,10 +70,7 @@ class FirstLegalPlayer:
             if not _is_trade_template(action):
                 return PlayerResponse(action=action)
 
-        if self.allow_trade_offers:
-            return PlayerResponse(action=_materialize_default_trade_offer())
-
-        raise RuntimeError("FirstLegalPlayer found no concrete legal actions to take.")
+        return PlayerResponse(action=_materialize_default_trade_offer())
 
 
 class RandomLegalPlayer:
@@ -77,11 +80,9 @@ class RandomLegalPlayer:
         self,
         *,
         seed: int | None = None,
-        allow_trade_offers: bool = False,
         record_observations: bool = False,
     ) -> None:
         self._rng = random.Random(seed)
-        self.allow_trade_offers = allow_trade_offers
         self.record_observations = record_observations
         self.observations: list[Observation] = []
 
@@ -94,10 +95,7 @@ class RandomLegalPlayer:
         if concrete_actions:
             return PlayerResponse(action=self._rng.choice(concrete_actions))
 
-        if self.allow_trade_offers:
-            return PlayerResponse(action=_materialize_default_trade_offer())
-
-        raise RuntimeError("RandomLegalPlayer found no concrete legal actions to sample.")
+        return PlayerResponse(action=_materialize_default_trade_offer())
 
 
 class LLMPlayer:
@@ -109,10 +107,18 @@ class LLMPlayer:
         client: LLMClient,
         model: str,
         temperature: float = 0.2,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
+        prompt_history_limit: int | None = 12,
+        prompt_memory_limit: int | None = 8,
     ) -> None:
         self.client = client
         self.model = model
         self.temperature = temperature
+        self.top_p = top_p
+        self.reasoning_enabled = reasoning_enabled
+        self.prompt_history_limit = prompt_history_limit
+        self.prompt_memory_limit = prompt_memory_limit
         self.observations: list[Observation] = []
         self._last_prompt_trace: PromptTrace | None = None
 
@@ -120,10 +126,28 @@ class LLMPlayer:
         self.observations.append(observation)
         trace_attempts: list[PromptTraceAttempt] = []
         messages = self._messages_for(observation)
-        response_payload = self._complete_and_trace(
-            messages=messages,
-            trace_attempts=trace_attempts,
-        )
+        try:
+            response_payload = self._complete_and_trace(
+                messages=messages,
+                trace_attempts=trace_attempts,
+            )
+        except LLMRequestTooLargeError as exc:
+            self._record_failed_attempt(
+                messages=messages,
+                trace_attempts=trace_attempts,
+                error_type="request_too_large",
+                error_message=str(exc),
+            )
+            messages = self._messages_for(
+                observation,
+                history_limit=self._compact_limit(self.prompt_history_limit, fallback=4),
+                memory_limit=self._compact_limit(self.prompt_memory_limit, fallback=4),
+                compact=True,
+            )
+            response_payload = self._complete_and_trace(
+                messages=messages,
+                trace_attempts=trace_attempts,
+            )
         response = self._response_from_payload(observation, response_payload)
         if self._is_legal_response_action(response.action, observation.legal_actions):
             self._last_prompt_trace = self._prompt_trace_for(
@@ -163,7 +187,18 @@ class LLMPlayer:
         self._last_prompt_trace = None
         return trace
 
-    def _messages_for(self, observation: Observation) -> list[dict[str, object]]:
+    def _messages_for(
+        self,
+        observation: Observation,
+        *,
+        history_limit: int | None = None,
+        memory_limit: int | None = None,
+        compact: bool = False,
+    ) -> list[dict[str, object]]:
+        if history_limit is None:
+            history_limit = self.prompt_history_limit
+        if memory_limit is None:
+            memory_limit = self.prompt_memory_limit
         system_prompt = "\n\n".join(
             part
             for part in (
@@ -176,14 +211,18 @@ class LLMPlayer:
                     "`payload`, but use the exact legal action when you do. If a legal action is "
                     "marked as requiring a concrete payload, do not choose it by `action_index`; "
                     "instead return an `action` object with a concrete payload. `private_reasoning` "
-                    "should contain your full private reasoning for this decision, including how "
-                    "you are refining your strategy; it will be saved only in your private history. "
-                    "`private_memory_write` should be a short distilled note worth keeping for "
-                    "future turns."
+                    "should be a concise private summary under 30 words; do not output long "
+                    "analysis. `private_memory_write` should be null or a short distilled note "
+                    "under 20 words worth keeping for future turns."
                 ),
             )
             if part
         )
+        public_history_source = observation.public_history
+        private_history_source = observation.private_history
+        public_history = self._tail(public_history_source, history_limit)
+        private_history = self._tail(private_history_source, history_limit)
+        private_memory = self._tail(observation.memory, memory_limit)
         indexed_legal_actions = [
             {
                 "index": index,
@@ -201,9 +240,18 @@ class LLMPlayer:
             "decision_prompt": observation.decision_prompt,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
-            "public_history": [event.to_dict() for event in observation.public_history],
-            "private_history": [event.to_dict() for event in observation.private_history],
-            "private_memory": [entry.to_dict() for entry in observation.memory],
+            "public_history": [event.to_dict() for event in public_history],
+            "private_history": [event.to_dict() for event in private_history],
+            "private_memory": [entry.to_dict() for entry in private_memory],
+            "context_window": {
+                "compact_retry": compact,
+                "public_history_available": len(public_history_source),
+                "public_history_included": len(public_history),
+                "private_history_available": len(private_history_source),
+                "private_history_included": len(private_history),
+                "private_memory_available": len(observation.memory),
+                "private_memory_included": len(private_memory),
+            },
             "legal_actions": indexed_legal_actions,
             "response_contract": {
                 "action_index": "preferred integer index into legal_actions",
@@ -212,11 +260,12 @@ class LLMPlayer:
                     "action that needs a concrete payload"
                 ),
                 "private_reasoning": (
-                    "required private explanation of this move and any strategy updates; "
-                    "kept in your private history"
+                    "required concise private explanation under 30 words; kept in your private "
+                    "history"
                 ),
                 "private_memory_write": (
-                    "optional short summary worth remembering on future turns; null if none"
+                    "optional short summary under 20 words worth remembering on future turns; "
+                    "null if none"
                 ),
             },
         }
@@ -224,6 +273,23 @@ class LLMPlayer:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(user_payload, sort_keys=True)},
         ]
+
+    @staticmethod
+    def _tail(
+        items: tuple[Event, ...] | tuple[MemoryEntry, ...],
+        limit: int | None,
+    ) -> tuple[Event, ...] | tuple[MemoryEntry, ...]:
+        if limit is None:
+            return items
+        if limit <= 0:
+            return ()
+        return items[-limit:]
+
+    @staticmethod
+    def _compact_limit(limit: int | None, *, fallback: int) -> int:
+        if limit is None:
+            return fallback
+        return max(1, min(limit, max(1, limit // 2)))
 
     def _response_from_payload(
         self, observation: Observation, response_payload: dict[str, object]
@@ -355,6 +421,8 @@ class LLMPlayer:
             model=self.model,
             temperature=self.temperature,
             messages=messages,
+            top_p=self.top_p,
+            reasoning_enabled=self.reasoning_enabled,
         )
         response_payload = self._extract_response_json(completion)
         trace_attempts.append(
@@ -364,6 +432,28 @@ class LLMPlayer:
             )
         )
         return response_payload
+
+    def _record_failed_attempt(
+        self,
+        *,
+        messages: list[dict[str, object]],
+        trace_attempts: list[PromptTraceAttempt],
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        trace_attempts.append(
+            PromptTraceAttempt(
+                messages=tuple(self._json_safe_message(message) for message in messages),
+                response=self._json_safe_object(
+                    {
+                        "error": {
+                            "type": error_type,
+                            "message": error_message,
+                        }
+                    }
+                ),
+            )
+        )
 
     def _prompt_trace_for(
         self,
@@ -406,7 +496,17 @@ class LLMPlayer:
         content = message.get("content")
         if not isinstance(content, str):
             raise RuntimeError("LLM completion message content must be a string.")
-        parsed = json.loads(LLMPlayer._strip_markdown_fences(content))
+        stripped_content = LLMPlayer._strip_markdown_fences(content)
+        if not stripped_content:
+            reasoning = message.get("reasoning")
+            finish_reason = first_choice.get("finish_reason")
+            if isinstance(reasoning, str) and reasoning.strip():
+                raise RuntimeError(
+                    "LLM completion did not include JSON content. The provider returned "
+                    f"reasoning-only output with finish_reason={finish_reason!r}."
+                )
+            raise RuntimeError("LLM completion message content was empty.")
+        parsed = json.loads(stripped_content)
         if not isinstance(parsed, dict):
             raise RuntimeError("LLM response JSON must decode to an object.")
         return parsed

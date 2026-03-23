@@ -15,8 +15,14 @@ class LLMClient(Protocol):
         model: str,
         messages: list[dict[str, object]],
         temperature: float,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
     ) -> dict[str, object]:
         ...
+
+
+class LLMRequestTooLargeError(RuntimeError):
+    """Raised when the provider rejects a request because the prompt is too large."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +39,8 @@ class OpenAICompatibleChatClient:
         model: str,
         messages: list[dict[str, object]],
         temperature: float,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
     ) -> dict[str, object]:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
@@ -50,6 +58,10 @@ class OpenAICompatibleChatClient:
             "temperature": temperature,
             "response_format": {"type": "json_object"},
         }
+        if top_p is not None:
+            body["top_p"] = top_p
+        if reasoning_enabled is not None:
+            body["reasoning"] = {"enabled": reasoning_enabled}
         endpoint = self.api_base.rstrip("/") + "/chat/completions"
         req = request.Request(
             endpoint,
@@ -57,6 +69,7 @@ class OpenAICompatibleChatClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": "catan-bench/0.2.0",
             },
             method="POST",
         )
@@ -66,6 +79,10 @@ class OpenAICompatibleChatClient:
                     return json.loads(response.read().decode("utf-8"))
             except error.HTTPError as exc:  # pragma: no cover - network dependency.
                 details = exc.read().decode("utf-8", errors="replace")
+                if self._is_request_too_large_error(exc):
+                    raise LLMRequestTooLargeError(
+                        f"LLM request exceeded the provider payload limit: {details}"
+                    ) from exc
                 if self._should_retry_http_error(exc) and attempt_index + 1 < self.max_attempts:
                     time.sleep(self._retry_delay(exc, attempt_index))
                     continue
@@ -93,3 +110,7 @@ class OpenAICompatibleChatClient:
     @staticmethod
     def _should_retry_http_error(exc: error.HTTPError) -> bool:
         return exc.code in {408, 429, 500, 502, 503, 504}
+
+    @staticmethod
+    def _is_request_too_large_error(exc: error.HTTPError) -> bool:
+        return exc.code == 413

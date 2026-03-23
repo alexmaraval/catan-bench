@@ -204,6 +204,8 @@ class FakeLLMClient:
         model: str,
         messages: list[dict[str, object]],
         temperature: float,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
     ) -> dict[str, object]:
         return {
             "choices": [
@@ -313,9 +315,14 @@ class OrchestratorTests(unittest.TestCase):
             )
 
             orchestrator.step()
+            run_dir = orchestrator.run_dir
+            self.assertIsNotNone(run_dir)
+            assert run_dir is not None
+            self.assertEqual(run_dir.parent, Path(tmpdir))
+            self.assertNotEqual(run_dir, Path(tmpdir))
 
             prompt_trace_lines = Path(
-                tmpdir, "players", "RED", "prompt_trace.jsonl"
+                run_dir, "players", "RED", "prompt_trace.jsonl"
             ).read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(prompt_trace_lines), 1)
             prompt_trace = json.loads(prompt_trace_lines[0])
@@ -379,6 +386,11 @@ class OrchestratorTests(unittest.TestCase):
             )
 
             result = orchestrator.run()
+            run_dir = orchestrator.run_dir
+            self.assertIsNotNone(run_dir)
+            assert run_dir is not None
+            self.assertEqual(run_dir.parent, Path(tmpdir))
+            self.assertNotEqual(run_dir, Path(tmpdir))
 
             self.assertEqual(result.game_id, "mock-game-1")
             self.assertEqual(result.winner_ids, ("BLUE",))
@@ -386,6 +398,7 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(result.public_event_count, 3)
             self.assertEqual(result.private_event_count, 5)
             self.assertEqual(result.memory_writes, 2)
+            self.assertEqual(result.metadata["benchmark"]["run_directory"], str(run_dir))
             self.assertEqual(result.metadata["benchmark"]["trade_metrics"]["offers"], 1)
             self.assertEqual(result.metadata["benchmark"]["trade_metrics"]["accepted"], 1)
 
@@ -402,14 +415,14 @@ class OrchestratorTests(unittest.TestCase):
                 blue_observation.recent_private_events[0].kind, "trade_offer_received"
             )
 
-            self.assertTrue(Path(tmpdir, "public_history.jsonl").exists())
-            self.assertTrue(Path(tmpdir, "players", "RED", "memory.jsonl").exists())
-            self.assertTrue(Path(tmpdir, "players", "BLUE", "private_history.jsonl").exists())
-            self.assertTrue(Path(tmpdir, "players", "RED", "prompt_trace.jsonl").exists())
-            self.assertTrue(Path(tmpdir, "result.json").exists())
+            self.assertTrue(Path(run_dir, "public_history.jsonl").exists())
+            self.assertTrue(Path(run_dir, "players", "RED", "memory.jsonl").exists())
+            self.assertTrue(Path(run_dir, "players", "BLUE", "private_history.jsonl").exists())
+            self.assertTrue(Path(run_dir, "players", "RED", "prompt_trace.jsonl").exists())
+            self.assertTrue(Path(run_dir, "result.json").exists())
 
             red_private_history = Path(
-                tmpdir, "players", "RED", "private_history.jsonl"
+                run_dir, "players", "RED", "private_history.jsonl"
             ).read_text(encoding="utf-8")
             self.assertIn('"kind": "player_decision"', red_private_history)
             self.assertIn(
@@ -417,7 +430,7 @@ class OrchestratorTests(unittest.TestCase):
                 red_private_history,
             )
             self.assertEqual(
-                Path(tmpdir, "players", "RED", "prompt_trace.jsonl").read_text(encoding="utf-8"),
+                Path(run_dir, "players", "RED", "prompt_trace.jsonl").read_text(encoding="utf-8"),
                 "",
             )
 

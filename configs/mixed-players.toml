@@ -1,0 +1,49 @@
+# Groq (free tier available, very fast)
+[[players]]
+id = "RED"
+type = "llm"
+model = "qwen/qwen3-32b"
+api_base = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+
+# Together AI
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "moonshotai/Kimi-K2.5"
+api_base = "https://api.together.ai/v1"
+api_key_env = "TOGETHER_API_KEY"
+temperature = 0.6
+top_p = 0.95
+reasoning_enabled = false
+
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "MiniMaxAI/MiniMax-M2.5"
+api_base = "https://api.together.ai/v1"
+api_key_env = "TOGETHER_API_KEY"
+temperature = 0.6
+top_p = 0.95
+reasoning_enabled = false
+
+## Google Gemini
+#[[players]]
+#id = "BLUE"
+#type = "llm"
+#model = "gemini-2.0-flash"
+#api_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
+#api_key_env = "GEMINI_API_KEY"
+
+# Ollama (local, free)
+[[players]]
+#id = "ollama"
+#type = "llm"
+#model = "llama3.2"
+#api_base = "http://localhost:11434/v1"
+#api_key_env = "OPENAI_API_KEY"  # Ollama ignores this, any set var works
+id = "WHITE"
+type = "llm"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"

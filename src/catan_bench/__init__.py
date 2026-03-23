@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 from .config import GameConfig, PlayerConfig, load_game_config, load_player_configs
 from .engine import EngineAdapter
-from .llm import LLMClient, OpenAICompatibleChatClient
+from .llm import LLMClient, LLMRequestTooLargeError, OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator, InvalidActionError, MissingPlayerError
 from .players import FirstLegalPlayer, LLMPlayer, Player, RandomLegalPlayer, ScriptedPlayer
@@ -49,6 +49,7 @@ __all__ = [
     "GameResult",
     "InvalidActionError",
     "LLMClient",
+    "LLMRequestTooLargeError",
     "LLMPlayer",
     "PlayerConfig",
     "MemoryEntry",

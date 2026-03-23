@@ -4,12 +4,17 @@ import json
 import unittest
 
 from catan_bench import Action, Event, LLMPlayer, MemoryEntry, Observation
+from catan_bench.llm import LLMRequestTooLargeError
 
 
 class FakeLLMClient:
     def __init__(
         self,
-        content: dict[str, object] | str | list[dict[str, object] | str],
+        content: (
+            dict[str, object]
+            | str
+            | list[dict[str, object] | str | dict[str, object]]
+        ),
     ) -> None:
         self.content = content
         self.calls: list[dict[str, object]] = []
@@ -20,9 +25,17 @@ class FakeLLMClient:
         model: str,
         messages: list[dict[str, object]],
         temperature: float,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
     ) -> dict[str, object]:
         self.calls.append(
-            {"model": model, "messages": messages, "temperature": temperature}
+            {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "reasoning_enabled": reasoning_enabled,
+            }
         )
         if isinstance(self.content, list):
             if not self.content:
@@ -30,11 +43,49 @@ class FakeLLMClient:
             content = self.content.pop(0)
         else:
             content = self.content
+        if isinstance(content, dict) and "choices" in content:
+            return content
         return {
             "choices": [
                 {
                     "message": {
                         "content": content if isinstance(content, str) else json.dumps(content),
+                    }
+                }
+            ]
+        }
+
+
+class OversizeThenSuccessClient:
+    def __init__(self, success_payload: dict[str, object]) -> None:
+        self.success_payload = success_payload
+        self.calls: list[dict[str, object]] = []
+
+    def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, object]],
+        temperature: float,
+        top_p: float | None = None,
+        reasoning_enabled: bool | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "reasoning_enabled": reasoning_enabled,
+            }
+        )
+        if len(self.calls) == 1:
+            raise LLMRequestTooLargeError("first attempt was too large")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(self.success_payload),
                     }
                 }
             ]
@@ -294,6 +345,178 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(response.action.payload, {"node_id": 10})
         self.assertEqual(response.reasoning, "Second attempt is still illegal.")
         self.assertEqual(response.memory_write, {"plan": "Fallback gracefully if needed."})
+
+    def test_llm_player_passes_optional_sampling_and_reasoning_flags(self) -> None:
+        client = FakeLLMClient({"action_index": 0, "private_reasoning": "Safe opening."})
+        player = LLMPlayer(
+            client=client,
+            model="fake-model",
+            temperature=0.6,
+            top_p=0.95,
+            reasoning_enabled=False,
+        )
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="ORANGE",
+            turn_index=0,
+            phase="build_initial_settlement",
+            decision_index=0,
+            public_state={},
+            private_state={},
+            legal_actions=(Action("END_TURN"),),
+        )
+
+        response = player.respond(observation)
+
+        self.assertEqual(response.action.action_type, "END_TURN")
+        self.assertEqual(client.calls[0]["top_p"], 0.95)
+        self.assertFalse(client.calls[0]["reasoning_enabled"])
+
+    def test_llm_player_raises_clear_error_for_reasoning_only_response(self) -> None:
+        client = FakeLLMClient(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning": "Long hidden analysis with no final answer.",
+                        },
+                        "finish_reason": "length",
+                    }
+                ]
+            }
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="ORANGE",
+            turn_index=0,
+            phase="build_initial_settlement",
+            decision_index=0,
+            public_state={},
+            private_state={},
+            legal_actions=(Action("END_TURN"),),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "reasoning-only output with finish_reason='length'",
+        ):
+            player.respond(observation)
+
+    def test_llm_player_bounds_prompt_history_and_memory(self) -> None:
+        client = FakeLLMClient({"action_index": 0, "private_reasoning": "Take the legal move."})
+        player = LLMPlayer(
+            client=client,
+            model="fake-model",
+            temperature=0.1,
+            prompt_history_limit=2,
+            prompt_memory_limit=1,
+        )
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="RED",
+            turn_index=4,
+            phase="play_turn",
+            decision_index=7,
+            public_state={},
+            private_state={},
+            public_history=tuple(
+                Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
+                for index in range(5)
+            ),
+            private_history=tuple(
+                Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
+                for index in range(4)
+            ),
+            legal_actions=(Action("END_TURN"),),
+            memory=tuple(
+                MemoryEntry(
+                    player_id="RED",
+                    content={"note": f"memory-{index}"},
+                    turn_index=index,
+                    phase="play_turn",
+                    decision_index=index,
+                )
+                for index in range(3)
+            ),
+        )
+
+        player.respond(observation)
+
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
+        self.assertEqual(
+            [event["kind"] for event in payload["public_history"]],
+            ["public-3", "public-4"],
+        )
+        self.assertEqual(
+            [event["kind"] for event in payload["private_history"]],
+            ["private-2", "private-3"],
+        )
+        self.assertEqual(len(payload["private_memory"]), 1)
+        self.assertEqual(payload["private_memory"][0]["content"], {"note": "memory-2"})
+        self.assertEqual(payload["context_window"]["public_history_available"], 5)
+        self.assertEqual(payload["context_window"]["public_history_included"], 2)
+
+    def test_llm_player_retries_with_compact_prompt_after_oversized_request(self) -> None:
+        client = OversizeThenSuccessClient(
+            {"action_index": 0, "private_reasoning": "Compact retry succeeded."}
+        )
+        player = LLMPlayer(
+            client=client,
+            model="fake-model",
+            temperature=0.1,
+            prompt_history_limit=6,
+            prompt_memory_limit=5,
+        )
+
+        observation = Observation(
+            game_id="game-1",
+            player_id="RED",
+            turn_index=6,
+            phase="play_turn",
+            decision_index=11,
+            public_state={},
+            private_state={},
+            public_history=tuple(
+                Event(kind=f"public-{index}", turn_index=index, phase="play_turn")
+                for index in range(8)
+            ),
+            private_history=tuple(
+                Event(kind=f"private-{index}", turn_index=index, phase="play_turn")
+                for index in range(8)
+            ),
+            legal_actions=(Action("END_TURN"),),
+            memory=tuple(
+                MemoryEntry(
+                    player_id="RED",
+                    content={"note": f"memory-{index}"},
+                    turn_index=index,
+                    phase="play_turn",
+                    decision_index=index,
+                )
+                for index in range(7)
+            ),
+        )
+
+        response = player.respond(observation)
+        prompt_trace = player.take_last_prompt_trace()
+
+        self.assertEqual(response.action.action_type, "END_TURN")
+        self.assertEqual(len(client.calls), 2)
+        first_payload = json.loads(client.calls[0]["messages"][1]["content"])
+        second_payload = json.loads(client.calls[1]["messages"][1]["content"])
+        self.assertEqual(first_payload["context_window"]["public_history_included"], 6)
+        self.assertEqual(second_payload["context_window"]["public_history_included"], 3)
+        self.assertEqual(second_payload["context_window"]["private_memory_included"], 2)
+        self.assertTrue(second_payload["context_window"]["compact_retry"])
+        self.assertIsNotNone(prompt_trace)
+        assert prompt_trace is not None
+        self.assertEqual(prompt_trace.attempts[0].response["error"]["type"], "request_too_large")
+        self.assertEqual(prompt_trace.attempts[1].response["action_index"], 0)
 
 
 if __name__ == "__main__":

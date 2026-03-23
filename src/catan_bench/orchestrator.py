@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import re
+import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
 
@@ -24,7 +27,18 @@ class InvalidActionError(ValueError):
     """Raised when a player returns an action that is not currently legal."""
 
 
-logger = logging.getLogger(__name__)
+def _slugify_path_component(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "game"
+
+
+def _resolve_run_dir(base_run_dir: str | Path | None, *, game_id: str) -> Path | None:
+    if base_run_dir is None:
+        return None
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    token = secrets.token_hex(4)
+    run_name = f"{_slugify_path_component(game_id)}-{timestamp}-{token}"
+    return Path(base_run_dir) / run_name
 
 
 class GameOrchestrator:
@@ -43,13 +57,14 @@ class GameOrchestrator:
         max_decisions: int = 10_000,
         reporter: TerminalReporter | None = None,
     ) -> None:
+        resolved_run_dir = _resolve_run_dir(run_dir, game_id=engine.game_id)
         self.engine = engine
         self.players = dict(players)
         self.observation_builder = observation_builder or ObservationBuilder()
-        self.event_log = event_log or EventLog(run_dir)
-        self.memory_store = memory_store or MemoryStore(run_dir)
-        self.prompt_trace_store = prompt_trace_store or PromptTraceStore(run_dir)
-        self.run_dir = Path(run_dir) if run_dir is not None else None
+        self.event_log = event_log or EventLog(resolved_run_dir)
+        self.memory_store = memory_store or MemoryStore(resolved_run_dir)
+        self.prompt_trace_store = prompt_trace_store or PromptTraceStore(resolved_run_dir)
+        self.run_dir = resolved_run_dir
         self.max_decisions = max_decisions
         self.reporter = reporter
         self._decision_phase_counts: dict[str, int] = {}
@@ -189,6 +204,7 @@ class GameOrchestrator:
                 self.run_dir / "metadata.json",
                 {
                     "game_id": self.engine.game_id,
+                    "run_directory": str(self.run_dir),
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
                         player_id: type(self.players[player_id]).__name__
@@ -241,6 +257,7 @@ class GameOrchestrator:
 
         return {
             "history_window": self.observation_builder.recent_event_window,
+            "run_directory": None if self.run_dir is None else str(self.run_dir),
             "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
             "trade_metrics": trade_metrics,
             "trade_event_share": (

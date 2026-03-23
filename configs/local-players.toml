@@ -1,0 +1,38 @@
+# Ollama (local, no API key required)
+# Pull models with: ollama pull <model>
+
+[[players]]
+id = "RED"
+type = "llm"
+model = "qwen3:4b"
+api_base = "http://localhost:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "qwen3:4b"
+api_base = "http://localhost:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "qwen3:4b"
+api_base = "http://localhost:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "qwen3:4b"
+api_base = "http://localhost:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300

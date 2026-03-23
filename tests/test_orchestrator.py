@@ -251,6 +251,53 @@ class PhasedScriptedPlayer:
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_observation_builder_prefers_decision_scoped_state_when_available(self) -> None:
+        class ScopedEngine:
+            game_id = "scoped-game"
+
+            @staticmethod
+            def public_state():
+                return {"mode": "full"}
+
+            @staticmethod
+            def private_state(player_id: str):
+                return {"player_id": player_id, "mode": "full"}
+
+            @staticmethod
+            def public_state_for_decision(*, player_id: str, phase: str, legal_actions):
+                return {
+                    "mode": "scoped",
+                    "player_id": player_id,
+                    "phase": phase,
+                    "legal_action_count": len(legal_actions),
+                }
+
+            @staticmethod
+            def private_state_for_decision(*, player_id: str, phase: str, legal_actions):
+                return {
+                    "mode": "scoped",
+                    "player_id": player_id,
+                    "phase": phase,
+                    "legal_action_count": len(legal_actions),
+                }
+
+        decision = DecisionPoint(
+            acting_player_id="RED",
+            turn_index=2,
+            phase="play_turn",
+            decision_index=7,
+            legal_actions=(Action("END_TURN"),),
+        )
+        observation = ObservationBuilder().build_action(
+            engine=ScopedEngine(),
+            decision=decision,
+            memory_store=MemoryStore(),
+        )
+
+        self.assertEqual(observation.public_state["mode"], "scoped")
+        self.assertEqual(observation.private_state["mode"], "scoped")
+        self.assertEqual(observation.public_state["phase"], "play_turn")
+
     def test_observation_builder_distinguishes_full_history_from_recent_window(self) -> None:
         class StubEngine:
             game_id = "stub-game"

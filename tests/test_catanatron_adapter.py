@@ -136,6 +136,69 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertIn("board", public_state)
         self.assertNotIn("player_state", public_state)
 
+    def test_decision_scoped_state_condenses_summaries_and_board(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=7)
+        decision = adapter.current_decision()
+
+        public_state = adapter.public_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+        private_state = adapter.private_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+
+        current_player = public_state["players"][decision.acting_player_id]
+        self.assertIn("vp", current_player)
+        self.assertIn("roads", current_player)
+        self.assertNotIn("seat_index", current_player)
+        self.assertNotIn("development_cards_remaining", public_state["bank"])
+        self.assertIn("your_network", public_state["board"])
+        self.assertIn("topology", public_state["board"])
+        self.assertNotIn("status_flags", private_state)
+        self.assertNotIn("ports", private_state)
+
+    def test_decision_scoped_state_omits_topology_when_not_building(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=1)
+
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        roll_transition = adapter.apply_action(Action("ROLL"))
+        self.assertTrue(any(event.kind == "dice_rolled" for event in roll_transition.public_events))
+
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+        adapter.apply_action(
+            adapter.resolve_action(
+                proposed_action=Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                ),
+                legal_actions=adapter.current_decision().legal_actions,
+            )
+        )
+
+        decision = adapter.current_decision()
+        self.assertEqual(decision.phase, "decide_trade")
+        public_state = adapter.public_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+        private_state = adapter.private_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+
+        self.assertIn("your_network", public_state["board"])
+        self.assertNotIn("topology", public_state["board"])
+        self.assertNotIn("ports", private_state)
+
     def test_can_advance_to_turn_play_and_offer_trade(self) -> None:
         adapter = CatanatronEngineAdapter(seed=1)
 

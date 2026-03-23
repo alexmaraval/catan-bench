@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Mapping
 
+from .engine import EngineAdapter
 from .observations import ObservationBuilder
 from .players import Player
 from .schemas import Action, GameResult, MemoryEntry
 from .storage import EventLog, MemoryStore, write_json
+
+logger = logging.getLogger(__name__)
 
 
 class MissingPlayerError(KeyError):
@@ -22,7 +26,7 @@ class GameOrchestrator:
 
     def __init__(
         self,
-        engine,
+        engine: EngineAdapter,
         players: Mapping[str, Player],
         *,
         observation_builder: ObservationBuilder | None = None,
@@ -41,6 +45,7 @@ class GameOrchestrator:
 
     def run(self) -> GameResult:
         self._prepare_run()
+        logger.info("Starting game %s with players %s", self.engine.game_id, list(self.players))
 
         total_decisions = 0
         while not self.engine.is_terminal():
@@ -51,6 +56,7 @@ class GameOrchestrator:
             self.step()
             total_decisions += 1
 
+        logger.info("Game %s finished after %d decisions", self.engine.game_id, total_decisions)
         metadata = dict(self.engine.result())
         result = GameResult(
             game_id=self.engine.game_id,
@@ -74,6 +80,13 @@ class GameOrchestrator:
             raise RuntimeError("Cannot step a terminal game.")
 
         decision = self.engine.current_decision()
+        logger.debug(
+            "Decision %d: player=%s phase=%s actions=%d",
+            decision.decision_index,
+            decision.acting_player_id,
+            decision.phase,
+            len(decision.legal_actions),
+        )
         player = self.players.get(decision.acting_player_id)
         if player is None:
             raise MissingPlayerError(

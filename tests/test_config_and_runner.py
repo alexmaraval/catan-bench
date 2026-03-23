@@ -16,7 +16,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
-        self.assertEqual(game_config.seed, 7)
+        self.assertEqual(game_config.seed, 12)
         self.assertEqual(len(player_configs), 4)
         self.assertEqual(player_configs[0].id, "RED")
 

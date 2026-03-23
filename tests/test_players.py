@@ -203,6 +203,105 @@ class LLMPlayerTests(unittest.TestCase):
             ),
         )
 
+    def test_llm_player_action_prompt_omits_recent_events_and_condenses_actions(self) -> None:
+        client = FakeLLMClient(
+            {
+                "action_index": 0,
+                "private_reasoning": "Take the first legal move.",
+            }
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        player.respond(
+            Observation(
+                game_id="game-1",
+                player_id="RED",
+                turn_index=3,
+                phase="build_initial_settlement",
+                decision_index=12,
+                public_state={"board": {"settlement_candidates": [{"node_id": 10}]}},
+                private_state={"resources": {"WOOD": 0}},
+                legal_actions=(
+                    Action(
+                        "BUILD_SETTLEMENT",
+                        payload={"node_id": 10},
+                        description="Build a settlement on node 10.",
+                    ),
+                    Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {}, "request": {}},
+                        description="Offer a trade.",
+                    ),
+                ),
+                recent_public_events=(Event(kind="dice_rolled", turn_index=3, phase="play_turn"),),
+                recent_private_events=(
+                    Event(kind="private_state_changed", turn_index=3, phase="play_turn"),
+                ),
+            )
+        )
+
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
+
+        self.assertNotIn("recent_public_events", payload)
+        self.assertNotIn("recent_private_events", payload)
+        self.assertEqual(
+            payload["legal_actions"][0],
+            {
+                "index": 0,
+                "action_type": "BUILD_SETTLEMENT",
+                "payload": {"node_id": 10},
+            },
+        )
+        self.assertNotIn("description", payload["legal_actions"][0])
+        self.assertEqual(
+            payload["legal_actions"][1]["payload"],
+            {"offer": {}, "request": {}},
+        )
+        self.assertFalse(payload["legal_actions"][1]["selectable_by_index"])
+        self.assertTrue(payload["legal_actions"][1]["requires_concrete_payload"])
+
+    def test_llm_player_placement_only_prompt_uses_candidate_action_indexes(self) -> None:
+        client = FakeLLMClient(
+            {
+                "action_index": 1,
+                "private_reasoning": "Highest-value opening node.",
+            }
+        )
+        player = LLMPlayer(client=client, model="fake-model", temperature=0.1)
+
+        player.respond(
+            Observation(
+                game_id="game-1",
+                player_id="WHITE",
+                turn_index=0,
+                phase="build_initial_settlement",
+                decision_index=0,
+                public_state={
+                    "board": {
+                        "settlement_candidates": [
+                            {"action_index": 0, "node_id": 10, "adjacent_tiles": ["WOOD@8"]},
+                            {"action_index": 1, "node_id": 11, "adjacent_tiles": ["ORE@6"]},
+                        ]
+                    }
+                },
+                private_state={"resources": {"WOOD": 0}},
+                legal_actions=(
+                    Action("BUILD_SETTLEMENT", payload={"node_id": 10}),
+                    Action("BUILD_SETTLEMENT", payload={"node_id": 11}),
+                ),
+            )
+        )
+
+        payload = json.loads(client.calls[0]["messages"][1]["content"])
+        system_prompt = client.calls[0]["messages"][0]["content"]
+
+        self.assertNotIn("legal_actions", payload)
+        self.assertEqual(
+            payload["response_contract"]["action_index"],
+            "required integer copied from public_state.board.settlement_candidates[].action_index",
+        )
+        self.assertIn("settlement_candidates", system_prompt)
+
     def test_llm_player_repairs_one_illegal_action_attempt(self) -> None:
         client = FakeLLMClient(
             [

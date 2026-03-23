@@ -5,6 +5,7 @@ src/catan_bench/__init__.py
 src/catan_bench/__main__.py
 src/catan_bench/catanatron_adapter.py
 src/catan_bench/config.py
+src/catan_bench/dashboard.py
 src/catan_bench/engine.py
 src/catan_bench/llm.py
 src/catan_bench/observations.py
@@ -23,6 +24,7 @@ src/catan_bench.egg-info/requires.txt
 src/catan_bench.egg-info/top_level.txt
 tests/test_catanatron_adapter.py
 tests/test_config_and_runner.py
+tests/test_dashboard.py
 tests/test_llm.py
 tests/test_orchestrator.py
 tests/test_players.py

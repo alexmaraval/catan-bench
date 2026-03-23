@@ -800,10 +800,44 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("stage=recall", rendered)
         self.assertIn("stage=act", rendered)
         self.assertIn("stage=reflect", rendered)
-        self.assertIn('"action_index": 0', rendered)
+        self.assertIn("action_index: 0", rendered)
         self.assertIn("PROMPT", rendered)
         self.assertIn("ANSWER", rendered)
         self.assertIn("Press N then Enter to continue.", rendered)
+        self.assertIn("public_events_since_last_turn:", rendered)
+        self.assertIn("private_memory:", rendered)
+
+    def test_debug_reporter_pretty_prints_json_message_content(self) -> None:
+        rendered = DebugTerminalReporter._render_attempt_messages(
+            (
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "player_id": "RED",
+                            "turn_index": 3,
+                            "public_state": {"scores": {"RED": 4, "BLUE": 2}},
+                        },
+                        sort_keys=True,
+                    ),
+                },
+            )
+        )
+
+        self.assertEqual(rendered[0], "[user]")
+        self.assertIn('player_id: "RED"', rendered)
+        self.assertIn("turn_index: 3", rendered)
+        public_state_index = rendered.index("public_state:")
+        self.assertEqual(rendered[public_state_index + 1], "{")
+
+    def test_debug_reporter_pretty_prints_fenced_json_answers(self) -> None:
+        rendered = DebugTerminalReporter._render_attempt_response(
+            '```json\n{"action_index": 0, "private_reasoning": "Take the safe move."}\n```',
+            {},
+        )
+
+        self.assertIn("action_index: 0", rendered)
+        self.assertIn('private_reasoning: "Take the safe move."', rendered)
 
     def test_orchestrator_runs_recall_and_reflect_memory_flow(self) -> None:
         red_player = PhasedScriptedPlayer(

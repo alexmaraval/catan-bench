@@ -507,10 +507,7 @@ class CatanatronEngineAdapter:
         legal_actions: Sequence[Action],
         game_json: Mapping[str, Any],
     ) -> dict[str, JsonValue]:
-        requires_topology = self._requires_full_board_topology(
-            phase=phase,
-            legal_actions=legal_actions,
-        )
+        _ = phase
         board_view: dict[str, JsonValue] = {
             "robber_coordinate": list(game_json["robber_coordinate"]),
             "your_network": self._player_network_view(
@@ -521,13 +518,12 @@ class CatanatronEngineAdapter:
         robber_targets = self._robber_targets_view(legal_actions)
         if robber_targets:
             board_view["robber_targets"] = robber_targets
-        if requires_topology:
-            board_view["topology"] = {
-                "tiles": game_json["tiles"],
-                "nodes": game_json["nodes"],
-                "edges": game_json["edges"],
-                "adjacent_tiles": game_json["adjacent_tiles"],
-            }
+        board_view.update(
+            self._placement_candidate_views(
+                legal_actions=legal_actions,
+                game_json=game_json,
+            )
+        )
         return board_view
 
     def _player_network_view(
@@ -551,16 +547,16 @@ class CatanatronEngineAdapter:
         ]
         owned_roads.sort(key=lambda edge: tuple(int(node_id) for node_id in edge["id"]))
 
-        network_tiles: dict[tuple[str, object], dict[str, JsonValue]] = {}
+        network_tiles: dict[str, None] = {}
         buildings_payload: list[dict[str, JsonValue]] = []
         for node in owned_buildings:
             node_id = int(node["id"])
             tiles = [
-                self._tile_summary(tile)
+                self._tile_prompt_value(tile)
                 for tile in adjacent_tiles.get(str(node_id), [])
             ]
             for tile in tiles:
-                network_tiles[self._tile_summary_key(tile)] = tile
+                network_tiles.setdefault(tile, None)
             buildings_payload.append(
                 {
                     "node_id": node_id,
@@ -572,7 +568,7 @@ class CatanatronEngineAdapter:
         return {
             "buildings": buildings_payload,
             "roads": [{"edge": list(edge["id"])} for edge in owned_roads],
-            "adjacent_tiles": list(network_tiles.values()),
+            "adjacent_tiles": list(network_tiles.keys()),
         }
 
     @staticmethod
@@ -598,18 +594,109 @@ class CatanatronEngineAdapter:
             for coordinate, victims in sorted(targets.items())
         ]
 
-    @staticmethod
-    def _requires_full_board_topology(
+    def _placement_candidate_views(
+        self,
         *,
-        phase: str,
         legal_actions: Sequence[Action],
-    ) -> bool:
-        if phase in {"build_initial_settlement", "build_initial_road"}:
-            return True
-        return any(
-            action.action_type in {"BUILD_SETTLEMENT", "BUILD_ROAD", "BUILD_CITY"}
-            for action in legal_actions
-        )
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        candidate_views: dict[str, JsonValue] = {}
+
+        settlement_candidates: list[dict[str, JsonValue]] = []
+        city_candidates: list[dict[str, JsonValue]] = []
+        road_candidates: list[dict[str, JsonValue]] = []
+        for action_index, action in enumerate(legal_actions):
+            if action.action_type == "BUILD_SETTLEMENT" and "node_id" in action.payload:
+                settlement_candidates.append(
+                    self._node_candidate_view(
+                        action_index=action_index,
+                        node_id=int(action.payload["node_id"]),
+                        game_json=game_json,
+                    )
+                )
+            elif action.action_type == "BUILD_CITY" and "node_id" in action.payload:
+                city_candidates.append(
+                    self._node_candidate_view(
+                        action_index=action_index,
+                        node_id=int(action.payload["node_id"]),
+                        game_json=game_json,
+                        include_owner=True,
+                    )
+                )
+            elif action.action_type == "BUILD_ROAD" and "edge" in action.payload:
+                road_candidates.append(
+                    self._road_candidate_view(
+                        action_index=action_index,
+                        edge=tuple(int(node_id) for node_id in action.payload["edge"]),
+                        game_json=game_json,
+                    )
+                )
+
+        if settlement_candidates:
+            candidate_views["settlement_candidates"] = settlement_candidates
+        if city_candidates:
+            candidate_views["city_candidates"] = city_candidates
+        if road_candidates:
+            candidate_views["road_candidates"] = road_candidates
+
+        return candidate_views
+
+    def _node_candidate_view(
+        self,
+        *,
+        action_index: int,
+        node_id: int,
+        game_json: Mapping[str, Any],
+        include_owner: bool = False,
+    ) -> dict[str, JsonValue]:
+        node = game_json["nodes"][str(node_id)]
+        adjacent_tiles = game_json["adjacent_tiles"].get(str(node_id), [])
+
+        tile_summaries: list[str] = []
+        ports: list[str] = []
+        for tile in adjacent_tiles:
+            summary = self._tile_prompt_value(tile)
+            if summary.startswith("PORT:"):
+                ports.append(summary.removeprefix("PORT:"))
+                continue
+            tile_summaries.append(summary)
+
+        candidate_view: dict[str, JsonValue] = {
+            "action_index": action_index,
+            "node_id": node_id,
+            "adjacent_tiles": tile_summaries,
+        }
+        if ports:
+            candidate_view["ports"] = sorted(set(ports))
+        if include_owner:
+            building = node.get("building")
+            if building is not None:
+                candidate_view["building"] = str(building)
+            color = node.get("color")
+            if color is not None:
+                candidate_view["owner_player_id"] = str(color)
+        return candidate_view
+
+    def _road_candidate_view(
+        self,
+        *,
+        action_index: int,
+        edge: tuple[int, int],
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        return {
+            "action_index": action_index,
+            "edge": list(edge),
+            "endpoints": [
+                self._node_candidate_view(
+                    action_index=action_index,
+                    node_id=node_id,
+                    game_json=game_json,
+                    include_owner=True,
+                )
+                for node_id in edge
+            ],
+        }
 
     @staticmethod
     def _should_include_ports(
@@ -621,27 +708,16 @@ class CatanatronEngineAdapter:
         return any(action.action_type == "MARITIME_TRADE" for action in legal_actions)
 
     @staticmethod
-    def _tile_summary(tile: Mapping[str, Any]) -> dict[str, JsonValue]:
+    def _tile_prompt_value(tile: Mapping[str, Any]) -> str:
         tile_type = str(tile.get("type", "UNKNOWN"))
         if tile_type == "RESOURCE_TILE":
-            return {
-                "resource": str(tile["resource"]),
-                "number": int(tile["number"]),
-            }
+            return f"{tile['resource']}@{int(tile['number'])}"
         if tile_type == "DESERT":
-            return {"type": "DESERT"}
+            return "DESERT"
         if tile_type == "PORT":
-            return {
-                "type": "PORT",
-                "resource": "ANY" if tile.get("resource") is None else str(tile["resource"]),
-            }
-        return {"type": tile_type}
-
-    @staticmethod
-    def _tile_summary_key(tile: Mapping[str, JsonValue]) -> tuple[str, object]:
-        if "resource" in tile and "number" in tile:
-            return (str(tile["resource"]), tile["number"])
-        return (str(tile.get("type", "UNKNOWN")), tile.get("resource"))
+            resource = "ANY" if tile.get("resource") is None else str(tile["resource"])
+            return f"PORT:{resource}"
+        return tile_type
 
     def _offer_trade_template(self) -> Action:
         return Action(

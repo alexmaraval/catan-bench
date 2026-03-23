@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 try:
@@ -157,9 +158,54 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertNotIn("seat_index", current_player)
         self.assertNotIn("development_cards_remaining", public_state["bank"])
         self.assertIn("your_network", public_state["board"])
-        self.assertIn("topology", public_state["board"])
+        self.assertIn("settlement_candidates", public_state["board"])
+        self.assertNotIn("topology", public_state["board"])
+        self.assertEqual(
+            len(public_state["board"]["settlement_candidates"]),
+            len(decision.legal_actions),
+        )
+        first_candidate = public_state["board"]["settlement_candidates"][0]
+        self.assertIn("action_index", first_candidate)
+        self.assertIsInstance(first_candidate["adjacent_tiles"][0], str)
+        self.assertLess(
+            len(json.dumps(public_state["board"], sort_keys=True)),
+            len(json.dumps(adapter.public_state()["board"], sort_keys=True)),
+        )
         self.assertNotIn("status_flags", private_state)
         self.assertNotIn("ports", private_state)
+
+    def test_initial_road_prompt_view_uses_road_candidates(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=1)
+        adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        decision = adapter.current_decision()
+        self.assertEqual(decision.phase, "build_initial_road")
+
+        public_state = adapter.public_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+
+        self.assertIn("road_candidates", public_state["board"])
+        self.assertNotIn("topology", public_state["board"])
+        self.assertEqual(
+            len(public_state["board"]["road_candidates"]),
+            len(decision.legal_actions),
+        )
+        self.assertTrue(
+            all(
+                "action_index" in candidate
+                for candidate in public_state["board"]["road_candidates"]
+            )
+        )
+        self.assertTrue(
+            any(
+                endpoint.get("owner_player_id") == decision.acting_player_id
+                for candidate in public_state["board"]["road_candidates"]
+                for endpoint in candidate["endpoints"]
+            )
+        )
 
     def test_decision_scoped_state_omits_topology_when_not_building(self) -> None:
         adapter = CatanatronEngineAdapter(seed=1)

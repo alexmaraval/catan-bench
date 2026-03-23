@@ -5,6 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlparse
 from urllib import error, request
 
 
@@ -61,7 +62,7 @@ class OpenAICompatibleChatClient:
         if top_p is not None:
             body["top_p"] = top_p
         if reasoning_enabled is not None:
-            body["reasoning"] = {"enabled": reasoning_enabled}
+            body.update(self._reasoning_request_fields(reasoning_enabled))
         endpoint = self.api_base.rstrip("/") + "/chat/completions"
         req = request.Request(
             endpoint,
@@ -96,6 +97,21 @@ class OpenAICompatibleChatClient:
                 raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
 
         raise RuntimeError("LLM request failed after exhausting retry attempts.")
+
+    def _reasoning_request_fields(
+        self, reasoning_enabled: bool
+    ) -> dict[str, object]:
+        provider = self._provider_name()
+        if provider == "groq":
+            return {"include_reasoning": reasoning_enabled}
+        return {"reasoning": {"enabled": reasoning_enabled}}
+
+    def _provider_name(self) -> str:
+        hostname = urlparse(self.api_base).hostname or ""
+        hostname = hostname.lower()
+        if hostname.endswith("groq.com"):
+            return "groq"
+        return "default"
 
     def _retry_delay(self, exc: error.HTTPError, attempt_index: int) -> float:
         """Return seconds to sleep before the next attempt, respecting Retry-After."""

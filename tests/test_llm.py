@@ -24,6 +24,53 @@ class _FakeHTTPResponse:
 
 
 class OpenAICompatibleChatClientTests(unittest.TestCase):
+    def test_complete_uses_openai_reasoning_field_by_default(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(api_key_env="OPENAI_API_KEY")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="fake-model",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertEqual(captured_body["reasoning"], {"enabled": False})
+        self.assertNotIn("include_reasoning", captured_body)
+
+    def test_complete_uses_groq_include_reasoning_field(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://api.groq.com/openai/v1",
+            api_key_env="GROQ_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="fake-model",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertEqual(captured_body["include_reasoning"], False)
+        self.assertNotIn("reasoning", captured_body)
+
     def test_complete_retries_retryable_http_errors(self) -> None:
         attempts: list[str] = []
 

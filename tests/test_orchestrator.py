@@ -920,6 +920,61 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(second_transition.public_events[0].kind, "turn_ended")
         self.assertEqual(red_player.open_calls, 1)
 
+    def test_message_only_reply_is_excluded_from_quotes_and_not_selectable(self) -> None:
+        red_player = OwnerTradeChatPlayer(
+            action_responses=[Action("END_TURN")],
+            open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Anyone selling 1 wood?",
+                    requested_resources={"WOOD": 1},
+                )
+            ],
+            selection_responses=[
+                TradeChatSelectionResponse(
+                    selected_player_id="ORANGE",
+                    message="Taking ORANGE's quote.",
+                )
+            ],
+        )
+        # WHITE replies with a message only — no resource maps
+        white_player = QuoteReplyPlayer(
+            TradeChatReplyResponse(message="Not interested, sorry.")
+        )
+        # ORANGE provides a valid quote
+        orange_player = QuoteReplyPlayer(
+            TradeChatReplyResponse(
+                message="I can do 1 wood for 1 sheep.",
+                owner_gives={"SHEEP": 1},
+                owner_gets={"WOOD": 1},
+            )
+        )
+
+        orchestrator = GameOrchestrator(
+            OwnerLedTradeChatEngine(),
+            players={"RED": red_player, "WHITE": white_player, "ORANGE": orange_player},
+            trading_chat_enabled=True,
+            run_dir=None,
+        )
+
+        first_transition = orchestrator.step()
+        event_kinds = [event.kind for event in first_transition.public_events]
+
+        # WHITE's message-only reply should not appear as a trade_chat_message quote event
+        message_events = [
+            e for e in first_transition.public_events
+            if e.kind == "trade_chat_message" and e.payload.get("speaker_player_id") == "WHITE"
+        ]
+        self.assertEqual(message_events, [], "WHITE's message-only reply should be excluded from quotes")
+
+        # ORANGE's valid quote should still appear and be selectable
+        self.assertIn("trade_chat_quote_selected", event_kinds)
+        selected_event = next(e for e in first_transition.public_events if e.kind == "trade_chat_quote_selected")
+        self.assertEqual(selected_event.payload["selected_player_id"], "ORANGE")
+
+        # The observation passed to ORANGE should only contain ORANGE in quotes (WHITE filtered out)
+        self.assertEqual(len(orange_player.chat_observations[0].quotes), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

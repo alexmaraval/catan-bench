@@ -39,7 +39,7 @@ class OpenAICompatibleChatClient:
             raise RuntimeError(
                 "Missing API key for LLM player. "
                 f"Set environment variable {self.api_key_env!r} before running, "
-                "or change `api_key_env` in configs/players.toml to point at the "
+                "or change `api_key_env` in configs/openai-players.toml to point at the "
                 "variable you want to use. Example: "
                 f"export {self.api_key_env}=<your_api_key>"
             )

@@ -64,7 +64,7 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
 
     players_payload = data.get("players")
     if not isinstance(players_payload, list) or not players_payload:
-        raise ValueError("players.toml must define a non-empty [[players]] list.")
+        raise ValueError("openai-players.toml must define a non-empty [[players]] list.")
 
     seen_ids: set[str] = set()
     configs: list[PlayerConfig] = []

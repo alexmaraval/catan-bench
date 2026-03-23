@@ -13,6 +13,7 @@ Version `0.2.0` adds LLM player support on top of the benchmark core:
 - a live `catanatron` engine adapter,
 - an `LLMPlayer` backed by an OpenAI-compatible chat client,
 - prompt trace recording for every LLM decision,
+- a live Streamlit dashboard for monitoring in-progress runs,
 - static HTML replay export from completed run artifacts.
 
 The adapter targets the current GitHub version of `catanatron`, not the older PyPI release, because the GitHub version includes the domestic trade flow needed for this benchmark.
@@ -56,10 +57,10 @@ The harness is centered on four boundaries:
 4. `Storage`
    - `public_history.jsonl`
    - `players/<id>/private_history.jsonl`
-   - `players/<id>/memory.jsonl`
+   - `players/<id>/memory.json`
    - `players/<id>/prompt_trace.jsonl`
 
-Each player's `private_history.jsonl` now also captures their own prior decisions, including the chosen action and their fuller private reasoning for that turn. The long-term `memory.jsonl` remains a distilled summary store rather than a dump of verbose reasoning.
+Each player's `private_history.jsonl` now also captures their own prior decisions, including the chosen action and their fuller private reasoning for that turn. The current `memory.json` remains a distilled summary store rather than a dump of verbose reasoning.
 For LLM-backed players, `prompt_trace.jsonl` records the exact prompt messages and JSON response for each decision, including any repair attempt after an illegal move.
 
 The harness is modeled around **decision points**, not just turns, so it can support trade responses, robber choices, initial placements, and other non-standard turn interactions.
@@ -78,6 +79,7 @@ The harness is modeled around **decision points**, not just turns, so it can sup
 - Support for dynamic domestic trade offers via adapter-side validation of `OFFER_TRADE`.
 - Semantic public event logs for replay-friendly game interactions.
 - A static replay exporter that renders a public `replay.html` plus per-player personal replay pages.
+- A live Streamlit dashboard that tails run artifacts while a game is in progress.
 - Post-game trade metadata in completed results.
 - Unit tests covering both the mock harness flow and a real `catanatron` trade flow.
 
@@ -159,7 +161,7 @@ Each player-specific page combines:
 
 - the shared public transcript,
 - that player's `private_history.jsonl`,
-- that player's `memory.jsonl`.
+- that player's `memory.json`.
 
 The personal replay pages also include simple filters so you can isolate:
 
@@ -173,7 +175,16 @@ The replay exporter reads:
 - `public_history.jsonl`
 - `result.json`
 - `players/<id>/private_history.jsonl`
-- `players/<id>/memory.jsonl`
+- `players/<id>/memory.json`
+
+Launch the live dashboard for that same run directory:
+
+```bash
+uv sync --group dashboard
+uv run streamlit run dashboard.py -- --run-dir runs/quickstart
+```
+
+The dashboard reads the live run artifacts directly and refreshes in place, so you can keep it open while a benchmark game is still running.
 
 Run the current test suite:
 

@@ -415,63 +415,130 @@ class LLMPlayer:
         *,
         compact: bool = False,
     ) -> list[dict[str, object]]:
+        placement_candidates_key = self._placement_candidates_key(observation)
         system_prompt = "\n\n".join(
             part
             for part in (
                 observation.game_rules,
-                (
-                    "Phase 2 - Act. Return strict JSON with keys `action_index` and "
-                    "`private_reasoning`. `action_index` should be the integer index of one "
-                    "entry from the provided `legal_actions` list and is the preferred way to "
-                    "choose an action. You may also include `action` with `action_type` and "
-                    "`payload`, but use the exact legal action when you do. If a legal action is "
-                    "marked as requiring a concrete payload, do not choose it by `action_index`; "
-                    "instead return an `action` object with a concrete payload. "
-                    "`private_reasoning` should be a concise private summary under 30 words."
-                ),
+                self._action_phase_instruction(placement_candidates_key),
             )
             if part
         )
-        indexed_legal_actions = [
-            {
-                "index": index,
-                "selectable_by_index": not _is_trade_template(action),
-                "requires_concrete_payload": _is_trade_template(action),
-                **action.to_dict(),
-            }
-            for index, action in enumerate(observation.legal_actions)
-        ]
         user_payload = {
             "player_id": observation.player_id,
             "turn_index": observation.turn_index,
             "phase": observation.phase,
             "decision_index": observation.decision_index,
-            "decision_prompt": observation.decision_prompt,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
             "private_memory": self._memory_content(observation.memory),
             "context_window": {
                 "compact_retry": compact,
             },
-            "recent_public_events": [event.to_dict() for event in observation.recent_public_events],
-            "recent_private_events": [event.to_dict() for event in observation.recent_private_events],
-            "legal_actions": indexed_legal_actions,
-            "response_contract": {
-                "action_index": "preferred integer index into legal_actions",
-                "action": (
-                    "optional exact copy of the chosen legal action object; required for any "
-                    "action that needs a concrete payload"
-                ),
-                "private_reasoning": (
-                    "required concise private explanation under 30 words; kept in your private "
-                    "history"
-                ),
-            },
+            "response_contract": self._action_response_contract(placement_candidates_key),
         }
+        if placement_candidates_key is None:
+            user_payload["legal_actions"] = self._action_prompt_entries(observation.legal_actions)
+        if observation.decision_prompt is not None:
+            user_payload["decision_prompt"] = observation.decision_prompt
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(user_payload, sort_keys=True)},
         ]
+
+    @staticmethod
+    def _action_phase_instruction(placement_candidates_key: str | None) -> str:
+        if placement_candidates_key is not None:
+            return (
+                "Phase 2 - Act. Return strict JSON with keys `action_index` and "
+                "`private_reasoning`. For this placement decision, each candidate in "
+                f"`public_state.board.{placement_candidates_key}` already includes its "
+                "`action_index`; return one of those indexes. `private_reasoning` should be a "
+                "concise private summary under 30 words."
+            )
+        return (
+            "Phase 2 - Act. Return strict JSON with keys `action_index` and "
+            "`private_reasoning`. `action_index` should be the integer index of one "
+            "entry from the provided `legal_actions` list and is the preferred way to "
+            "choose an action. You may also include `action` with `action_type` and "
+            "`payload`, but use the exact legal action when you do. If a legal action is "
+            "marked as requiring a concrete payload, do not choose it by `action_index`; "
+            "instead return an `action` object with a concrete payload. Base the choice "
+            "only on the current state, your memory, and the listed legal actions. "
+            "`private_reasoning` should be a concise private summary under 30 words."
+        )
+
+    @staticmethod
+    def _action_response_contract(
+        placement_candidates_key: str | None,
+    ) -> dict[str, str]:
+        if placement_candidates_key is not None:
+            return {
+                "action_index": (
+                    "required integer copied from "
+                    f"public_state.board.{placement_candidates_key}[].action_index"
+                ),
+                "private_reasoning": "required private note under 30 words",
+            }
+        return {
+            "action_index": "preferred integer index into legal_actions",
+            "action": (
+                "optional chosen legal action; required when a listed action needs a "
+                "concrete payload"
+            ),
+            "private_reasoning": "required private note under 30 words",
+        }
+
+    @staticmethod
+    def _placement_candidates_key(observation: Observation) -> str | None:
+        action_types = {action.action_type for action in observation.legal_actions}
+        if action_types == {"BUILD_SETTLEMENT"}:
+            candidates_key = "settlement_candidates"
+        elif action_types == {"BUILD_ROAD"}:
+            candidates_key = "road_candidates"
+        elif action_types == {"BUILD_CITY"}:
+            candidates_key = "city_candidates"
+        else:
+            return None
+
+        board = observation.public_state.get("board")
+        if not isinstance(board, dict):
+            return None
+        candidates = board.get(candidates_key)
+        if not isinstance(candidates, list) or len(candidates) != len(observation.legal_actions):
+            return None
+        if any(
+            not isinstance(candidate, dict) or not isinstance(candidate.get("action_index"), int)
+            for candidate in candidates
+        ):
+            return None
+        return candidates_key
+
+    @staticmethod
+    def _action_prompt_entries(
+        legal_actions: tuple[Action, ...],
+    ) -> list[dict[str, JsonValue]]:
+        return [
+            LLMPlayer._action_prompt_entry(index=index, action=action)
+            for index, action in enumerate(legal_actions)
+        ]
+
+    @staticmethod
+    def _action_prompt_entry(
+        *,
+        index: int,
+        action: Action,
+    ) -> dict[str, JsonValue]:
+        entry: dict[str, JsonValue] = {
+            "index": index,
+            "action_type": action.action_type,
+        }
+        if action.payload or _is_trade_template(action):
+            entry["payload"] = action.payload
+        if _is_trade_template(action):
+            entry["selectable_by_index"] = False
+            entry["requires_concrete_payload"] = True
+        return entry
 
     def _messages_for_trade_chat_open(
         self, observation: TradeChatObservation
@@ -885,19 +952,29 @@ class LLMPlayer:
         attempted_response: dict[str, object],
         error_message: str,
     ) -> list[dict[str, object]]:
+        placement_candidates_key = LLMPlayer._placement_candidates_key(observation)
         repair_payload = {
             "error": error_message,
             "previous_response": attempted_response,
             "instruction": (
                 "Choose one legal action by returning only `action_index` and "
+                "`private_reasoning`."
+            ),
+        }
+        if placement_candidates_key is None:
+            repair_payload["instruction"] = (
+                "Choose one legal action by returning only `action_index` and "
                 "`private_reasoning`. The action_index must be one of the provided legal "
                 "action indexes."
-            ),
-            "legal_actions": [
-                {"index": index, **action.to_dict()}
-                for index, action in enumerate(observation.legal_actions)
-            ],
-        }
+            )
+            repair_payload["legal_actions"] = LLMPlayer._action_prompt_entries(
+                observation.legal_actions
+            )
+        else:
+            repair_payload["candidate_source"] = (
+                f"Use one action_index from public_state.board.{placement_candidates_key} "
+                "in the earlier prompt."
+            )
         return [
             {
                 "role": "system",

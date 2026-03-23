@@ -594,6 +594,53 @@ class FailedTradeAttemptEngine:
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_observation_builder_prefers_decision_scoped_state_when_available(self) -> None:
+        class ScopedEngine:
+            game_id = "scoped-game"
+
+            @staticmethod
+            def public_state():
+                return {"mode": "full"}
+
+            @staticmethod
+            def private_state(player_id: str):
+                return {"player_id": player_id, "mode": "full"}
+
+            @staticmethod
+            def public_state_for_decision(*, player_id: str, phase: str, legal_actions):
+                return {
+                    "mode": "scoped",
+                    "player_id": player_id,
+                    "phase": phase,
+                    "legal_action_count": len(legal_actions),
+                }
+
+            @staticmethod
+            def private_state_for_decision(*, player_id: str, phase: str, legal_actions):
+                return {
+                    "mode": "scoped",
+                    "player_id": player_id,
+                    "phase": phase,
+                    "legal_action_count": len(legal_actions),
+                }
+
+        decision = DecisionPoint(
+            acting_player_id="RED",
+            turn_index=2,
+            phase="play_turn",
+            decision_index=7,
+            legal_actions=(Action("END_TURN"),),
+        )
+        observation = ObservationBuilder().build_action(
+            engine=ScopedEngine(),
+            decision=decision,
+            memory_store=MemoryStore(),
+        )
+
+        self.assertEqual(observation.public_state["mode"], "scoped")
+        self.assertEqual(observation.private_state["mode"], "scoped")
+        self.assertEqual(observation.public_state["phase"], "play_turn")
+
     def test_observation_builder_distinguishes_full_history_from_recent_window(self) -> None:
         class StubEngine:
             game_id = "stub-game"
@@ -753,10 +800,44 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("stage=recall", rendered)
         self.assertIn("stage=act", rendered)
         self.assertIn("stage=reflect", rendered)
-        self.assertIn('"action_index": 0', rendered)
+        self.assertIn("action_index: 0", rendered)
         self.assertIn("PROMPT", rendered)
         self.assertIn("ANSWER", rendered)
         self.assertIn("Press N then Enter to continue.", rendered)
+        self.assertIn("public_events_since_last_turn:", rendered)
+        self.assertIn("private_memory:", rendered)
+
+    def test_debug_reporter_pretty_prints_json_message_content(self) -> None:
+        rendered = DebugTerminalReporter._render_attempt_messages(
+            (
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "player_id": "RED",
+                            "turn_index": 3,
+                            "public_state": {"scores": {"RED": 4, "BLUE": 2}},
+                        },
+                        sort_keys=True,
+                    ),
+                },
+            )
+        )
+
+        self.assertEqual(rendered[0], "[user]")
+        self.assertIn('player_id: "RED"', rendered)
+        self.assertIn("turn_index: 3", rendered)
+        public_state_index = rendered.index("public_state:")
+        self.assertEqual(rendered[public_state_index + 1], "{")
+
+    def test_debug_reporter_pretty_prints_fenced_json_answers(self) -> None:
+        rendered = DebugTerminalReporter._render_attempt_response(
+            '```json\n{"action_index": 0, "private_reasoning": "Take the safe move."}\n```',
+            {},
+        )
+
+        self.assertIn("action_index: 0", rendered)
+        self.assertIn('private_reasoning: "Take the safe move."', rendered)
 
     def test_orchestrator_runs_recall_and_reflect_memory_flow(self) -> None:
         red_player = PhasedScriptedPlayer(

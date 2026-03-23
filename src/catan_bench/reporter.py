@@ -176,10 +176,7 @@ class DebugTerminalReporter(TerminalReporter):
             role = str(message.get("role", "unknown"))
             content = message.get("content")
             rendered.append(f"[{role}]")
-            if isinstance(content, str):
-                rendered.extend(content.splitlines() or [""])
-            else:
-                rendered.extend(json.dumps(content, indent=2, sort_keys=True).splitlines())
+            rendered.extend(DebugTerminalReporter._render_debug_content(content))
             rendered.append("")
         if rendered and rendered[-1] == "":
             rendered.pop()
@@ -190,8 +187,63 @@ class DebugTerminalReporter(TerminalReporter):
         response_text: str | None, parsed_response: dict[str, object]
     ) -> list[str]:
         if response_text is not None:
-            return response_text.splitlines() or [""]
-        return json.dumps(parsed_response, indent=2, sort_keys=True).splitlines()
+            return DebugTerminalReporter._render_debug_content(response_text)
+        return DebugTerminalReporter._render_debug_content(parsed_response)
+
+    @staticmethod
+    def _render_debug_content(content: object) -> list[str]:
+        if isinstance(content, str):
+            parsed = DebugTerminalReporter._maybe_parse_json_text(content)
+            if parsed is not None:
+                return DebugTerminalReporter._render_structured_json(parsed)
+            return content.splitlines() or [""]
+        return DebugTerminalReporter._render_structured_json(content)
+
+    @staticmethod
+    def _maybe_parse_json_text(content: str) -> object | None:
+        stripped = DebugTerminalReporter._strip_markdown_fences(content).strip()
+        if not stripped or stripped[0] not in "{[":
+            return None
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _strip_markdown_fences(content: str) -> str:
+        stripped = content.strip()
+        if not stripped.startswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if not lines:
+            return stripped
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _render_structured_json(content: object) -> list[str]:
+        if isinstance(content, dict):
+            return DebugTerminalReporter._render_json_mapping(content)
+        return json.dumps(content, indent=2, sort_keys=True).splitlines()
+
+    @staticmethod
+    def _render_json_mapping(mapping: dict[object, object]) -> list[str]:
+        rendered: list[str] = []
+        for key, value in mapping.items():
+            key_label = str(key)
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                rendered.append(f"{key_label}: {json.dumps(value, sort_keys=True)}")
+            else:
+                rendered.append(f"{key_label}:")
+                rendered.extend(json.dumps(value, indent=2, sort_keys=True).splitlines())
+            rendered.append("")
+        if rendered and rendered[-1] == "":
+            rendered.pop()
+        return rendered
 
     @staticmethod
     def _wrap_lines(lines: list[str], *, width: int) -> list[str]:

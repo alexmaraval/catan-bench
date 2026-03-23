@@ -46,8 +46,16 @@ class ObservationBuilder:
             turn_index=decision.turn_index,
             phase=decision.phase,
             decision_index=decision.decision_index,
-            public_state=dict(engine.public_state()),
-            private_state=dict(engine.private_state(player_id)),
+            public_state=self._public_state_for_decision(
+                engine=engine,
+                decision=decision,
+                player_id=player_id,
+            ),
+            private_state=self._private_state_for_decision(
+                engine=engine,
+                decision=decision,
+                player_id=player_id,
+            ),
             game_rules=self.game_rules,
             decision_prompt=decision.prompt,
             legal_actions=tuple(decision.legal_actions),
@@ -71,8 +79,16 @@ class ObservationBuilder:
             turn_index=decision.turn_index,
             phase=decision.phase,
             decision_index=decision.decision_index,
-            public_state=dict(engine.public_state()),
-            private_state=dict(engine.private_state(player_id)),
+            public_state=self._public_state_for_decision(
+                engine=engine,
+                decision=decision,
+                player_id=player_id,
+            ),
+            private_state=self._private_state_for_decision(
+                engine=engine,
+                decision=decision,
+                player_id=player_id,
+            ),
             game_rules=self.game_rules,
             decision_prompt=decision.prompt,
             public_history=event_log.recent_public(None),
@@ -137,3 +153,39 @@ class ObservationBuilder:
             private_events_this_turn=private_events,
             memory=memory_store.get(player_id),
         )
+
+    @staticmethod
+    def _public_state_for_decision(
+        *,
+        engine: EngineAdapter,
+        decision: DecisionPoint,
+        player_id: str,
+    ) -> dict:
+        builder = getattr(engine, "public_state_for_decision", None)
+        if callable(builder):
+            return dict(
+                builder(
+                    player_id=player_id,
+                    phase=decision.phase,
+                    legal_actions=tuple(decision.legal_actions),
+                )
+            )
+        return dict(engine.public_state())
+
+    @staticmethod
+    def _private_state_for_decision(
+        *,
+        engine: EngineAdapter,
+        decision: DecisionPoint,
+        player_id: str,
+    ) -> dict:
+        builder = getattr(engine, "private_state_for_decision", None)
+        if callable(builder):
+            return dict(
+                builder(
+                    player_id=player_id,
+                    phase=decision.phase,
+                    legal_actions=tuple(decision.legal_actions),
+                )
+            )
+        return dict(engine.private_state(player_id))

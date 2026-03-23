@@ -17,6 +17,9 @@ DEV_CARD_ORDER = (
     "ROAD_BUILDING",
     "VICTORY_POINT",
 )
+TOTAL_ROADS = 15
+TOTAL_SETTLEMENTS = 5
+TOTAL_CITIES = 4
 
 try:
     from catanatron import Game
@@ -171,6 +174,70 @@ class CatanatronEngineAdapter:
                 ),
             },
         }
+
+    def public_state_for_decision(
+        self,
+        *,
+        player_id: str,
+        phase: str,
+        legal_actions: Sequence[Action],
+    ) -> Mapping[str, JsonValue]:
+        state = self.game.state
+        game_json = self._game_json()
+        return {
+            "players": {
+                color.value: self._public_player_prompt_summary(color)
+                for color in state.colors
+            },
+            "board": self._board_prompt_view(
+                player_id=player_id,
+                phase=phase,
+                legal_actions=legal_actions,
+                game_json=game_json,
+            ),
+            "turn": {
+                "current_player_id": state.current_color().value,
+                "turn_player_id": state.colors[state.current_turn_index].value,
+                "num_turns": state.num_turns,
+                "prompt": state.current_prompt.value,
+                "is_resolving_trade": state.is_resolving_trade,
+            },
+            "trade_state": self._trade_state_public(),
+            "bank": {
+                "resources": self._freqdeck_to_dict(state.resource_freqdeck),
+            },
+        }
+
+    def private_state_for_decision(
+        self,
+        *,
+        player_id: str,
+        phase: str,
+        legal_actions: Sequence[Action],
+    ) -> Mapping[str, JsonValue]:
+        color = Color[player_id]
+        key = player_key(self.game.state, color)
+        state = self.game.state
+
+        prompt_state: dict[str, JsonValue] = {
+            "player_id": player_id,
+            "resources": self._resource_counts(key),
+            "development_cards": self._development_card_counts(key),
+            "pieces": {
+                "roads": state.player_state[f"{key}_ROADS_AVAILABLE"],
+                "settlements": state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"],
+                "cities": state.player_state[f"{key}_CITIES_AVAILABLE"],
+            },
+            "victory_points": {
+                "visible": state.player_state[f"{key}_VICTORY_POINTS"],
+                "actual": state.player_state[f"{key}_ACTUAL_VICTORY_POINTS"],
+            },
+        }
+        if self._should_include_ports(phase=phase, legal_actions=legal_actions):
+            prompt_state["ports"] = self._serialize_ports(
+                state.board.get_player_port_resources(color)
+            )
+        return prompt_state
 
     def resolve_action(
         self, *, proposed_action: Action, legal_actions: tuple[Action, ...]
@@ -372,6 +439,27 @@ class CatanatronEngineAdapter:
             "has_largest_army": bool(state.player_state[f"{key}_HAS_ARMY"]),
         }
 
+    def _public_player_prompt_summary(self, color: Color) -> dict[str, JsonValue]:
+        key = player_key(self.game.state, color)
+        state = self.game.state
+        return {
+            "vp": int(state.player_state[f"{key}_VICTORY_POINTS"]),
+            "res_cards": sum(
+                state.player_state[f"{key}_{resource}_IN_HAND"]
+                for resource in RESOURCE_ORDER
+            ),
+            "dev_cards": sum(
+                state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
+            ),
+            "roads": TOTAL_ROADS - int(state.player_state[f"{key}_ROADS_AVAILABLE"]),
+            "settlements": (
+                TOTAL_SETTLEMENTS - int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
+            ),
+            "cities": TOTAL_CITIES - int(state.player_state[f"{key}_CITIES_AVAILABLE"]),
+            "longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),
+            "largest_army": bool(state.player_state[f"{key}_HAS_ARMY"]),
+        }
+
     def _resource_counts(self, key: str) -> dict[str, int]:
         return {
             resource: int(self.game.state.player_state[f"{key}_{resource}_IN_HAND"])
@@ -410,6 +498,226 @@ class CatanatronEngineAdapter:
 
     def _game_json(self) -> dict[str, Any]:
         return json.loads(json.dumps(self.game, cls=GameEncoder))
+
+    def _board_prompt_view(
+        self,
+        *,
+        player_id: str,
+        phase: str,
+        legal_actions: Sequence[Action],
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        _ = phase
+        board_view: dict[str, JsonValue] = {
+            "robber_coordinate": list(game_json["robber_coordinate"]),
+            "your_network": self._player_network_view(
+                player_id=player_id,
+                game_json=game_json,
+            ),
+        }
+        robber_targets = self._robber_targets_view(legal_actions)
+        if robber_targets:
+            board_view["robber_targets"] = robber_targets
+        board_view.update(
+            self._placement_candidate_views(
+                legal_actions=legal_actions,
+                game_json=game_json,
+            )
+        )
+        return board_view
+
+    def _player_network_view(
+        self,
+        *,
+        player_id: str,
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        nodes = game_json["nodes"]
+        edges = game_json["edges"]
+        adjacent_tiles = game_json["adjacent_tiles"]
+
+        owned_buildings = [
+            node
+            for node in nodes.values()
+            if node.get("color") == player_id and node.get("building") is not None
+        ]
+        owned_buildings.sort(key=lambda node: int(node["id"]))
+        owned_roads = [
+            edge for edge in edges if edge.get("color") == player_id
+        ]
+        owned_roads.sort(key=lambda edge: tuple(int(node_id) for node_id in edge["id"]))
+
+        network_tiles: dict[str, None] = {}
+        buildings_payload: list[dict[str, JsonValue]] = []
+        for node in owned_buildings:
+            node_id = int(node["id"])
+            tiles = [
+                self._tile_prompt_value(tile)
+                for tile in adjacent_tiles.get(str(node_id), [])
+            ]
+            for tile in tiles:
+                network_tiles.setdefault(tile, None)
+            buildings_payload.append(
+                {
+                    "node_id": node_id,
+                    "building": str(node["building"]),
+                    "adjacent_tiles": tiles,
+                }
+            )
+
+        return {
+            "buildings": buildings_payload,
+            "roads": [{"edge": list(edge["id"])} for edge in owned_roads],
+            "adjacent_tiles": list(network_tiles.keys()),
+        }
+
+    @staticmethod
+    def _robber_targets_view(legal_actions: Sequence[Action]) -> list[dict[str, JsonValue]]:
+        targets: dict[tuple[int, int, int], set[str]] = {}
+        for action in legal_actions:
+            if action.action_type != "MOVE_ROBBER":
+                continue
+            coordinate = action.payload.get("coordinate")
+            if not isinstance(coordinate, list) or len(coordinate) != 3:
+                continue
+            key = tuple(int(axis) for axis in coordinate)
+            victims = targets.setdefault(key, set())
+            victim = action.payload.get("victim")
+            if isinstance(victim, str):
+                victims.add(victim)
+
+        return [
+            {
+                "coordinate": list(coordinate),
+                "victims": sorted(victims),
+            }
+            for coordinate, victims in sorted(targets.items())
+        ]
+
+    def _placement_candidate_views(
+        self,
+        *,
+        legal_actions: Sequence[Action],
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        candidate_views: dict[str, JsonValue] = {}
+
+        settlement_candidates: list[dict[str, JsonValue]] = []
+        city_candidates: list[dict[str, JsonValue]] = []
+        road_candidates: list[dict[str, JsonValue]] = []
+        for action_index, action in enumerate(legal_actions):
+            if action.action_type == "BUILD_SETTLEMENT" and "node_id" in action.payload:
+                settlement_candidates.append(
+                    self._node_candidate_view(
+                        action_index=action_index,
+                        node_id=int(action.payload["node_id"]),
+                        game_json=game_json,
+                    )
+                )
+            elif action.action_type == "BUILD_CITY" and "node_id" in action.payload:
+                city_candidates.append(
+                    self._node_candidate_view(
+                        action_index=action_index,
+                        node_id=int(action.payload["node_id"]),
+                        game_json=game_json,
+                        include_owner=True,
+                    )
+                )
+            elif action.action_type == "BUILD_ROAD" and "edge" in action.payload:
+                road_candidates.append(
+                    self._road_candidate_view(
+                        action_index=action_index,
+                        edge=tuple(int(node_id) for node_id in action.payload["edge"]),
+                        game_json=game_json,
+                    )
+                )
+
+        if settlement_candidates:
+            candidate_views["settlement_candidates"] = settlement_candidates
+        if city_candidates:
+            candidate_views["city_candidates"] = city_candidates
+        if road_candidates:
+            candidate_views["road_candidates"] = road_candidates
+
+        return candidate_views
+
+    def _node_candidate_view(
+        self,
+        *,
+        action_index: int,
+        node_id: int,
+        game_json: Mapping[str, Any],
+        include_owner: bool = False,
+    ) -> dict[str, JsonValue]:
+        node = game_json["nodes"][str(node_id)]
+        adjacent_tiles = game_json["adjacent_tiles"].get(str(node_id), [])
+
+        tile_summaries: list[str] = []
+        ports: list[str] = []
+        for tile in adjacent_tiles:
+            summary = self._tile_prompt_value(tile)
+            if summary.startswith("PORT:"):
+                ports.append(summary.removeprefix("PORT:"))
+                continue
+            tile_summaries.append(summary)
+
+        candidate_view: dict[str, JsonValue] = {
+            "action_index": action_index,
+            "node_id": node_id,
+            "adjacent_tiles": tile_summaries,
+        }
+        if ports:
+            candidate_view["ports"] = sorted(set(ports))
+        if include_owner:
+            building = node.get("building")
+            if building is not None:
+                candidate_view["building"] = str(building)
+            color = node.get("color")
+            if color is not None:
+                candidate_view["owner_player_id"] = str(color)
+        return candidate_view
+
+    def _road_candidate_view(
+        self,
+        *,
+        action_index: int,
+        edge: tuple[int, int],
+        game_json: Mapping[str, Any],
+    ) -> dict[str, JsonValue]:
+        return {
+            "action_index": action_index,
+            "edge": list(edge),
+            "endpoints": [
+                self._node_candidate_view(
+                    action_index=action_index,
+                    node_id=node_id,
+                    game_json=game_json,
+                    include_owner=True,
+                )
+                for node_id in edge
+            ],
+        }
+
+    @staticmethod
+    def _should_include_ports(
+        *,
+        phase: str,
+        legal_actions: Sequence[Action],
+    ) -> bool:
+        _ = phase
+        return any(action.action_type == "MARITIME_TRADE" for action in legal_actions)
+
+    @staticmethod
+    def _tile_prompt_value(tile: Mapping[str, Any]) -> str:
+        tile_type = str(tile.get("type", "UNKNOWN"))
+        if tile_type == "RESOURCE_TILE":
+            return f"{tile['resource']}@{int(tile['number'])}"
+        if tile_type == "DESERT":
+            return "DESERT"
+        if tile_type == "PORT":
+            resource = "ANY" if tile.get("resource") is None else str(tile["resource"])
+            return f"PORT:{resource}"
+        return tile_type
 
     def _offer_trade_template(self) -> Action:
         return Action(

@@ -1,0 +1,35 @@
+[[players]]
+id = "RED"
+type = "llm"
+model = "qwen/qwen3-32b"
+api_base = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "qwen/qwen3-32b"
+api_base = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "openai/gpt-oss-120b"
+api_base = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "openai/gpt-oss-120b"
+api_base = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300

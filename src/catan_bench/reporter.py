@@ -327,6 +327,10 @@ def _describe(event: object) -> str | None:
         return f"city on node {p.get('node_id')}"
     if kind == "road_built":
         return f"road on {p.get('edge')}"
+    if kind == "resources_discarded":
+        count = p.get("discarded_count", "?")
+        noun = "resource" if count == 1 else "resources"
+        return f"discarded {count} {noun}"
 
     if kind == "robber_moved":
         coord  = p.get("coordinate")

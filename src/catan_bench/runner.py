@@ -96,7 +96,7 @@ def run_from_config_files(
     *,
     game_config_path: str | Path,
     players_config_path: str | Path,
-    resume_run_dir: str | Path | None = None,
+    run_dir: str | Path | None = None,
     debug: bool = False,
     debug_from_setup: bool = False,
     debug_trade: bool = False,
@@ -104,6 +104,10 @@ def run_from_config_files(
     _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
     player_configs = load_player_configs(players_config_path)
+    effective_run_dir, resume_run_dir = _resolve_requested_run_dir(
+        requested_run_dir=run_dir,
+        configured_run_dir=game_config.run_dir,
+    )
     resume_game_id = _load_resume_game_id(resume_run_dir)
     engine = build_engine(game_config, player_configs, game_id=resume_game_id)
     players = build_players(player_configs, game_config)
@@ -113,7 +117,7 @@ def run_from_config_files(
         observation_builder=ObservationBuilder(
             recent_event_window=game_config.history_window,
         ),
-        run_dir=game_config.run_dir,
+        run_dir=effective_run_dir,
         resume_run_dir=resume_run_dir,
         trading_chat_enabled=game_config.trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=(
@@ -139,6 +143,34 @@ def _load_local_env(start_dir: Path) -> None:
     if env_path is None:
         return
     load_dotenv(env_path, override=False)
+
+
+def _resolve_requested_run_dir(
+    *,
+    requested_run_dir: str | Path | None,
+    configured_run_dir: Path | None,
+) -> tuple[Path | None, Path | None]:
+    if requested_run_dir is None:
+        return configured_run_dir, None
+    requested_path = Path(requested_run_dir)
+    if _is_existing_run_directory(requested_path):
+        return None, requested_path
+    return requested_path, None
+
+
+def _is_existing_run_directory(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    return any(
+        (path / file_name).exists()
+        for file_name in (
+            "metadata.json",
+            "checkpoint.json",
+            "public_history.jsonl",
+            "public_state_trace.jsonl",
+            "action_trace.jsonl",
+        )
+    )
 
 
 def _load_resume_game_id(resume_run_dir: str | Path | None) -> str | None:
@@ -168,9 +200,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--game", required=True, help="Path to game TOML config.")
     parser.add_argument("--players", required=True, help="Path to player TOML config.")
     parser.add_argument(
-        "--resume-run",
-        help="Resume an existing run directory by replaying its saved action trace and appending new output in place.",
+        "--run-dir",
+        help=(
+            "For a new run, use this as the base output directory. "
+            "If it points to an existing run directory, resume that run in place."
+        ),
     )
+    parser.add_argument("--resume-run", dest="run_dir", help=argparse.SUPPRESS)
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -191,7 +227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = run_from_config_files(
         game_config_path=args.game,
         players_config_path=args.players,
-        resume_run_dir=args.resume_run,
+        run_dir=args.run_dir,
         debug=args.debug,
         debug_from_setup=args.debug_from_setup,
         debug_trade=args.debug_trade,

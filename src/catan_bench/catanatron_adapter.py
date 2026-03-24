@@ -126,7 +126,7 @@ class CatanatronEngineAdapter:
             phase=self._phase_name(state.current_prompt),
             legal_actions=legal_actions,
             decision_index=len(state.action_records),
-            prompt=self._decision_prompt(state.current_prompt),
+            prompt=self._decision_prompt(state.current_prompt, legal_actions=legal_actions),
         )
 
     def _advance_past_self_trade_response(self) -> None:
@@ -252,6 +252,7 @@ class CatanatronEngineAdapter:
                 "turn_player_id": state.colors[state.current_turn_index].value,
                 "num_turns": state.num_turns,
                 "prompt": state.current_prompt.value,
+                "is_discarding": state.is_discarding,
                 "is_resolving_trade": state.is_resolving_trade,
             },
             "trade_state": self._trade_state_public(),
@@ -289,6 +290,9 @@ class CatanatronEngineAdapter:
             prompt_state["ports"] = self._serialize_ports(
                 state.board.get_player_port_resources(color)
             )
+        discard_prompt = self._discard_prompt_summary(legal_actions)
+        if discard_prompt is not None:
+            prompt_state["discard_requirement"] = discard_prompt
         return prompt_state
 
     def resolve_action(
@@ -827,11 +831,18 @@ class CatanatronEngineAdapter:
             "BUY_DEVELOPMENT_CARD",
             "PLAY_KNIGHT_CARD",
             "PLAY_ROAD_BUILDING",
-            "DISCARD",
             "END_TURN",
             "CANCEL_TRADE",
         }:
             return {}
+
+        if action_type == "DISCARD":
+            resource_map = self._discard_resource_map_from_value(value)
+            if resource_map is not None:
+                return {"resources": resource_map}
+            if value is None:
+                return {}
+            return {"value": value}
 
         if action_type in {"BUILD_SETTLEMENT", "BUILD_CITY"}:
             return {"node_id": int(value)}
@@ -885,11 +896,19 @@ class CatanatronEngineAdapter:
             "BUY_DEVELOPMENT_CARD",
             "PLAY_KNIGHT_CARD",
             "PLAY_ROAD_BUILDING",
-            "DISCARD",
             "END_TURN",
             "CANCEL_TRADE",
         }:
             return None
+
+        if action_type == "DISCARD":
+            resource_map = self._discard_resource_map_from_payload(payload)
+            if resource_map is not None:
+                return self._resource_map_to_freqdeck(resource_map)
+            value = payload.get("value")
+            if isinstance(value, list):
+                return tuple(value)
+            return value
 
         if action_type in {"BUILD_SETTLEMENT", "BUILD_CITY"}:
             return int(payload["node_id"])
@@ -974,6 +993,87 @@ class CatanatronEngineAdapter:
         }
 
     @staticmethod
+    def _resource_summary(resource_map: Mapping[str, int]) -> str:
+        parts = [
+            f"{resource_map[resource]}×{resource}"
+            for resource in RESOURCE_ORDER
+            if resource_map.get(resource)
+        ]
+        return ", ".join(parts) or "none"
+
+    @staticmethod
+    def _resource_name(value: object) -> str | None:
+        if isinstance(value, str):
+            return value
+        enum_value = getattr(value, "value", None)
+        if isinstance(enum_value, str):
+            return enum_value
+        return None
+
+    @classmethod
+    def _normalize_resource_map(
+        cls, resource_map: Mapping[object, object]
+    ) -> dict[str, int] | None:
+        normalized: dict[str, int] = {}
+        for resource, amount in resource_map.items():
+            resource_name = cls._resource_name(resource)
+            if resource_name not in RESOURCE_ORDER:
+                return None
+            if not isinstance(amount, int):
+                return None
+            if amount <= 0:
+                continue
+            normalized[resource_name] = amount
+        return {
+            resource: normalized[resource]
+            for resource in RESOURCE_ORDER
+            if normalized.get(resource, 0) > 0
+        }
+
+    @classmethod
+    def _discard_resource_map_from_value(cls, value: Any) -> dict[str, int] | None:
+        if isinstance(value, Mapping):
+            return cls._normalize_resource_map(value)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            if len(value) == len(RESOURCE_ORDER) and all(isinstance(item, int) for item in value):
+                return cls._freqdeck_to_dict(value)
+            counts: dict[str, int] = {}
+            for item in value:
+                resource_name = cls._resource_name(item)
+                if resource_name not in RESOURCE_ORDER:
+                    return None
+                counts[resource_name] = counts.get(resource_name, 0) + 1
+            return counts
+        return None
+
+    @classmethod
+    def _discard_resource_map_from_payload(
+        cls, payload: Mapping[str, JsonValue]
+    ) -> dict[str, int] | None:
+        resources = payload.get("resources")
+        if isinstance(resources, Mapping):
+            return cls._normalize_resource_map(resources)
+        value = payload.get("value")
+        return cls._discard_resource_map_from_value(value)
+
+    @classmethod
+    def _discard_prompt_summary(
+        cls, legal_actions: Sequence[Action]
+    ) -> dict[str, JsonValue] | None:
+        if not legal_actions or any(action.action_type != "DISCARD" for action in legal_actions):
+            return None
+        resource_map = cls._discard_resource_map_from_payload(legal_actions[0].payload)
+        if resource_map is None:
+            return None
+        discard_count = sum(resource_map.values())
+        if discard_count <= 0:
+            return None
+        return {
+            "count": discard_count,
+            "legal_options": len(legal_actions),
+        }
+
+    @staticmethod
     def _serialize_ports(ports: Sequence[Any]) -> list[str]:
         result = []
         for port in ports:
@@ -984,13 +1084,21 @@ class CatanatronEngineAdapter:
     def _phase_name(prompt: ActionPrompt) -> str:
         return prompt.value.lower()
 
-    @staticmethod
-    def _decision_prompt(prompt: ActionPrompt) -> str:
+    @classmethod
+    def _decision_prompt(
+        cls, prompt: ActionPrompt, *, legal_actions: Sequence[Action] = ()
+    ) -> str:
+        discard_summary = cls._discard_prompt_summary(legal_actions)
         return {
             ActionPrompt.BUILD_INITIAL_SETTLEMENT: "Place your initial settlement.",
             ActionPrompt.BUILD_INITIAL_ROAD: "Place your initial road.",
             ActionPrompt.PLAY_TURN: "Choose an action for your turn.",
-            ActionPrompt.DISCARD: "Discard when the robber has been triggered.",
+            ActionPrompt.DISCARD: (
+                f"Choose which {discard_summary['count']} resource cards to discard "
+                "for the robber event."
+                if discard_summary is not None
+                else "Choose which resources to discard for the robber event."
+            ),
             ActionPrompt.MOVE_ROBBER: "Move the robber and optionally steal a resource.",
             ActionPrompt.DECIDE_TRADE: "Respond to the current trade offer.",
             ActionPrompt.DECIDE_ACCEPTEES: "Choose which accepting player to trade with.",
@@ -1076,6 +1184,11 @@ class CatanatronEngineAdapter:
             payload["node_id"] = action.payload["node_id"]
         elif action_type == "BUILD_ROAD":
             payload["edge"] = list(action.payload["edge"])
+        elif action_type == "DISCARD":
+            discard_map = self._discard_resource_map_from_payload(action.payload)
+            payload["action"] = {"action_type": "DISCARD", "payload": {}}
+            if discard_map is not None:
+                payload["discarded_count"] = sum(discard_map.values())
         elif action_type == "MOVE_ROBBER":
             payload["coordinate"] = list(action.payload["coordinate"])
             payload["victim"] = action.payload.get("victim")
@@ -1093,6 +1206,7 @@ class CatanatronEngineAdapter:
             "BUILD_SETTLEMENT": "settlement_built",
             "BUILD_CITY": "city_built",
             "BUILD_ROAD": "road_built",
+            "DISCARD": "resources_discarded",
             "MOVE_ROBBER": "robber_moved",
             "OFFER_TRADE": "trade_offered",
             "ACCEPT_TRADE": "trade_accepted",
@@ -1106,9 +1220,9 @@ class CatanatronEngineAdapter:
             "PLAY_ROAD_BUILDING": "development_card_played",
         }.get(action_type, "action_taken")
 
-    @staticmethod
+    @classmethod
     def _description_for_action(
-        action_type: str, payload: Mapping[str, JsonValue]
+        cls, action_type: str, payload: Mapping[str, JsonValue]
     ) -> str | None:
         if action_type == "BUILD_SETTLEMENT":
             return f"Build a settlement on node {payload['node_id']}."
@@ -1125,6 +1239,12 @@ class CatanatronEngineAdapter:
         if action_type == "PLAY_ROAD_BUILDING":
             return "Play Road Building; you will then place two roads."
         if action_type == "DISCARD":
+            discard_map = cls._discard_resource_map_from_payload(payload)
+            if discard_map:
+                return (
+                    f"Discard {cls._resource_summary(discard_map)} "
+                    "for the robber event."
+                )
             return "Discard the required cards for the robber event."
         if action_type == "MOVE_ROBBER":
             coordinate = payload.get("coordinate")

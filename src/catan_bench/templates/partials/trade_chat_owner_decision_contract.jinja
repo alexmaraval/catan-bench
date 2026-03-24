@@ -1,0 +1,5 @@
+Return strict JSON with keys:
+- `decision`: one of `continue`, `select`, or `close`.
+- `selected_proposal_id`: required only when `decision` is `select`; it must match one provided proposal id.
+- `message`: optional short public owner message.
+- `private_reasoning`: optional concise private note under 30 words.

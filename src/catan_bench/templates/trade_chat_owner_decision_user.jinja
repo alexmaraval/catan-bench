@@ -1,19 +1,16 @@
-Stage: Trade chat reply.
-This is a public trade chatroom owned by the active player.
-You may speak publicly, make a concrete proposal to the owner, or decline.
-You cannot trade with another non-owner player in this room.
-Compelling proposals should help you while still being attractive enough that the owner might prefer them to a bank fallback.
-Because the room is public, if another player already posted a proposal and you want the deal, improve on it or offer a cleaner fit instead of repeating a worse trade.
+Stage: Trade chat owner decision.
+You own this public trade chatroom.
+After reviewing the round, either continue the discussion, select one concrete proposal, or close the room with no deal.
+Prefer proposals that improve your build tempo at a better rate than your likely maritime fallback. If nobody offers that, close the room and move on.
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
 ### Your hand
 Resources: {{ fmt_resources(payload.private_state.resources) }}
-{% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
-{% if dc != "none" %}
-Dev cards: {{ dc }}
-{% endif %}
 VP: {{ fmt_vp(payload.private_state) }}
+{% if payload.private_state.ports %}
+Ports: {{ payload.private_state.ports | join(", ") }}
+{% endif %}
 {% if payload.memory.short_term %}
 Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
@@ -25,10 +22,9 @@ Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endfor %}
 {% endif %}
 
-### Trade negotiation
-Owner: {{ payload.owner_player_id }}
-They are requesting: {{ fmt_resources(payload.requested_resources) }}
+### Room state
 Round: {{ payload.round_index }}
+Requested resources: {{ fmt_resources(payload.requested_resources) }}
 Message character limit: {{ payload.message_char_limit }}
 
 ### Chat transcript
@@ -37,7 +33,16 @@ Message character limit: {{ payload.message_char_limit }}
 - {{ fmt_event(event) }}
 {% endfor %}
 {% else %}
-(no messages yet)
+(no messages)
+{% endif %}
+
+### Concrete proposals
+{% if payload.proposals %}
+{% for proposal in payload.proposals %}
+- {{ proposal.proposal_id }} by {{ proposal.player_id }}: owner gives {{ fmt_resources(proposal.owner_gives) }}, owner gets {{ fmt_resources(proposal.owner_gets) }}{% if proposal.message %}  "{{ proposal.message }}"{% endif %}
+{% endfor %}
+{% else %}
+(no concrete proposals)
 {% endif %}
 {% if payload.memory.long_term %}
 
@@ -45,13 +50,4 @@ Message character limit: {{ payload.message_char_limit }}
 {{ fmt_memory(payload.memory.long_term) }}
 {% endif %}
 
-### Current proposals
-{% if payload.proposals %}
-{% for proposal in payload.proposals %}
-- {{ proposal.proposal_id }} by {{ proposal.player_id }}: owner gives {{ fmt_resources(proposal.owner_gives) }}, owner gets {{ fmt_resources(proposal.owner_gets) }}{% if proposal.message %}  "{{ proposal.message }}"{% endif %}
-{% endfor %}
-{% else %}
-(no concrete proposals yet)
-{% endif %}
-
-{% include "partials/trade_chat_reply_contract.jinja" %}
+{% include "partials/trade_chat_owner_decision_contract.jinja" %}

@@ -14,7 +14,9 @@ class GameConfig:
     run_dir: Path | None = None
     history_window: int | None = 40
     trading_chat_enabled: bool = False
-    trading_chat_max_failed_attempts_per_turn: int = 4
+    trading_chat_max_failed_attempts_per_turn: int = 5
+    trading_chat_max_rooms_per_turn: int = 5
+    trading_chat_max_rounds_per_attempt: int = 3
     trading_chat_message_chars: int = 160
     trading_chat_history_limit: int | None = 16
 
@@ -51,7 +53,11 @@ def load_game_config(path: str | Path) -> GameConfig:
     history_window = payload.get("history_window", 40)
     trading_chat_enabled = bool(payload.get("trading_chat_enabled", False))
     trading_chat_max_failed_attempts_per_turn = int(
-        payload.get("trading_chat_max_failed_attempts_per_turn", 4)
+        payload.get("trading_chat_max_failed_attempts_per_turn", 5)
+    )
+    trading_chat_max_rooms_per_turn = int(payload.get("trading_chat_max_rooms_per_turn", 5))
+    trading_chat_max_rounds_per_attempt = int(
+        payload.get("trading_chat_max_rounds_per_attempt", 3)
     )
     trading_chat_message_chars = int(payload.get("trading_chat_message_chars", 160))
     trading_chat_history_limit = payload.get("trading_chat_history_limit", 16)
@@ -71,6 +77,8 @@ def load_game_config(path: str | Path) -> GameConfig:
         history_window=history_window,
         trading_chat_enabled=trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=trading_chat_max_failed_attempts_per_turn,
+        trading_chat_max_rooms_per_turn=trading_chat_max_rooms_per_turn,
+        trading_chat_max_rounds_per_attempt=trading_chat_max_rounds_per_attempt,
         trading_chat_message_chars=trading_chat_message_chars,
         trading_chat_history_limit=trading_chat_history_limit,
     )

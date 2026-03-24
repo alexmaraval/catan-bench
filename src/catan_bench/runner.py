@@ -184,6 +184,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Run silently until the first trade chat opens, then pause for every prompt.",
     )
+    parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Run post-game analysis after the game ends and print a summary.",
+    )
     args = parser.parse_args(argv)
 
     result = run_from_config_files(
@@ -195,6 +200,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         debug_trade=args.debug_trade,
     )
     print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+
+    if args.analyze:
+        run_directory = result.metadata.get("benchmark", {}).get("run_directory")
+        if run_directory:
+            from .analysis import analyze_game, print_terminal_summary
+            analysis = analyze_game(run_directory)
+            print_terminal_summary(analysis)
+
     return 0
 
 

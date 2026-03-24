@@ -2014,6 +2014,63 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             if phase.get("pip_count", 0):
                 st.caption(f"Opening: {phase.get('resource_diversity', 0)} types, {phase.get('pip_count', 0)} pips")
 
+    # ── Trade Negotiation Breakdown ──
+    any_chat = any(
+        pdata.get("trade_chat", {}).get("rooms_opened", 0)
+        or pdata.get("trade_chat", {}).get("proposals_made", 0)
+        for pdata in players.values()
+    )
+    if any_chat:
+        st.subheader("Trade Chat Negotiations")
+        chat_rows = []
+        for pid, pdata in players.items():
+            tc = pdata.get("trade_chat", {})
+            chat_rows.append({
+                "Player": pid,
+                "Rooms Opened": tc.get("rooms_opened", 0),
+                "Success Rate": f"{tc.get('negotiation_success_rate', 0):.0%}",
+                "Proposals Made": tc.get("proposals_made", 0),
+                "Proposals Accepted": tc.get("proposals_accepted", 0),
+                "Rooms Participated": tc.get("rooms_participated_in", 0),
+                "Avg Rounds": tc.get("avg_rounds_per_room", 0),
+            })
+        st.dataframe(chat_rows, use_container_width=True)
+
+        # Counterparty heatmap as a table
+        cp_rows = []
+        for pid, pdata in players.items():
+            cp = pdata.get("trade_chat", {}).get("counterparty_frequency", {})
+            if cp:
+                for partner, count in sorted(cp.items(), key=lambda x: -x[1]):
+                    cp_rows.append({"Player": pid, "Trade Partner": partner, "Completed Trades": count})
+        if cp_rows:
+            st.caption("Trade partnerships (completed chat trades)")
+            st.dataframe(cp_rows, use_container_width=True)
+
+    # ── Strategy Evolution ──
+    any_strategy = any(
+        pdata.get("strategy", {}).get("opening_strategy")
+        for pdata in players.values()
+    )
+    if any_strategy:
+        st.subheader("Strategy Evolution")
+        for pid, pdata in players.items():
+            strat = pdata.get("strategy", {})
+            if not strat.get("opening_strategy") and not strat.get("strategy_updates"):
+                continue
+            color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            with st.expander(f"{pid} — {strat.get('strategy_update_count', 0)} strategy updates"):
+                if strat.get("opening_strategy"):
+                    st.markdown(f"**Opening strategy:** {strat['opening_strategy']}")
+                updates = strat.get("strategy_updates", [])
+                for i, upd in enumerate(updates):
+                    if i == 0 and upd.get("stage") == "opening_strategy":
+                        continue  # Already shown above
+                    lt = upd.get("long_term", "")
+                    st.markdown(f"**Turn {upd.get('turn_index', '?')}** ({upd.get('stage', '')}): {lt}")
+                if strat.get("final_strategy") and (not updates or updates[-1].get("long_term") != strat["final_strategy"]):
+                    st.markdown(f"**Final strategy:** {strat['final_strategy']}")
+
 
 def _maybe_rerun(st, *, auto_refresh: bool, refresh_interval: int) -> None:
     if not auto_refresh:

@@ -11,15 +11,20 @@ from catan_bench.analysis import (
     compute_building_timeline,
     compute_decision_quality,
     compute_dev_card_analysis,
+    compute_discard_analysis,
     compute_game_summary,
     compute_phase_analysis,
     compute_resource_production,
     compute_robber_analysis,
+    compute_strategy_evolution,
     compute_trade_analysis,
+    compute_trade_chat_analysis,
     compute_vp_progression,
     PIPS,
 )
-from catan_bench.schemas import Event, PromptTrace, PromptTraceAttempt, PublicStateSnapshot
+from catan_bench.schemas import (
+    Event, MemorySnapshot, PlayerMemory, PromptTrace, PromptTraceAttempt, PublicStateSnapshot,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -192,6 +197,31 @@ class TestComputeRobberAnalysis(unittest.TestCase):
         result = compute_robber_analysis("RED", [_event("dice_rolled")])
         self.assertEqual(result["times_moved_robber"], 0)
         self.assertEqual(result["times_targeted"], 0)
+
+
+# ── Discard analysis tests ────────────────────────────────────────────────────
+
+class TestComputeDiscardAnalysis(unittest.TestCase):
+    def test_counts_discards_for_player(self) -> None:
+        events = [
+            _event("resources_discarded", actor="RED", discarded_count=4),
+            _event("resources_discarded", actor="BLUE", discarded_count=5),
+            _event("resources_discarded", actor="RED", discarded_count=3),
+        ]
+        result = compute_discard_analysis("RED", events)
+        self.assertEqual(result["times_discarded"], 2)
+        self.assertEqual(result["total_cards_discarded"], 7)
+
+    def test_no_discard_events(self) -> None:
+        result = compute_discard_analysis("RED", [_event("dice_rolled")])
+        self.assertEqual(result["times_discarded"], 0)
+        self.assertEqual(result["total_cards_discarded"], 0)
+
+    def test_missing_discarded_count(self) -> None:
+        events = [_event("resources_discarded", actor="RED")]
+        result = compute_discard_analysis("RED", events)
+        self.assertEqual(result["times_discarded"], 1)
+        self.assertEqual(result["total_cards_discarded"], 0)
 
 
 # ── Dev card analysis tests ───────────────────────────────────────────────────
@@ -504,6 +534,204 @@ class TestComputeDecisionQuality(unittest.TestCase):
         self.assertEqual(result["max_attempts_on_single_decision"], 0)
 
 
+# ── Trade chat analysis tests ─────────────────────────────────────────────────
+
+class TestComputeTradeChatAnalysis(unittest.TestCase):
+    def _chat_event(self, kind: str, owner: str = "RED", turn: int = 1,
+                    attempt: int = 0, **extra) -> Event:
+        payload: dict = {"owner_player_id": owner, "attempt_index": attempt, **extra}
+        return Event(
+            kind=kind, payload=payload, turn_index=turn,
+            history_index=0, phase="play_turn",
+        )
+
+    def test_rooms_opened_and_success_rate(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED", attempt=0),
+            self._chat_event("trade_chat_closed", owner="RED", attempt=0, outcome="selected", selected_player_id="BLUE"),
+            self._chat_event("trade_chat_opened", owner="RED", attempt=1),
+            self._chat_event("trade_chat_closed", owner="RED", attempt=1, outcome="no_deal"),
+        ]
+        result = compute_trade_chat_analysis("RED", events)
+        self.assertEqual(result["rooms_opened"], 2)
+        self.assertEqual(result["rooms_closed_selected"], 1)
+        self.assertEqual(result["rooms_closed_no_deal"], 1)
+        self.assertAlmostEqual(result["negotiation_success_rate"], 0.5)
+
+    def test_proposals_made_and_accepted(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED"),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="BLUE", proposal_id="A0.0.1",
+                             offer={"WOOD": 1}, request={"ORE": 1}, round_index=0),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="ORANGE", proposal_id="A0.0.2",
+                             offer={"BRICK": 1}, request={"ORE": 1}, round_index=0),
+            self._chat_event("trade_chat_quote_selected", owner="RED",
+                             selected_player_id="BLUE",
+                             offer={"WOOD": 1}, request={"ORE": 1}),
+            self._chat_event("trade_chat_closed", owner="RED",
+                             outcome="selected", selected_player_id="BLUE"),
+        ]
+        blue_result = compute_trade_chat_analysis("BLUE", events)
+        self.assertEqual(blue_result["proposals_made"], 1)
+        self.assertEqual(blue_result["proposals_accepted"], 1)
+
+        orange_result = compute_trade_chat_analysis("ORANGE", events)
+        self.assertEqual(orange_result["proposals_made"], 1)
+        self.assertEqual(orange_result["proposals_accepted"], 0)
+
+    def test_rooms_participated_in(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED"),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="BLUE", round_index=0),
+            self._chat_event("trade_chat_closed", owner="RED", outcome="no_deal"),
+        ]
+        blue_result = compute_trade_chat_analysis("BLUE", events)
+        self.assertEqual(blue_result["rooms_participated_in"], 1)
+        self.assertEqual(blue_result["rooms_opened"], 0)
+
+    def test_counterparty_frequency(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED", attempt=0),
+            self._chat_event("trade_chat_quote_selected", owner="RED", attempt=0,
+                             selected_player_id="BLUE", offer={"WOOD": 1}, request={"ORE": 1}),
+            self._chat_event("trade_chat_closed", owner="RED", attempt=0,
+                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event("trade_chat_opened", owner="RED", attempt=1),
+            self._chat_event("trade_chat_quote_selected", owner="RED", attempt=1,
+                             selected_player_id="BLUE", offer={"BRICK": 1}, request={"SHEEP": 1}),
+            self._chat_event("trade_chat_closed", owner="RED", attempt=1,
+                             outcome="selected", selected_player_id="BLUE"),
+        ]
+        result = compute_trade_chat_analysis("RED", events)
+        self.assertEqual(result["counterparty_frequency"].get("BLUE"), 2)
+
+    def test_resource_flow_as_owner(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED"),
+            self._chat_event("trade_chat_quote_selected", owner="RED",
+                             selected_player_id="BLUE",
+                             offer={"WOOD": 2}, request={"ORE": 3}),
+            self._chat_event("trade_chat_closed", owner="RED",
+                             outcome="selected", selected_player_id="BLUE"),
+        ]
+        result = compute_trade_chat_analysis("RED", events)
+        self.assertEqual(result["resources_given_via_chat"].get("WOOD"), 2)
+        self.assertEqual(result["resources_gained_via_chat"].get("ORE"), 3)
+
+    def test_resource_flow_as_acceptee(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED"),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="BLUE", proposal_id="A0.0.1",
+                             offer={"WOOD": 1}, request={"ORE": 1}, round_index=0),
+            self._chat_event("trade_chat_quote_selected", owner="RED",
+                             selected_player_id="BLUE",
+                             offer={"WOOD": 1}, request={"ORE": 1}),
+            self._chat_event("trade_chat_closed", owner="RED",
+                             outcome="selected", selected_player_id="BLUE"),
+        ]
+        # BLUE is acceptee: gains what owner offered (WOOD), gives what owner requested (ORE)
+        result = compute_trade_chat_analysis("BLUE", events)
+        self.assertEqual(result["resources_gained_via_chat"].get("WOOD"), 1)
+        self.assertEqual(result["resources_given_via_chat"].get("ORE"), 1)
+
+    def test_avg_rounds(self) -> None:
+        events = [
+            self._chat_event("trade_chat_opened", owner="RED"),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="BLUE", round_index=0),
+            self._chat_event("trade_chat_message", owner="RED",
+                             speaker_player_id="BLUE", round_index=1),
+            self._chat_event("trade_chat_closed", owner="RED", outcome="no_deal"),
+        ]
+        result = compute_trade_chat_analysis("RED", events)
+        self.assertAlmostEqual(result["avg_rounds_per_room"], 2.0)
+
+    def test_no_chat_events(self) -> None:
+        result = compute_trade_chat_analysis("RED", [_event("dice_rolled")])
+        self.assertEqual(result["rooms_opened"], 0)
+        self.assertEqual(result["proposals_made"], 0)
+        self.assertEqual(result["negotiation_success_rate"], 0.0)
+
+
+# ── Strategy evolution tests ──────────────────────────────────────────────────
+
+def _mem_snapshot(
+    player_id: str,
+    turn: int,
+    stage: str,
+    long_term: str | None = None,
+    short_term: str | None = None,
+) -> MemorySnapshot:
+    return MemorySnapshot(
+        player_id=player_id,
+        history_index=0,
+        turn_index=turn,
+        phase="play_turn",
+        decision_index=0,
+        stage=stage,
+        memory=PlayerMemory(long_term=long_term, short_term=short_term),
+    )
+
+
+class TestComputeStrategyEvolution(unittest.TestCase):
+    def test_opening_strategy_extracted(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "opening_strategy", long_term="Focus on ore and wheat"),
+        ]
+        result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(result["opening_strategy"], "Focus on ore and wheat")
+        self.assertEqual(result["strategy_update_count"], 1)
+
+    def test_deduplicates_unchanged_rewrites(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "opening_strategy", long_term="Plan A"),
+            _mem_snapshot("RED", 3, "turn_end", long_term="Plan A"),  # Same — should be skipped
+            _mem_snapshot("RED", 5, "turn_end", long_term="Plan B"),  # Changed
+        ]
+        result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(result["strategy_update_count"], 2)
+        self.assertEqual(result["strategy_updates"][0]["long_term"], "Plan A")
+        self.assertEqual(result["strategy_updates"][1]["long_term"], "Plan B")
+
+    def test_final_strategy_captured(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "opening_strategy", long_term="Start"),
+            _mem_snapshot("RED", 10, "turn_end", long_term="Endgame pivot"),
+        ]
+        result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(result["final_strategy"], "Endgame pivot")
+
+    def test_short_term_note_count(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "turn_start", short_term="note 1"),
+            _mem_snapshot("RED", 1, "choose_action", short_term="note 2"),
+            _mem_snapshot("RED", 2, "turn_start", short_term="note 3"),
+            _mem_snapshot("RED", 2, "turn_end", long_term="strategy"),  # Not counted
+        ]
+        result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(result["short_term_note_count"], 3)
+
+    def test_empty_memory_traces(self) -> None:
+        result = compute_strategy_evolution("RED", [])
+        self.assertIsNone(result["opening_strategy"])
+        self.assertEqual(result["strategy_update_count"], 0)
+        self.assertIsNone(result["final_strategy"])
+        self.assertEqual(result["short_term_note_count"], 0)
+
+    def test_filters_by_player_id(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "opening_strategy", long_term="Red plan"),
+            _mem_snapshot("BLUE", 1, "opening_strategy", long_term="Blue plan"),
+        ]
+        red_result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(red_result["opening_strategy"], "Red plan")
+        self.assertEqual(red_result["strategy_update_count"], 1)
+
+
 # ── PIPS constant test ────────────────────────────────────────────────────────
 
 class TestPipsConstant(unittest.TestCase):
@@ -594,6 +822,27 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             }
         ])
         _write_jsonl(run_dir / "players" / "BLUE" / "prompt_trace.jsonl", [])
+        _write_jsonl(run_dir / "players" / "RED" / "memory_trace.jsonl", [
+            {
+                "player_id": "RED",
+                "history_index": 0,
+                "turn_index": 1,
+                "phase": "play_turn",
+                "decision_index": 0,
+                "stage": "opening_strategy",
+                "memory": {"long_term": "Expand toward ore ports", "short_term": None},
+            },
+            {
+                "player_id": "RED",
+                "history_index": 2,
+                "turn_index": 3,
+                "phase": "play_turn",
+                "decision_index": 5,
+                "stage": "turn_end",
+                "memory": {"long_term": "Pivot to city strategy", "short_term": None},
+            },
+        ])
+        _write_jsonl(run_dir / "players" / "BLUE" / "memory_trace.jsonl", [])
 
     def test_analyze_game_returns_valid_structure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -603,12 +852,14 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             analysis = analyze_game(run_dir, write=True)
 
             self.assertEqual(analysis["game_id"], "test-game")
-            self.assertEqual(analysis["version"], "1")
+            self.assertEqual(analysis["version"], "2")
 
             gs = analysis["game_summary"]
             self.assertEqual(gs["winner_ids"], ["RED"])
             self.assertEqual(gs["num_turns"], 5)
             self.assertEqual(gs["total_decisions"], 10)
+            self.assertIn("trade_chat_rooms", gs)
+            self.assertIn("trade_chat_success_rate", gs)
 
             players = analysis["players"]
             self.assertIn("RED", players)
@@ -617,6 +868,16 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             self.assertTrue(players["RED"]["is_winner"])
             self.assertFalse(players["BLUE"]["is_winner"])
             self.assertEqual(players["RED"]["final_vp"], 5)
+
+            # Discard key present
+            self.assertIn("discard", players["RED"])
+
+            # New keys present
+            self.assertIn("trade_chat", players["RED"])
+            self.assertIn("strategy", players["RED"])
+            self.assertEqual(players["RED"]["strategy"]["opening_strategy"], "Expand toward ore ports")
+            self.assertEqual(players["RED"]["strategy"]["strategy_update_count"], 2)
+            self.assertEqual(players["RED"]["strategy"]["final_strategy"], "Pivot to city strategy")
 
             # analysis.json was written
             self.assertTrue((run_dir / "analysis.json").exists())

@@ -12,7 +12,7 @@ Dev cards: {{ dc }}
 {% endif %}
 VP: {{ fmt_vp(payload.private_state) }}
 {% if payload.memory.short_term %}
-Current plan: {{ fmt_memory(payload.memory.short_term) }}
+Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
 
 {% if payload.public_state.players %}

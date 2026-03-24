@@ -1,2 +1,2 @@
 Return strict JSON with one key:
-- `short_term`: a brief plain-text note for this turn, ideally 1 sentence and under 30 words. Return `null` if there is nothing worth storing.
+- `short_term`: a brief plain-text scratchpad entry for this turn, ideally 1 sentence and under 30 words. This is a local strategy notepad, not an action log. New entries are appended until end of turn, then wiped. Return `null` if there is nothing new worth adding.

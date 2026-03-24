@@ -545,13 +545,13 @@ class GameOrchestratorTests(unittest.TestCase):
 
     def test_orchestrator_persists_two_slot_memory_without_private_history(self) -> None:
         red = ScriptedPlayer(
-            start_turn_responses=[TurnStartResponse(short_term={"plan": "Offer trade first."})],
+            start_turn_responses=[TurnStartResponse(short_term="Offer trade first.")],
             action_responses=[
                 ActionDecision(
                     action=Action("OFFER_TRADE", payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}}),
-                    short_term={"plan": "Wait for BLUE's reply."},
+                    short_term="Wait for BLUE's reply.",
                 ),
-                ActionDecision(action=Action("END_TURN"), short_term={"plan": "End turn."}),
+                ActionDecision(action=Action("END_TURN"), short_term="End turn if trade fails."),
             ],
             end_turn_responses=[TurnEndResponse(long_term={"goal": "Try a different trade next time."})],
         )
@@ -572,7 +572,7 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual(result.winner_ids, ("RED",))
             self.assertEqual(
                 red.action_observations[1].memory.short_term,
-                {"plan": "Wait for BLUE's reply."},
+                "Offer trade first.\nWait for BLUE's reply.",
             )
             red_history = orchestrator.memory_store.history("RED")
             self.assertEqual(
@@ -585,6 +585,14 @@ class GameOrchestratorTests(unittest.TestCase):
                     "turn_end",
                     "turn_cleanup",
                 ],
+            )
+            self.assertEqual(
+                red_history[2].memory.short_term,
+                "Offer trade first.\nWait for BLUE's reply.",
+            )
+            self.assertEqual(
+                red_history[3].memory.short_term,
+                "Offer trade first.\nWait for BLUE's reply.\nEnd turn if trade fails.",
             )
             self.assertEqual(red_history[-1].memory.short_term, None)
             self.assertEqual(red_history[-2].memory.long_term, {"goal": "Try a different trade next time."})

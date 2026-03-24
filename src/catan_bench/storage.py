@@ -281,9 +281,13 @@ class MemoryStore:
         stage: str,
     ) -> MemorySnapshot:
         current = self.get(player_id)
+        merged_short_term = self._merge_short_term_notes(
+            current.short_term,
+            short_term,
+        )
         return self.write(
             player_id=player_id,
-            memory=PlayerMemory(long_term=current.long_term, short_term=short_term),
+            memory=PlayerMemory(long_term=current.long_term, short_term=merged_short_term),
             history_index=history_index,
             turn_index=turn_index,
             phase=phase,
@@ -339,6 +343,28 @@ class MemoryStore:
 
     def count(self) -> int:
         return sum(len(snapshots) for snapshots in self._history_by_player.values())
+
+    @staticmethod
+    def _merge_short_term_notes(
+        current_short_term: JsonValue | None,
+        new_short_term: JsonValue | None,
+    ) -> JsonValue | None:
+        if new_short_term is None:
+            return current_short_term
+        if current_short_term is None:
+            return new_short_term
+        if isinstance(current_short_term, str) and isinstance(new_short_term, str):
+            current_text = current_short_term.strip()
+            new_text = new_short_term.strip()
+            if not new_text:
+                return current_short_term
+            if not current_text:
+                return new_text
+            existing_lines = [line.strip() for line in current_text.splitlines() if line.strip()]
+            if new_text in existing_lines:
+                return current_short_term
+            return f"{current_text}\n{new_text}"
+        return new_short_term
 
     def close(self) -> None:
         for handle in self._trace_handles_by_player.values():

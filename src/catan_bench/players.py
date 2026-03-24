@@ -134,7 +134,7 @@ class ScriptedPlayer:
         response = self._action_responses.popleft()
         if isinstance(response, ActionDecision):
             return response
-        return ActionDecision(action=response, short_term=observation.memory.short_term)
+        return ActionDecision(action=response, short_term=None)
 
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
         self.end_turn_observations.append(observation)
@@ -152,7 +152,7 @@ class ScriptedPlayer:
         response = self._reactive_responses.popleft()
         if isinstance(response, ActionDecision):
             return response
-        return ActionDecision(action=response, short_term=observation.memory.short_term)
+        return ActionDecision(action=response, short_term=None)
 
     def open_trade_chat(self, observation: TradeChatObservation) -> TradeChatOpenResponse:
         self.trade_chat_observations.append(observation)
@@ -203,7 +203,7 @@ class FirstLegalPlayer:
             self.action_observations.append(observation)
         return ActionDecision(
             action=self._first_legal_action(observation.legal_actions),
-            short_term=observation.memory.short_term,
+            short_term=None,
         )
 
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
@@ -216,7 +216,7 @@ class FirstLegalPlayer:
             self.reactive_observations.append(observation)
         return ActionDecision(
             action=self._first_legal_action(observation.legal_actions),
-            short_term=observation.memory.short_term,
+            short_term=None,
         )
 
     @staticmethod
@@ -261,7 +261,7 @@ class RandomLegalPlayer:
             self.action_observations.append(observation)
         return ActionDecision(
             action=self._sample_action(observation.legal_actions),
-            short_term=observation.memory.short_term,
+            short_term=None,
         )
 
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
@@ -274,7 +274,7 @@ class RandomLegalPlayer:
             self.reactive_observations.append(observation)
         return ActionDecision(
             action=self._sample_action(observation.legal_actions),
-            short_term=observation.memory.short_term,
+            short_term=None,
         )
 
     def _sample_action(self, legal_actions: tuple[Action, ...]) -> Action:
@@ -959,7 +959,7 @@ class LLMPlayer:
     ) -> ActionDecision:
         return ActionDecision(
             action=self._action_from_payload(observation.legal_actions, response_payload),
-            short_term=self._coerce_memory_field(response_payload, "short_term", default=observation.memory.short_term),
+            short_term=self._coerce_memory_field(response_payload, "short_term"),
             reasoning=self._coerce_reasoning(response_payload),
         )
 
@@ -968,7 +968,7 @@ class LLMPlayer:
     ) -> ActionDecision:
         return ActionDecision(
             action=self._action_from_payload(observation.legal_actions, response_payload),
-            short_term=observation.memory.short_term,
+            short_term=None,
             reasoning=self._coerce_reasoning(response_payload),
         )
 
@@ -1290,7 +1290,7 @@ class LLMPlayer:
 
         return ActionDecision(
             action=self._fallback_legal_action(observation.legal_actions),
-            short_term=observation.memory.short_term,
+            short_term=None,
             reasoning=self._best_effort_reasoning(
                 repaired_payload,
                 fallback=decision.reasoning if decision is not None else None,

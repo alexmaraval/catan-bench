@@ -266,7 +266,7 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.action.action_type, "END_TURN")
-        self.assertEqual(response.short_term, {"plan": "Trade first."})
+        self.assertIsNone(response.short_term)
         self.assertEqual(response.reasoning, "Still bad.")
         trace = player.take_last_prompt_trace()
         self.assertIsNotNone(trace)
@@ -525,7 +525,7 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'Current plan: {"action": "build road", "target_edge": "[17, 18]"}',
+            'Current turn scratchpad: {"action": "build road", "target_edge": "[17, 18]"}',
             rendered,
         )
         self.assertIn('{"goal": "contest longest road"}', rendered)
@@ -533,7 +533,8 @@ class LLMPlayerTests(unittest.TestCase):
     def test_turn_start_contract_asks_for_plain_text_memory(self) -> None:
         renderer = PromptRenderer()
         rendered = renderer.render("partials/turn_start_contract.jinja")
-        self.assertIn("brief plain-text note", rendered)
+        self.assertIn("scratchpad entry", rendered)
+        self.assertIn("not an action log", rendered)
 
     def test_opening_strategy_contract_asks_for_plain_text_memory(self) -> None:
         renderer = PromptRenderer()
@@ -550,6 +551,7 @@ class LLMPlayerTests(unittest.TestCase):
         rendered = renderer.render("partials/action_contract.jinja")
         self.assertIn('"action_type": "OFFER_TRADE"', rendered)
         self.assertIn('"payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}', rendered)
+        self.assertIn("not as a description of the chosen action", rendered)
 
     def test_start_turn_raises_runtime_error_and_records_failed_attempt(self) -> None:
         player = LLMPlayer(

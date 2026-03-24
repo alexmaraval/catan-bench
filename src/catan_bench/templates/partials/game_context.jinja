@@ -15,7 +15,7 @@ VP: {{ fmt_vp(payload.private_state) }}
 Ports: {{ payload.private_state.ports | join(", ") }}
 {% endif %}
 {% if payload.memory.short_term %}
-Current plan: {{ fmt_memory(payload.memory.short_term) }}
+Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
 {% if payload.public_state.players %}
 

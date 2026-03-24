@@ -459,6 +459,7 @@ def _render_player_summary_table(st, players: dict) -> None:
         res = summary.get("resource_card_count") or summary.get("res_cards", 0)
         dev = summary.get("development_card_count") or summary.get("dev_cards", 0)
         roads = summary.get("longest_road_length", "-")
+        army = "🏆" if summary.get("has_largest_army") else "—"
         flags = []
         if summary.get("has_longest_road"):
             flags.append("🏆 Road")
@@ -471,6 +472,7 @@ def _render_player_summary_table(st, players: dict) -> None:
             f"<td style='text-align:center'>{res}</td>"
             f"<td style='text-align:center'>{dev}</td>"
             f"<td style='text-align:center'>{roads}</td>"
+            f"<td style='text-align:center'>{army}</td>"
             f"<td>{' '.join(flags)}</td>"
             f"</tr>"
         )
@@ -479,7 +481,7 @@ def _render_player_summary_table(st, players: dict) -> None:
             "<table style='width:100%;border-collapse:collapse;font-size:0.82rem'>"
             "<thead><tr style='border-bottom:1px solid #e5e7eb'>"
             "<th style='text-align:left'>Player</th>"
-            "<th>VP</th><th>Res</th><th>Dev</th><th>Road</th><th></th>"
+            "<th>VP</th><th>Res</th><th>Dev</th><th>Road</th><th>Army</th><th></th>"
             "</tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table>"

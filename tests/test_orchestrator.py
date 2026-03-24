@@ -1196,6 +1196,68 @@ class GameOrchestratorTests(unittest.TestCase):
                 ],
             )
 
+    def test_orchestrator_recovers_trade_chat_selection_from_invalid_hint(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
+            end_turn_responses=[TurnEndResponse(long_term={"goal": "Trade earlier."})],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need brick.",
+                    requested_resources={"BRICK": 1},
+                )
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="BLUE_WOOD_FOR_BRICK",
+                    message="Let's do it.",
+                ),
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do that.",
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockTradeChatEngine(),
+            {"RED": red, "BLUE": blue},
+            trading_chat_enabled=True,
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("RED",))
+        selected_event = next(
+            event
+            for event in orchestrator.event_log.public_events
+            if event.kind == "trade_chat_quote_selected"
+        )
+        self.assertEqual(selected_event.payload["selected_player_id"], "BLUE")
+        self.assertEqual(
+            selected_event.payload["selected_proposal_id"],
+            "attempt-1-round-1-proposal-1",
+        )
+        self.assertFalse(
+            any(event.kind == "trade_chat_no_deal" for event in orchestrator.event_log.public_events)
+        )
+
     def test_orchestrator_filters_trade_chat_proposals_owner_cannot_pay(self) -> None:
         red = ScriptedPlayer(
             start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],

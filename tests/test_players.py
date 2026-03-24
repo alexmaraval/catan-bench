@@ -344,6 +344,52 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(select_response.decision, "select")
         self.assertEqual(select_response.selected_proposal_id, "attempt-1-round-1-proposal-1")
 
+    def test_llm_player_trade_chat_select_recovers_invalid_proposal_hint(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "decision": "select",
+                    "selected_proposal_id": "BLUE_WOOD_FOR_BRICK",
+                    "message": "Deal.",
+                }
+            ),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="RED",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="owner_decision",
+            attempt_index=1,
+            round_index=1,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"WOOD": 1}},
+            transcript=(),
+            requested_resources={"BRICK": 1},
+            other_player_ids=("BLUE",),
+            proposals=(
+                TradeChatProposal(
+                    proposal_id="attempt-1-round-1-proposal-1",
+                    player_id="BLUE",
+                    round_index=1,
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                ),
+            ),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        select_response = player.decide_trade_chat(observation)
+
+        self.assertEqual(select_response.decision, "select")
+        self.assertEqual(select_response.selected_proposal_id, "attempt-1-round-1-proposal-1")
+
     def test_trade_chat_reply_falls_back_to_responder_relative_offer_request_when_needed(self) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(

@@ -1859,8 +1859,10 @@ class GameOrchestrator:
         decision_value = decision_value.lower()
         if decision_value not in {"continue", "select", "close"}:
             decision_value = "close"
-        if not isinstance(selected_proposal_id, str):
-            selected_proposal_id = None
+        selected_proposal_id = self._coerce_selected_proposal_id_hint(
+            proposals=proposals,
+            selected_proposal_id=selected_proposal_id,
+        )
         return TradeChatOwnerDecisionResponse(
             decision=decision_value,
             selected_proposal_id=selected_proposal_id,
@@ -1946,6 +1948,34 @@ class GameOrchestrator:
         for proposal in reversed(proposals):
             if proposal.player_id == normalized_player_id:
                 return proposal.proposal_id
+        return None
+
+    @staticmethod
+    def _coerce_selected_proposal_id_hint(
+        *,
+        proposals: tuple[TradeChatProposal, ...],
+        selected_proposal_id: str | None,
+    ) -> str | None:
+        if isinstance(selected_proposal_id, str):
+            for proposal in proposals:
+                if proposal.proposal_id == selected_proposal_id:
+                    return selected_proposal_id
+
+            hint_tokens = {
+                token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+            }
+            matching_players = {
+                proposal.player_id for proposal in proposals if proposal.player_id in hint_tokens
+            }
+            if len(matching_players) == 1:
+                matching_player_id = next(iter(matching_players))
+                return GameOrchestrator._selected_proposal_id_for_player(
+                    selected_player_id=matching_player_id,
+                    proposals=proposals,
+                )
+
+        if len(proposals) == 1:
+            return proposals[0].proposal_id
         return None
 
     def _update_trade_chat_after_action(

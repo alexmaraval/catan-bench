@@ -8,6 +8,7 @@ from pathlib import Path
 
 from catan_bench.dashboard import (
     DashboardSnapshot,
+    _render_player_summary_table,
     build_board_svg,
     build_player_timelines,
     discover_run_directories,
@@ -22,6 +23,36 @@ from catan_bench.schemas import Event
 
 
 class DashboardTests(unittest.TestCase):
+    def test_render_player_summary_table_includes_army_column(self) -> None:
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.markdown_calls: list[tuple[str, bool]] = []
+
+            def markdown(self, body: str, unsafe_allow_html: bool = False) -> None:
+                self.markdown_calls.append((body, unsafe_allow_html))
+
+        st = FakeStreamlit()
+
+        _render_player_summary_table(
+            st,
+            {
+                "RED": {
+                    "visible_victory_points": 3,
+                    "resource_card_count": 4,
+                    "development_card_count": 1,
+                    "longest_road_length": 5,
+                    "has_longest_road": True,
+                    "has_largest_army": True,
+                }
+            },
+        )
+
+        self.assertEqual(len(st.markdown_calls), 1)
+        html, unsafe = st.markdown_calls[0]
+        self.assertTrue(unsafe)
+        self.assertIn("<th>Army</th>", html)
+        self.assertIn("<td style='text-align:center'>🏆</td>", html)
+
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)

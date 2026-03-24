@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from collections import deque
 from typing import Callable, Iterable, Protocol
 
@@ -75,6 +76,34 @@ def _normalize_offer_trade_payload(payload: dict) -> dict:
         result["request"] = result.pop("want")
     # Drop extraneous keys the LLM sometimes adds (e.g. "player").
     return {k: v for k, v in result.items() if k in {"offer", "request"}}
+
+
+def _coerce_trade_chat_selected_proposal_id(
+    observation: TradeChatObservation,
+    selected_proposal_id: object,
+) -> str | None:
+    if isinstance(selected_proposal_id, str):
+        for proposal in observation.proposals:
+            if proposal.proposal_id == selected_proposal_id:
+                return selected_proposal_id
+
+        hint_tokens = {
+            token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+        }
+        matching_players = {
+            proposal.player_id
+            for proposal in observation.proposals
+            if proposal.player_id.upper() in hint_tokens
+        }
+        if len(matching_players) == 1:
+            matching_player_id = next(iter(matching_players))
+            for proposal in reversed(observation.proposals):
+                if proposal.player_id == matching_player_id:
+                    return proposal.proposal_id
+
+    if len(observation.proposals) == 1:
+        return observation.proposals[0].proposal_id
+    return None
 
 
 class ScriptedPlayer:
@@ -1299,8 +1328,10 @@ class LLMPlayer:
                     if proposal.player_id == selected_player_id:
                         selected_proposal_id = proposal.proposal_id
                         break
-        if not isinstance(selected_proposal_id, str):
-            selected_proposal_id = None
+        selected_proposal_id = _coerce_trade_chat_selected_proposal_id(
+            observation,
+            selected_proposal_id,
+        )
 
         return TradeChatOwnerDecisionResponse(
             decision=decision,

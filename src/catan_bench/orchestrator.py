@@ -758,6 +758,7 @@ class GameOrchestrator:
 
     def _turn_owner_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
         pending_response: ActionDecision | None = None
+        consecutive_invalid_trade_chat_attempts = 0
         while True:
             if pending_response is None:
                 observation = self.observation_builder.build_action(
@@ -797,14 +798,24 @@ class GameOrchestrator:
                     action=pending_response.action,
                 ):
                     return pending_response
-                continue
+                return ActionDecision(
+                    action=self._fallback_non_trade_action(decision.legal_actions),
+                    short_term=response.short_term,
+                )
             try:
                 _, selected_action = self._run_trade_chat(
                     player=player,
                     decision=decision,
                     selected_trade_action=response.action,
                 )
+                consecutive_invalid_trade_chat_attempts = 0
             except InvalidActionError as exc:
+                consecutive_invalid_trade_chat_attempts += 1
+                if consecutive_invalid_trade_chat_attempts >= 2:
+                    return ActionDecision(
+                        action=self._fallback_non_trade_action(decision.legal_actions),
+                        short_term=response.short_term,
+                    )
                 pending_response = self._retry_after_invalid_action(
                     player=player,
                     decision=decision,

@@ -2,6 +2,10 @@
 
 ### Your hand
 Resources: {{ fmt_resources(payload.private_state.resources) }}
+{% if payload.private_state.discard_requirement %}
+Must discard: {{ payload.private_state.discard_requirement.count }} cards
+Legal discard options: {{ payload.private_state.discard_requirement.legal_options }}
+{% endif %}
 {% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
 {% if dc != "none" %}
 Dev cards: {{ dc }}

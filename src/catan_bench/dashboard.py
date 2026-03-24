@@ -50,6 +50,7 @@ EVENT_EMOJIS = {
     "settlement_built": "🏠",
     "city_built": "🏙️",
     "road_built": "🛣️",
+    "resources_discarded": "🧺",
     "robber_moved": "🥷",
     "trade_offered": "🤝",
     "trade_accepted": "✅",
@@ -1328,6 +1329,7 @@ def _event_title(event: Event) -> str:
         "settlement_built": "Settlement built",
         "city_built": "City built",
         "road_built": "Road built",
+        "resources_discarded": "Resources discarded",
         "robber_moved": "Robber moved",
         "trade_offered": "Trade offered",
         "trade_accepted": "Trade accepted",
@@ -1400,6 +1402,10 @@ def _event_body(event: Event) -> str:
         return f"Dice result: {result}."
     if event.kind == "road_built":
         return f"Built road on {payload.get('edge')}."
+    if event.kind == "resources_discarded":
+        count = payload.get("discarded_count", "?")
+        noun = "resource" if count == 1 else "resources"
+        return f"Discarded {count} {noun} for the robber."
     if event.kind in {"settlement_built", "city_built"}:
         return f"Built on node {payload.get('node_id')}."
     if event.kind == "robber_moved":

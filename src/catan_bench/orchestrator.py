@@ -13,20 +13,19 @@ from .observations import ObservationBuilder
 from .players import Player
 from .schemas import (
     Action,
+    ActionDecision,
     DecisionPoint,
     Event,
     GameResult,
     JsonValue,
-    MemoryEntry,
-    PlayerResponse,
-    TradeChatObservation,
+    PublicStateSnapshot,
     TradeChatOpenResponse,
     TradeChatQuote,
     TradeChatReplyResponse,
     TradeChatSelectionResponse,
     TransitionResult,
 )
-from .storage import EventLog, MemoryStore, PromptTraceStore, write_json
+from .storage import EventLog, MemoryStore, PromptTraceStore, PublicStateStore, write_json
 
 if TYPE_CHECKING:
     from .reporter import TerminalReporter
@@ -57,13 +56,12 @@ def _resolve_run_dir(base_run_dir: str | Path | None, *, game_id: str) -> Path |
 
 
 @dataclass(slots=True)
-class _ActiveControlWindow:
-    player_id: str
+class _ActiveTurnSession:
+    owner_player_id: str
     turn_index: int
-    phase: str
-    decision_index: int
-    public_event_start: int
-    private_event_start: int
+    start_history_index: int
+    start_phase: str
+    start_decision_index: int
 
 
 @dataclass(slots=True)
@@ -83,7 +81,7 @@ class _PendingTradeChatSelection:
 
 
 class GameOrchestrator:
-    """Coordinates the engine, player adapters, and run-scoped logs."""
+    """Coordinates the engine, players, and run-scoped artifacts."""
 
     def __init__(
         self,
@@ -92,6 +90,7 @@ class GameOrchestrator:
         *,
         observation_builder: ObservationBuilder | None = None,
         event_log: EventLog | None = None,
+        public_state_store: PublicStateStore | None = None,
         memory_store: MemoryStore | None = None,
         prompt_trace_store: PromptTraceStore | None = None,
         run_dir: str | Path | None = None,
@@ -107,6 +106,7 @@ class GameOrchestrator:
         self.players = dict(players)
         self.observation_builder = observation_builder or ObservationBuilder()
         self.event_log = event_log or EventLog(resolved_run_dir)
+        self.public_state_store = public_state_store or PublicStateStore(resolved_run_dir)
         self.memory_store = memory_store or MemoryStore(resolved_run_dir)
         self.prompt_trace_store = prompt_trace_store or PromptTraceStore(resolved_run_dir)
         self.run_dir = resolved_run_dir
@@ -119,9 +119,8 @@ class GameOrchestrator:
         self.trading_chat_history_limit = trading_chat_history_limit
         self.reporter = reporter
         self._decision_phase_counts: dict[str, int] = {}
-        self._active_control_window: _ActiveControlWindow | None = None
-        self._public_event_cursor_by_player: dict[str, int] = {}
-        self._private_event_cursor_by_player: dict[str, int] = {}
+        self._active_turn: _ActiveTurnSession | None = None
+        self._last_turn_history_index_by_player: dict[str, int] = {}
         self._trade_chat_turn_state: _TradeChatTurnState | None = None
         self._pending_trade_chat_selection: _PendingTradeChatSelection | None = None
 
@@ -134,19 +133,13 @@ class GameOrchestrator:
         total_decisions = 0
         while not self.engine.is_terminal():
             if total_decisions >= self.max_decisions:
-                logger.warning(
-                    "Stopping game %s after %s decisions because max_decisions=%s was reached.",
-                    self.engine.game_id,
-                    total_decisions,
-                    self.max_decisions,
-                )
                 raise RuntimeError(
                     f"Stopped after {self.max_decisions} decisions without a terminal state."
                 )
             self.step()
             total_decisions += 1
 
-        logger.info("Game %s finished after %d decisions", self.engine.game_id, total_decisions)
+        self._finalize_active_turn_if_needed()
         metadata = dict(self.engine.result())
         metadata["benchmark"] = self._benchmark_metadata(total_decisions=total_decisions)
         result = GameResult(
@@ -154,120 +147,52 @@ class GameOrchestrator:
             winner_ids=self._winner_ids_from_metadata(metadata),
             total_decisions=total_decisions,
             public_event_count=len(self.event_log.public_events),
-            private_event_count=sum(
-                len(events) for events in self.event_log.private_events_by_player.values()
-            ),
             memory_writes=self.memory_store.count(),
             metadata=metadata,
         )
-
         if self.run_dir is not None:
             write_json(self.run_dir / "result.json", result.to_dict())
-
         if self.reporter is not None:
             self.reporter.on_game_end(result)
-
         return result
 
-    def step(self):
+    def step(self) -> TransitionResult:
         if self.engine.is_terminal():
             raise RuntimeError("Cannot step a terminal game.")
 
         decision = self.engine.current_decision()
-        self._refresh_trade_chat_turn_state(decision)
-        logger.debug(
-            "Decision %d: player=%s phase=%s actions=%d",
-            decision.decision_index,
-            decision.acting_player_id,
-            decision.phase,
-            len(decision.legal_actions),
+        turn_owner_id = self._turn_owner_id(decision)
+        self._refresh_trade_chat_turn_state(turn_owner_id=turn_owner_id, decision=decision)
+        self._decision_phase_counts[decision.phase] = (
+            self._decision_phase_counts.get(decision.phase, 0) + 1
         )
+
         player = self.players.get(decision.acting_player_id)
         if player is None:
             raise MissingPlayerError(
                 f"No player adapter registered for {decision.acting_player_id!r}."
             )
 
-        self._ensure_control_window(player=player, decision=decision)
-        self._decision_phase_counts[decision.phase] = (
-            self._decision_phase_counts.get(decision.phase, 0) + 1
-        )
-        chat_events: tuple[Event, ...] = ()
-        response = self._forced_trade_response(decision)
-        action_decision = self._decision_for_player_action(decision)
-
-        if response is None and self._can_offer_trade_chat(decision):
-            chat_events, selected_action = self._run_trade_chat(player=player, decision=decision)
-            if selected_action is not None:
-                response = PlayerResponse(action=selected_action)
-                action_decision = decision
-
-        if response is None:
-            observation = self.observation_builder.build_action(
-                engine=self.engine,
-                decision=action_decision,
-                memory_store=self.memory_store,
-                event_log=self.event_log,
-            )
-            response = player.respond(observation)
-            self._append_player_prompt_traces(player)
-
-        engine_resolve_action = getattr(self.engine, "resolve_action", None)
-        if callable(engine_resolve_action):
-            action = engine_resolve_action(
-                proposed_action=response.action,
-                legal_actions=action_decision.legal_actions,
-            )
-        else:
-            action = self._resolve_action(
-                proposed_action=response.action,
-                legal_actions=action_decision.legal_actions,
-            )
-
-        engine_transition = self.engine.apply_action(action)
-        combined_public_events = chat_events + engine_transition.public_events
-        if engine_transition.public_events:
-            self.event_log.append_public(engine_transition.public_events)
-        for player_id, events in engine_transition.private_events_by_player.items():
-            self.event_log.append_private(player_id, events)
-
-        self.event_log.append_private(
-            decision.acting_player_id,
-            (self._private_decision_event(decision=decision, action=action, response=response),),
-        )
-
-        transition = TransitionResult(
-            public_events=combined_public_events,
-            private_events_by_player=engine_transition.private_events_by_player,
-            terminal=engine_transition.terminal,
-            result_metadata=engine_transition.result_metadata,
-        )
-        self._update_trade_chat_after_action(
-            decision=decision,
-            action=action,
-            transition_terminal=engine_transition.terminal,
-        )
-
-        if self.reporter is not None:
-            self.reporter.on_step(
+        if self._should_auto_roll(decision):
+            response = ActionDecision(action=Action("ROLL"))
+            return self._apply_decision(
                 decision=decision,
-                action=action,
+                proposed_action=response.action,
                 response=response,
-                transition=transition,
             )
 
-        next_decision = None
-        if not engine_transition.terminal and not self.engine.is_terminal():
-            next_decision = self.engine.current_decision()
-        if self._should_end_control_window(
-            decision=decision,
-            action=action,
-            transition_terminal=engine_transition.terminal,
-            next_decision=next_decision,
-        ):
-            self._reflect_active_window(player=player, decision=decision)
+        if self._is_turn_owner_choice(decision, turn_owner_id):
+            self._ensure_turn_started(player=player, decision=decision)
+            response = self._turn_owner_response(player=player, decision=decision)
+        else:
+            response = self._reactive_response(player=player, decision=decision)
 
-        return transition
+        return self._apply_decision(
+            decision=decision,
+            proposed_action=response.action,
+            response=response,
+            update_short_term=self._is_turn_owner_choice(decision, turn_owner_id),
+        )
 
     def _prepare_run(self) -> None:
         missing_player_ids = [
@@ -278,15 +203,21 @@ class GameOrchestrator:
                 "Missing player adapters for: " + ", ".join(sorted(missing_player_ids))
             )
 
-        self.event_log.reset(self.engine.player_ids)
+        self.event_log.reset()
         self.memory_store.reset(self.engine.player_ids)
         self.prompt_trace_store.reset(self.engine.player_ids)
+        self.public_state_store.reset(
+            PublicStateSnapshot(
+                history_index=0,
+                turn_index=0,
+                phase="initial",
+                decision_index=None,
+                public_state=dict(self.engine.public_state()),
+            )
+        )
         self._decision_phase_counts = {}
-        self._active_control_window = None
-        self._public_event_cursor_by_player = {
-            player_id: 0 for player_id in self.engine.player_ids
-        }
-        self._private_event_cursor_by_player = {
+        self._active_turn = None
+        self._last_turn_history_index_by_player = {
             player_id: 0 for player_id in self.engine.player_ids
         }
         self._trade_chat_turn_state = None
@@ -297,6 +228,7 @@ class GameOrchestrator:
                 self.run_dir / "metadata.json",
                 {
                     "game_id": self.engine.game_id,
+                    "artifact_version": 2,
                     "run_directory": str(self.run_dir),
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
@@ -314,239 +246,263 @@ class GameOrchestrator:
                 },
             )
 
-    def _ensure_control_window(self, *, player: Player, decision: DecisionPoint) -> None:
-        active = self._active_control_window
-        if active is not None and active.player_id == decision.acting_player_id:
+    def _should_auto_roll(self, decision: DecisionPoint) -> bool:
+        if decision.phase != "play_turn":
+            return False
+        return any(action.action_type == "ROLL" for action in decision.legal_actions)
+
+    def _is_turn_owner_choice(self, decision: DecisionPoint, turn_owner_id: str) -> bool:
+        return (
+            decision.phase == "play_turn"
+            and decision.acting_player_id == turn_owner_id
+            and not self._should_auto_roll(decision)
+        )
+
+    def _ensure_turn_started(self, *, player: Player, decision: DecisionPoint) -> None:
+        active = self._active_turn
+        if (
+            active is not None
+            and active.owner_player_id == decision.acting_player_id
+            and active.turn_index == decision.turn_index
+        ):
             return
 
         player_id = decision.acting_player_id
-        public_cursor = self._public_event_cursor_by_player.get(player_id, 0)
-        private_cursor = self._private_event_cursor_by_player.get(player_id, 0)
-        recall = getattr(player, "recall", None)
-        if callable(recall):
-            recall_observation = self.observation_builder.build_recall(
-                engine=self.engine,
-                decision=decision,
-                event_log=self.event_log,
-                memory_store=self.memory_store,
-                public_event_start=public_cursor,
-                private_event_start=private_cursor,
-            )
-            recall_response = recall(recall_observation)
-            self._append_player_prompt_traces(player)
-            self._write_memory(
-                player_id=player_id,
-                memory=recall_response.memory,
-                turn_index=decision.turn_index,
-                phase=decision.phase,
-                decision_index=decision.decision_index,
-                update_kind="recall",
-            )
-
-        self._active_control_window = _ActiveControlWindow(
+        observation = self.observation_builder.build_turn_start(
+            engine=self.engine,
+            decision=decision,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            last_turn_history_index=self._last_turn_history_index_by_player.get(player_id, 0),
+        )
+        response = player.start_turn(observation)
+        self._append_player_prompt_traces(player)
+        self.memory_store.set_short_term(
             player_id=player_id,
+            short_term=response.short_term,
+            history_index=observation.history_index,
             turn_index=decision.turn_index,
             phase=decision.phase,
             decision_index=decision.decision_index,
-            public_event_start=len(self.event_log.public_events),
-            private_event_start=len(
-                self.event_log.private_events_by_player.get(player_id, ())
-            ),
+            stage="turn_start",
+        )
+        self._active_turn = _ActiveTurnSession(
+            owner_player_id=player_id,
+            turn_index=decision.turn_index,
+            start_history_index=observation.history_index,
+            start_phase=decision.phase,
+            start_decision_index=decision.decision_index,
         )
 
-    def _reflect_active_window(self, *, player: Player, decision: DecisionPoint) -> None:
-        active = self._active_control_window
-        if active is None:
-            return
-
-        reflect = getattr(player, "reflect", None)
-        if callable(reflect):
-            reflection_observation = self.observation_builder.build_reflection(
-                engine=self.engine,
-                player_id=active.player_id,
-                turn_index=decision.turn_index,
-                phase=decision.phase,
-                decision_index=decision.decision_index,
-                event_log=self.event_log,
-                memory_store=self.memory_store,
-                public_event_start=active.public_event_start,
-                private_event_start=active.private_event_start,
+    def _turn_owner_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
+        chat_events: tuple[Event, ...] = ()
+        selected_action: Action | None = None
+        if self._can_offer_trade_chat(decision):
+            chat_events, selected_action = self._run_trade_chat(player=player, decision=decision)
+        if selected_action is not None:
+            return ActionDecision(
+                action=selected_action,
+                short_term=self.memory_store.get(decision.acting_player_id).short_term,
             )
-            reflection_response = reflect(reflection_observation)
-            self._append_player_prompt_traces(player)
-            self._write_memory(
-                player_id=active.player_id,
-                memory=reflection_response.memory,
-                turn_index=decision.turn_index,
-                phase=decision.phase,
-                decision_index=decision.decision_index,
-                update_kind="reflect",
-            )
-
-        self._public_event_cursor_by_player[active.player_id] = len(self.event_log.public_events)
-        self._private_event_cursor_by_player[active.player_id] = len(
-            self.event_log.private_events_by_player.get(active.player_id, ())
+        observation = self.observation_builder.build_action(
+            engine=self.engine,
+            decision=decision,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            turn_start_history_index=self._turn_start_history_index(),
         )
-        self._active_control_window = None
+        response = player.choose_action(observation)
+        self._append_player_prompt_traces(player)
+        return response
 
-    def _write_memory(
+    def _reactive_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
+        forced = self._forced_trade_response(decision)
+        if forced is not None:
+            return forced
+        observation = self.observation_builder.build_reactive(
+            engine=self.engine,
+            decision=decision,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+        )
+        response = player.respond_reactive(observation)
+        self._append_player_prompt_traces(player)
+        return response
+
+    def _apply_decision(
         self,
         *,
-        player_id: str,
-        memory,
-        turn_index: int,
+        decision: DecisionPoint,
+        proposed_action: Action,
+        response: ActionDecision,
+        update_short_term: bool = False,
+    ) -> TransitionResult:
+        engine_resolve_action = getattr(self.engine, "resolve_action", None)
+        if callable(engine_resolve_action):
+            action = engine_resolve_action(
+                proposed_action=proposed_action,
+                legal_actions=decision.legal_actions,
+            )
+        else:
+            action = self._resolve_action(
+                proposed_action=proposed_action,
+                legal_actions=decision.legal_actions,
+            )
+        engine_transition = self.engine.apply_action(action)
+        transition = self._record_transition(decision=decision, transition=engine_transition)
+        self._update_trade_chat_after_action(
+            decision=decision,
+            action=action,
+            transition_terminal=transition.terminal,
+        )
+
+        if update_short_term:
+            self.memory_store.set_short_term(
+                player_id=decision.acting_player_id,
+                short_term=response.short_term,
+                history_index=self.event_log.current_history_index,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                stage="choose_action",
+            )
+
+        self._maybe_end_turn_session(decision=decision, transition=transition)
+
+        if self.reporter is not None:
+            self.reporter.on_step(
+                decision=decision,
+                action=action,
+                response=response,
+                transition=transition,
+            )
+
+        return transition
+
+    def _store_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
+        """Append events to the log and write the resulting public-state snapshot once.
+
+        We snapshot only after the full transition has been applied. If one engine
+        action emits multiple public events, attaching the same post-transition
+        state to each event makes the dashboard cursor "look ahead" when stepping
+        through those events one by one. Writing the snapshot only at the final
+        event keeps earlier cursor positions anchored to the previous known board.
+        """
+        stored = self.event_log.append(events)
+        if stored:
+            final_event = stored[-1]
+            self.public_state_store.append(
+                PublicStateSnapshot(
+                    history_index=final_event.history_index,
+                    turn_index=final_event.turn_index,
+                    phase=final_event.phase,
+                    decision_index=final_event.decision_index,
+                    public_state=dict(self.engine.public_state()),
+                )
+            )
+        return stored
+
+    def _record_transition(
+        self, *, decision: DecisionPoint, transition: TransitionResult
+    ) -> TransitionResult:
+        stored_events = self._store_events(transition.public_events)
+        return TransitionResult(
+            public_events=stored_events,
+            terminal=transition.terminal,
+            result_metadata=transition.result_metadata,
+        )
+
+    def _maybe_end_turn_session(
+        self, *, decision: DecisionPoint, transition: TransitionResult
+    ) -> None:
+        active = self._active_turn
+        if active is None:
+            return
+        if transition.terminal:
+            self._end_turn_session(active, phase=decision.phase, decision_index=decision.decision_index)
+            return
+        next_decision = self.engine.current_decision()
+        next_turn_owner_id = self._turn_owner_id(next_decision)
+        if (
+            next_turn_owner_id != active.owner_player_id
+            or next_decision.turn_index != active.turn_index
+        ):
+            self._end_turn_session(
+                active,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+            )
+
+    def _finalize_active_turn_if_needed(self) -> None:
+        active = self._active_turn
+        if active is None:
+            return
+        self._end_turn_session(
+            active,
+            phase=active.start_phase,
+            decision_index=active.start_decision_index,
+        )
+
+    def _end_turn_session(
+        self,
+        active: _ActiveTurnSession,
+        *,
         phase: str,
         decision_index: int,
-        update_kind: str,
     ) -> None:
-        self.memory_store.set(
-            MemoryEntry(
-                player_id=player_id,
-                content=memory,
-                turn_index=turn_index,
-                phase=phase,
-                decision_index=decision_index,
-                update_kind=update_kind,
-            )
+        player = self.players[active.owner_player_id]
+        observation = self.observation_builder.build_turn_end(
+            engine=self.engine,
+            player_id=active.owner_player_id,
+            turn_index=active.turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            turn_start_history_index=active.start_history_index,
         )
-
-    @staticmethod
-    def _should_end_control_window(
-        *,
-        decision: DecisionPoint,
-        action: Action,
-        transition_terminal: bool,
-        next_decision: DecisionPoint | None,
-    ) -> bool:
-        if transition_terminal or action.action_type == "END_TURN":
-            return True
-        if next_decision is None:
-            return True
-        return next_decision.acting_player_id != decision.acting_player_id
-
-    @staticmethod
-    def _resolve_action(
-        *, proposed_action: Action, legal_actions: tuple[Action, ...]
-    ) -> Action:
-        for legal_action in legal_actions:
-            if legal_action.matches(proposed_action):
-                return legal_action
-        if proposed_action.action_type == "OFFER_TRADE" and any(
-            action.action_type == "OFFER_TRADE" for action in legal_actions
-        ):
-            return proposed_action
-        matching_actions = [
-            action for action in legal_actions if action.action_type == proposed_action.action_type
-        ]
-        if proposed_action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE", "CANCEL_TRADE"}:
-            if len(matching_actions) == 1:
-                return matching_actions[0]
-        if proposed_action.action_type == "CONFIRM_TRADE":
-            accepting_player_id = proposed_action.payload.get("accepting_player_id")
-            if len(matching_actions) == 1 and accepting_player_id is None:
-                return matching_actions[0]
-            if isinstance(accepting_player_id, str):
-                for legal_action in matching_actions:
-                    if legal_action.payload.get("accepting_player_id") == accepting_player_id:
-                        return legal_action
-        raise InvalidActionError(
-            f"Action {proposed_action.to_dict()} is not in the current legal action set."
+        response = player.end_turn(observation)
+        self._append_player_prompt_traces(player)
+        self.memory_store.set_long_term(
+            player_id=active.owner_player_id,
+            long_term=response.long_term,
+            history_index=self.event_log.current_history_index,
+            turn_index=active.turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage="turn_end",
         )
-
-    @staticmethod
-    def _winner_ids_from_metadata(metadata) -> tuple[str, ...]:
-        winner_ids = metadata.get("winner_ids")
-        if isinstance(winner_ids, list) and all(
-            isinstance(player_id, str) for player_id in winner_ids
-        ):
-            return tuple(winner_ids)
-
-        winner_id = metadata.get("winner_id")
-        if isinstance(winner_id, str):
-            return (winner_id,)
-
-        return ()
-
-    def _benchmark_metadata(self, *, total_decisions: int) -> dict[str, object]:
-        public_events = self.event_log.public_events
-        trade_kinds = {
-            "trade_offered": "offers",
-            "trade_accepted": "accepted",
-            "trade_rejected": "rejected",
-            "trade_confirmed": "confirmed",
-            "trade_cancelled": "cancelled",
-        }
-        trade_metrics = {
-            metric: 0 for metric in ("offers", "accepted", "rejected", "confirmed", "cancelled")
-        }
-        trade_chat_metrics = {
-            metric: 0
-            for metric in (
-                "chat_windows_opened",
-                "chat_messages",
-                "quotes_selected",
-                "no_deals",
-            )
-        }
-        for event in public_events:
-            metric_name = trade_kinds.get(event.kind)
-            if metric_name is not None:
-                trade_metrics[metric_name] += 1
-            if event.kind == "trade_chat_opened":
-                trade_chat_metrics["chat_windows_opened"] += 1
-            elif event.kind == "trade_chat_message":
-                trade_chat_metrics["chat_messages"] += 1
-            elif event.kind == "trade_chat_quote_selected":
-                trade_chat_metrics["quotes_selected"] += 1
-            elif event.kind == "trade_chat_no_deal":
-                trade_chat_metrics["no_deals"] += 1
-
-        return {
-            "history_window": self.observation_builder.recent_event_window,
-            "run_directory": None if self.run_dir is None else str(self.run_dir),
-            "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
-            "trade_metrics": trade_metrics,
-            "trade_chat_metrics": trade_chat_metrics,
-            "trade_event_share": (
-                0.0
-                if total_decisions == 0
-                else round(sum(trade_metrics.values()) / total_decisions, 4)
-            ),
-        }
-
-    @staticmethod
-    def _private_decision_event(
-        *, decision: DecisionPoint, action: Action, response: PlayerResponse
-    ) -> Event:
-        payload = {
-            "decision_prompt": decision.prompt,
-            "action": action.to_dict(),
-        }
-        if response.reasoning is not None:
-            payload["reasoning"] = response.reasoning
-
-        return Event(
-            kind="player_decision",
-            payload=payload,
-            turn_index=decision.turn_index,
-            phase=decision.phase,
-            decision_index=decision.decision_index,
-            actor_player_id=decision.acting_player_id,
+        self.memory_store.clear_short_term(
+            player_id=active.owner_player_id,
+            history_index=self.event_log.current_history_index,
+            turn_index=active.turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage="turn_cleanup",
         )
+        self._last_turn_history_index_by_player[active.owner_player_id] = (
+            self.event_log.current_history_index
+        )
+        self._active_turn = None
 
-    def _refresh_trade_chat_turn_state(self, decision: DecisionPoint) -> None:
-        if decision.phase != "play_turn":
-            return
-        state = self._trade_chat_turn_state
-        if (
-            state is None
-            or state.owner_player_id != decision.acting_player_id
-            or state.turn_index != decision.turn_index
-        ):
-            self._trade_chat_turn_state = _TradeChatTurnState(
-                owner_player_id=decision.acting_player_id,
-                turn_index=decision.turn_index,
-            )
+    def _turn_owner_id(self, decision: DecisionPoint) -> str:
+        turn_owner_id_prop = getattr(self.engine, "turn_owner_id", None)
+        if isinstance(turn_owner_id_prop, str):
+            return turn_owner_id_prop
+        # fallback for engines that don't expose turn_owner_id directly
+        public_state = dict(self.engine.public_state())
+        turn = public_state.get("turn")
+        if isinstance(turn, dict):
+            turn_player_id = turn.get("turn_player_id")
+            if isinstance(turn_player_id, str):
+                return turn_player_id
+        return decision.acting_player_id
+
+    def _turn_start_history_index(self) -> int:
+        active = self._active_turn
+        if active is None:
+            return self.event_log.current_history_index
+        return active.start_history_index
 
     def _can_offer_trade_chat(self, decision: DecisionPoint) -> bool:
         if not self.trading_chat_enabled:
@@ -560,44 +516,28 @@ class GameOrchestrator:
             return False
         return state.failed_attempts < self.trading_chat_max_failed_attempts_per_turn
 
-    def _decision_for_player_action(self, decision: DecisionPoint) -> DecisionPoint:
-        if not self._can_offer_trade_chat(decision):
-            return decision
-        filtered_actions = tuple(
-            action for action in decision.legal_actions if action.action_type != "OFFER_TRADE"
-        )
-        return DecisionPoint(
-            acting_player_id=decision.acting_player_id,
-            turn_index=decision.turn_index,
-            phase=decision.phase,
-            legal_actions=filtered_actions,
-            decision_index=decision.decision_index,
-            prompt=decision.prompt,
-        )
-
-    def _forced_trade_response(self, decision: DecisionPoint) -> PlayerResponse | None:
+    def _forced_trade_response(self, decision: DecisionPoint) -> ActionDecision | None:
         pending = self._pending_trade_chat_selection
         if pending is None or pending.turn_index != decision.turn_index:
             return None
 
         if decision.phase == "decide_trade":
             if decision.acting_player_id == pending.counterparty_player_id:
-                return PlayerResponse(action=Action("ACCEPT_TRADE"))
+                return ActionDecision(action=Action("ACCEPT_TRADE"))
             if decision.acting_player_id != pending.owner_player_id:
-                return PlayerResponse(action=Action("REJECT_TRADE"))
+                return ActionDecision(action=Action("REJECT_TRADE"))
             return None
 
         if (
             decision.phase == "decide_acceptees"
             and decision.acting_player_id == pending.owner_player_id
         ):
-            return PlayerResponse(
+            return ActionDecision(
                 action=Action(
                     "CONFIRM_TRADE",
                     payload={"accepting_player_id": pending.counterparty_player_id},
                 )
             )
-
         return None
 
     def _run_trade_chat(
@@ -607,11 +547,8 @@ class GameOrchestrator:
         if not open_response.open_chat or not open_response.requested_resources:
             return (), None
 
-        attempt_index = 1
         state = self._trade_chat_turn_state
-        if state is not None:
-            attempt_index = state.failed_attempts + 1
-
+        attempt_index = state.failed_attempts + 1 if state is not None else 1
         events: list[Event] = [
             Event(
                 kind="trade_chat_opened",
@@ -639,8 +576,8 @@ class GameOrchestrator:
                     attempt_index=attempt_index,
                 )
             )
+        self._record_public_events(events)
 
-        self.event_log.append_public(tuple(events))
         quotes: list[TradeChatQuote] = []
         for other_player_id in self._trade_chat_participants(decision.acting_player_id):
             reply = self._reply_trade_chat(
@@ -650,7 +587,16 @@ class GameOrchestrator:
                 requested_resources=open_response.requested_resources,
                 quotes=tuple(quotes),
             )
-            if reply.message is None and (not reply.owner_gives or not reply.owner_gets):
+            # Require a complete, valid quote (both sides non-empty and respondent
+            # actually holds what the owner wants to receive).
+            if not reply.owner_gives or not reply.owner_gets:
+                continue
+            if not self._player_has_resources(other_player_id, reply.owner_gets):
+                logger.debug(
+                    "Skipping quote from %s: insufficient resources for %s",
+                    other_player_id,
+                    reply.owner_gets,
+                )
                 continue
             quote = TradeChatQuote(
                 player_id=other_player_id,
@@ -670,7 +616,7 @@ class GameOrchestrator:
                 quote=quote,
             )
             events.append(message_event)
-            self.event_log.append_public((message_event,))
+            self._record_public_events((message_event,))
 
         selection = self._select_trade_chat_offer(
             player=player,
@@ -683,7 +629,6 @@ class GameOrchestrator:
             (quote for quote in quotes if quote.player_id == selection.selected_player_id),
             None,
         )
-
         if selected_quote is None:
             no_deal_event = Event(
                 kind="trade_chat_no_deal",
@@ -710,7 +655,7 @@ class GameOrchestrator:
                 actor_player_id=decision.acting_player_id,
             )
             events.extend((no_deal_event, close_event))
-            self.event_log.append_public((no_deal_event, close_event))
+            self._record_public_events((no_deal_event, close_event))
             self._increment_failed_trade_chat_attempt()
             return tuple(events), None
 
@@ -743,7 +688,7 @@ class GameOrchestrator:
             actor_player_id=decision.acting_player_id,
         )
         events.extend((selected_event, close_event))
-        self.event_log.append_public((selected_event, close_event))
+        self._record_public_events((selected_event, close_event))
         self._pending_trade_chat_selection = _PendingTradeChatSelection(
             owner_player_id=decision.acting_player_id,
             counterparty_player_id=selected_quote.player_id,
@@ -766,7 +711,8 @@ class GameOrchestrator:
         open_trade_chat = getattr(player, "open_trade_chat", None)
         if not callable(open_trade_chat):
             return TradeChatOpenResponse(open_chat=False)
-        observation = self._trade_chat_observation(
+        observation = self.observation_builder.build_trade_chat(
+            engine=self.engine,
             player_id=decision.acting_player_id,
             owner_player_id=decision.acting_player_id,
             decision=decision,
@@ -776,6 +722,10 @@ class GameOrchestrator:
             else 1,
             requested_resources={},
             quotes=(),
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            message_char_limit=self.trading_chat_message_chars,
+            transcript_limit=self.trading_chat_history_limit,
         )
         response = open_trade_chat(observation)
         self._append_player_prompt_traces(player)
@@ -799,7 +749,8 @@ class GameOrchestrator:
         respond_trade_chat = getattr(player, "respond_trade_chat", None)
         if not callable(respond_trade_chat):
             return TradeChatReplyResponse()
-        observation = self._trade_chat_observation(
+        observation = self.observation_builder.build_trade_chat(
+            engine=self.engine,
             player_id=player_id,
             owner_player_id=decision.acting_player_id,
             decision=decision,
@@ -807,6 +758,10 @@ class GameOrchestrator:
             attempt_index=attempt_index,
             requested_resources=requested_resources,
             quotes=quotes,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            message_char_limit=self.trading_chat_message_chars,
+            transcript_limit=self.trading_chat_history_limit,
         )
         response = respond_trade_chat(observation)
         self._append_player_prompt_traces(player)
@@ -829,7 +784,8 @@ class GameOrchestrator:
         select_trade_chat_offer = getattr(player, "select_trade_chat_offer", None)
         if not callable(select_trade_chat_offer):
             return TradeChatSelectionResponse()
-        observation = self._trade_chat_observation(
+        observation = self.observation_builder.build_trade_chat(
+            engine=self.engine,
             player_id=decision.acting_player_id,
             owner_player_id=decision.acting_player_id,
             decision=decision,
@@ -837,6 +793,10 @@ class GameOrchestrator:
             attempt_index=attempt_index,
             requested_resources=requested_resources,
             quotes=quotes,
+            event_log=self.event_log,
+            memory_store=self.memory_store,
+            message_char_limit=self.trading_chat_message_chars,
+            transcript_limit=self.trading_chat_history_limit,
         )
         response = select_trade_chat_offer(observation)
         self._append_player_prompt_traces(player)
@@ -849,46 +809,13 @@ class GameOrchestrator:
             reasoning=response.reasoning,
         )
 
-    def _trade_chat_observation(
-        self,
-        *,
-        player_id: str,
-        owner_player_id: str,
-        decision: DecisionPoint,
-        stage: str,
-        attempt_index: int,
-        requested_resources: dict[str, JsonValue],
-        quotes: tuple[TradeChatQuote, ...],
-    ) -> TradeChatObservation:
-        transcript = self._trade_chat_transcript(decision.turn_index)
-        return TradeChatObservation(
-            game_id=self.engine.game_id,
-            player_id=player_id,
-            owner_player_id=owner_player_id,
-            turn_index=decision.turn_index,
-            phase=decision.phase,
-            decision_index=decision.decision_index,
-            stage=stage,
-            attempt_index=attempt_index,
-            public_state=dict(self.engine.public_state()),
-            private_state=dict(self.engine.private_state(player_id)),
-            transcript=transcript,
-            requested_resources=dict(requested_resources),
-            other_player_ids=tuple(
-                other_player_id for other_player_id in self.engine.player_ids if other_player_id != player_id
-            ),
-            quotes=quotes,
-            game_rules=self.observation_builder.game_rules,
-            memory=self.memory_store.get(player_id),
-            message_char_limit=self.trading_chat_message_chars,
-        )
-
-    def _trade_chat_transcript(self, turn_index: int) -> tuple[Event, ...]:
-        events = self.event_log.recent_public(self.trading_chat_history_limit)
-        return tuple(event for event in events if event.turn_index == turn_index)
+    def _record_public_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
+        return self._store_events(events)
 
     def _trade_chat_participants(self, owner_player_id: str) -> tuple[str, ...]:
-        return tuple(player_id for player_id in self.engine.player_ids if player_id != owner_player_id)
+        return tuple(
+            player_id for player_id in self.engine.player_ids if player_id != owner_player_id
+        )
 
     def _trade_chat_message_event(
         self,
@@ -949,14 +876,42 @@ class GameOrchestrator:
         if decision.turn_index != pending.turn_index:
             self._pending_trade_chat_selection = None
 
+    def _refresh_trade_chat_turn_state(
+        self, *, turn_owner_id: str, decision: DecisionPoint
+    ) -> None:
+        if decision.phase != "play_turn":
+            return
+        state = self._trade_chat_turn_state
+        if (
+            state is None
+            or state.owner_player_id != turn_owner_id
+            or state.turn_index != decision.turn_index
+        ):
+            self._trade_chat_turn_state = _TradeChatTurnState(
+                owner_player_id=turn_owner_id,
+                turn_index=decision.turn_index,
+            )
+
+    def _player_has_resources(self, player_id: str, resources: dict[str, JsonValue]) -> bool:
+        """Return True if player_id holds at least the given resource amounts."""
+        try:
+            private = dict(self.engine.private_state(player_id))
+            holdings = private.get("resources", {})
+            if not isinstance(holdings, dict):
+                return True
+            return all(
+                isinstance(amount, int) and int(holdings.get(resource, 0)) >= amount
+                for resource, amount in resources.items()
+            )
+        except Exception:
+            return True
+
     def _normalize_resource_map(self, value: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         result: dict[str, JsonValue] = {}
         for resource, amount in value.items():
             if not isinstance(resource, str):
                 continue
-            if not isinstance(amount, int):
-                continue
-            if amount <= 0:
+            if not isinstance(amount, int) or amount <= 0:
                 continue
             result[resource] = amount
         return result
@@ -976,19 +931,101 @@ class GameOrchestrator:
                 self.prompt_trace_store.append(prompt_trace)
                 self._report_prompt_trace(prompt_trace)
             return
-
         take_last_prompt_trace = getattr(player, "take_last_prompt_trace", None)
-        if not callable(take_last_prompt_trace):
-            return
-        prompt_trace = take_last_prompt_trace()
-        if prompt_trace is None:
-            return
-        self.prompt_trace_store.append(prompt_trace)
-        self._report_prompt_trace(prompt_trace)
+        if callable(take_last_prompt_trace):
+            prompt_trace = take_last_prompt_trace()
+            if prompt_trace is not None:
+                self.prompt_trace_store.append(prompt_trace)
+                self._report_prompt_trace(prompt_trace)
 
     def _report_prompt_trace(self, prompt_trace) -> None:
         if self.reporter is None:
             return
-        on_prompt_trace = getattr(self.reporter, "on_prompt_trace", None)
-        if callable(on_prompt_trace):
-            on_prompt_trace(prompt_trace)
+        hook = getattr(self.reporter, "on_prompt_trace", None)
+        if callable(hook):
+            hook(prompt_trace)
+
+    @staticmethod
+    def _resolve_action(
+        *, proposed_action: Action, legal_actions: tuple[Action, ...]
+    ) -> Action:
+        for legal_action in legal_actions:
+            if legal_action.matches(proposed_action):
+                return legal_action
+        if proposed_action.action_type == "OFFER_TRADE" and any(
+            action.action_type == "OFFER_TRADE" for action in legal_actions
+        ):
+            return proposed_action
+        matching_actions = [
+            action for action in legal_actions if action.action_type == proposed_action.action_type
+        ]
+        if proposed_action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE", "CANCEL_TRADE"}:
+            if len(matching_actions) == 1:
+                return matching_actions[0]
+        if proposed_action.action_type == "CONFIRM_TRADE":
+            accepting_player_id = proposed_action.payload.get("accepting_player_id")
+            if len(matching_actions) == 1 and accepting_player_id is None:
+                return matching_actions[0]
+            if isinstance(accepting_player_id, str):
+                for legal_action in matching_actions:
+                    if legal_action.payload.get("accepting_player_id") == accepting_player_id:
+                        return legal_action
+        raise InvalidActionError(
+            f"Action {proposed_action.to_dict()} is not in the current legal action set."
+        )
+
+    @staticmethod
+    def _winner_ids_from_metadata(metadata) -> tuple[str, ...]:
+        winner_ids = metadata.get("winner_ids")
+        if isinstance(winner_ids, list) and all(isinstance(player_id, str) for player_id in winner_ids):
+            return tuple(winner_ids)
+        winner_id = metadata.get("winner_id")
+        if isinstance(winner_id, str):
+            return (winner_id,)
+        return ()
+
+    def _benchmark_metadata(self, *, total_decisions: int) -> dict[str, object]:
+        trade_metrics = {
+            metric: 0
+            for metric in (
+                "offers",
+                "accepted",
+                "rejected",
+                "confirmed",
+                "cancelled",
+                "chat_windows_opened",
+                "chat_messages",
+                "quotes_selected",
+                "no_deals",
+            )
+        }
+        for event in self.event_log.public_events:
+            if event.kind == "trade_offered":
+                trade_metrics["offers"] += 1
+            elif event.kind == "trade_accepted":
+                trade_metrics["accepted"] += 1
+            elif event.kind == "trade_rejected":
+                trade_metrics["rejected"] += 1
+            elif event.kind == "trade_confirmed":
+                trade_metrics["confirmed"] += 1
+            elif event.kind == "trade_cancelled":
+                trade_metrics["cancelled"] += 1
+            elif event.kind == "trade_chat_opened":
+                trade_metrics["chat_windows_opened"] += 1
+            elif event.kind == "trade_chat_message":
+                trade_metrics["chat_messages"] += 1
+            elif event.kind == "trade_chat_quote_selected":
+                trade_metrics["quotes_selected"] += 1
+            elif event.kind == "trade_chat_no_deal":
+                trade_metrics["no_deals"] += 1
+        return {
+            "history_window": self.observation_builder.recent_event_window,
+            "run_directory": None if self.run_dir is None else str(self.run_dir),
+            "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
+            "trade_metrics": trade_metrics,
+            "trade_event_share": (
+                0.0
+                if total_decisions == 0
+                else round(sum(trade_metrics.values()) / total_decisions, 4)
+            ),
+        }

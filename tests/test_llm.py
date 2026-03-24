@@ -161,3 +161,44 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
                         messages=[{"role": "user", "content": "{}"}],
                         temperature=0.1,
                     )
+
+    def test_complete_retries_without_json_mode_when_provider_rejects_it(self) -> None:
+        captured_bodies: list[dict[str, object]] = []
+
+        def fake_urlopen(req, timeout):
+            captured_bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(captured_bodies) == 1:
+                raise error.HTTPError(
+                    req.full_url,
+                    400,
+                    "Bad Request",
+                    hdrs=None,
+                    fp=io.BytesIO(
+                        json.dumps(
+                            {
+                                "error": {
+                                    "message": (
+                                        "Failed to validate JSON. Please adjust your prompt."
+                                    ),
+                                    "code": "json_validate_failed",
+                                }
+                            }
+                        ).encode("utf-8")
+                    ),
+                )
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(api_key_env="OPENAI_API_KEY")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                response = client.complete(
+                    model="fake-model",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
+        self.assertEqual(len(captured_bodies), 2)
+        self.assertIn("response_format", captured_bodies[0])
+        self.assertNotIn("response_format", captured_bodies[1])
+        self.assertIn("choices", response)

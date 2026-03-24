@@ -1,0 +1,9 @@
+Return strict JSON.
+
+Required keys:
+- `action_index`: preferred integer index from the provided legal actions or board candidates.
+- `short_term`: revised short-term plan for the rest of the current turn. Reuse the previous value if no revision is needed.
+
+Optional keys:
+- `action`: full action object when a legal action requires a concrete payload.
+- `private_reasoning`: concise private note under 30 words.

@@ -53,50 +53,94 @@ class OpenAICompatibleChatClient:
                 f"export {self.api_key_env}=<your_api_key>"
             )
 
-        body = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "response_format": {"type": "json_object"},
-        }
-        if top_p is not None:
-            body["top_p"] = top_p
-        if reasoning_enabled is not None:
-            body.update(self._reasoning_request_fields(reasoning_enabled))
         endpoint = self.api_base.rstrip("/") + "/chat/completions"
-        req = request.Request(
-            endpoint,
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "catan-bench/0.2.0",
-            },
-            method="POST",
-        )
-        for attempt_index in range(self.max_attempts):
+        use_json_response_format = True
+        attempt_index = 0
+        while attempt_index < self.max_attempts:
+            req = self._build_request(
+                endpoint=endpoint,
+                api_key=api_key,
+                body=self._request_body(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    reasoning_enabled=reasoning_enabled,
+                    use_json_response_format=use_json_response_format,
+                ),
+            )
             try:
                 with request.urlopen(req, timeout=self.timeout_seconds) as response:
                     return json.loads(response.read().decode("utf-8"))
             except error.HTTPError as exc:  # pragma: no cover - network dependency.
                 details = exc.read().decode("utf-8", errors="replace")
+                if self._should_retry_without_response_format(
+                    exc,
+                    details=details,
+                    use_json_response_format=use_json_response_format,
+                ):
+                    use_json_response_format = False
+                    continue
                 if self._is_request_too_large_error(exc):
                     raise LLMRequestTooLargeError(
                         f"LLM request exceeded the provider payload limit: {details}"
                     ) from exc
-                if self._should_retry_http_error(exc) and attempt_index + 1 < self.max_attempts:
+                attempt_index += 1
+                if self._should_retry_http_error(exc) and attempt_index < self.max_attempts:
                     time.sleep(self._retry_delay(exc, attempt_index))
                     continue
                 raise RuntimeError(
                     f"LLM request failed with HTTP {exc.code}: {details}"
                 ) from exc
             except error.URLError as exc:  # pragma: no cover - network dependency.
-                if attempt_index + 1 < self.max_attempts:
+                attempt_index += 1
+                if attempt_index < self.max_attempts:
                     time.sleep(self.retry_backoff_seconds * (2**attempt_index))
                     continue
                 raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
 
         raise RuntimeError("LLM request failed after exhausting retry attempts.")
+
+    def _request_body(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, object]],
+        temperature: float,
+        top_p: float | None,
+        reasoning_enabled: bool | None,
+        use_json_response_format: bool,
+    ) -> dict[str, object]:
+        body: dict[str, object] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if use_json_response_format:
+            body["response_format"] = {"type": "json_object"}
+        if top_p is not None:
+            body["top_p"] = top_p
+        if reasoning_enabled is not None:
+            body.update(self._reasoning_request_fields(reasoning_enabled))
+        return body
+
+    @staticmethod
+    def _build_request(
+        *,
+        endpoint: str,
+        api_key: str,
+        body: dict[str, object],
+    ) -> request.Request:
+        return request.Request(
+            endpoint,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "catan-bench/0.3.0",
+            },
+            method="POST",
+        )
 
     def _reasoning_request_fields(
         self, reasoning_enabled: bool
@@ -130,3 +174,31 @@ class OpenAICompatibleChatClient:
     @staticmethod
     def _is_request_too_large_error(exc: error.HTTPError) -> bool:
         return exc.code == 413
+
+    @staticmethod
+    def _should_retry_without_response_format(
+        exc: error.HTTPError,
+        *,
+        details: str,
+        use_json_response_format: bool,
+    ) -> bool:
+        if exc.code != 400 or not use_json_response_format:
+            return False
+        error_payload: dict[str, object] = {}
+        try:
+            parsed = json.loads(details)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
+            error_payload = dict(parsed["error"])
+        code = str(error_payload.get("code", "")).lower()
+        message = str(error_payload.get("message", "")).lower()
+        if code == "json_validate_failed":
+            return True
+        return (
+            "failed to validate json" in message
+            or (
+                "response_format" in message
+                and ("unsupported" in message or "not supported" in message)
+            )
+        )

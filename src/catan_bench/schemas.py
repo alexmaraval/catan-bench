@@ -17,20 +17,20 @@ class Action:
         return self.action_type == other.action_type and self.payload == other.payload
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "action_type": self.action_type,
             "payload": self.payload,
         }
         if self.description is not None:
-            data["description"] = self.description
-        return data
+            payload["description"] = self.description
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, JsonValue]) -> "Action":
         return cls(
             action_type=str(data["action_type"]),
             payload=dict(data.get("payload") or {}),
-            description=data.get("description") if "description" in data else None,
+            description=str(data["description"]) if data.get("description") is not None else None,
         )
 
 
@@ -38,71 +38,127 @@ class Action:
 class Event:
     kind: str
     payload: dict[str, JsonValue] = field(default_factory=dict)
+    history_index: int = 0
     turn_index: int = 0
     phase: str = "unknown"
     decision_index: int | None = None
     actor_player_id: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "kind": self.kind,
             "payload": self.payload,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
         }
         if self.decision_index is not None:
-            data["decision_index"] = self.decision_index
+            payload["decision_index"] = self.decision_index
         if self.actor_player_id is not None:
-            data["actor_player_id"] = self.actor_player_id
-        return data
+            payload["actor_player_id"] = self.actor_player_id
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, JsonValue]) -> "Event":
         return cls(
             kind=str(data["kind"]),
             payload=dict(data.get("payload") or {}),
+            history_index=int(data.get("history_index", 0)),
             turn_index=int(data.get("turn_index", 0)),
             phase=str(data.get("phase", "unknown")),
-            decision_index=data.get("decision_index"),
-            actor_player_id=data.get("actor_player_id"),
+            decision_index=int(data["decision_index"]) if data.get("decision_index") is not None else None,
+            actor_player_id=(
+                str(data["actor_player_id"])
+                if data.get("actor_player_id") is not None
+                else None
+            ),
         )
 
 
 @dataclass(frozen=True, slots=True)
-class MemoryEntry:
+class PlayerMemory:
+    long_term: JsonValue | None = None
+    short_term: JsonValue | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "long_term": self.long_term,
+            "short_term": self.short_term,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue] | None) -> "PlayerMemory":
+        if data is None:
+            return cls()
+        return cls(
+            long_term=data.get("long_term"),
+            short_term=data.get("short_term"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MemorySnapshot:
     player_id: str
-    content: JsonValue
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
-    update_kind: str = "unknown"
-    tags: tuple[str, ...] = ()
+    stage: str
+    memory: PlayerMemory
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        return {
             "player_id": self.player_id,
-            "content": self.content,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
+            "stage": self.stage,
+            "memory": self.memory.to_dict(),
         }
-        if self.update_kind != "unknown":
-            data["update_kind"] = self.update_kind
-        if self.tags:
-            data["tags"] = list(self.tags)
-        return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "MemoryEntry":
-        tags = data.get("tags", ())
+    def from_dict(cls, data: dict[str, JsonValue]) -> "MemorySnapshot":
         return cls(
             player_id=str(data["player_id"]),
-            content=data["content"],
-            turn_index=int(data["turn_index"]),
-            phase=str(data["phase"]),
-            decision_index=int(data["decision_index"]),
-            update_kind=str(data.get("update_kind", "unknown")),
-            tags=tuple(str(tag) for tag in tags) if tags else (),
+            history_index=int(data.get("history_index", 0)),
+            turn_index=int(data.get("turn_index", 0)),
+            phase=str(data.get("phase", "unknown")),
+            decision_index=int(data.get("decision_index", 0)),
+            stage=str(data.get("stage", "unknown")),
+            memory=PlayerMemory.from_dict(
+                dict(data.get("memory") or {}) if isinstance(data.get("memory"), dict) else None
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PublicStateSnapshot:
+    history_index: int
+    turn_index: int
+    phase: str
+    decision_index: int | None
+    public_state: dict[str, JsonValue]
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        payload: dict[str, JsonValue] = {
+            "history_index": self.history_index,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "public_state": self.public_state,
+        }
+        if self.decision_index is not None:
+            payload["decision_index"] = self.decision_index
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "PublicStateSnapshot":
+        return cls(
+            history_index=int(data.get("history_index", 0)),
+            turn_index=int(data.get("turn_index", 0)),
+            phase=str(data.get("phase", "unknown")),
+            decision_index=int(data["decision_index"]) if data.get("decision_index") is not None else None,
+            public_state=dict(data.get("public_state") or {}),
         )
 
 
@@ -116,7 +172,7 @@ class DecisionPoint:
     prompt: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "acting_player_id": self.acting_player_id,
             "turn_index": self.turn_index,
             "phase": self.phase,
@@ -124,8 +180,8 @@ class DecisionPoint:
             "legal_actions": [action.to_dict() for action in self.legal_actions],
         }
         if self.prompt is not None:
-            data["prompt"] = self.prompt
-        return data
+            payload["prompt"] = self.prompt
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, JsonValue]) -> "DecisionPoint":
@@ -137,188 +193,140 @@ class DecisionPoint:
                 Action.from_dict(action) for action in data.get("legal_actions", ())
             ),
             decision_index=int(data.get("decision_index", 0)),
-            prompt=data.get("prompt") if "prompt" in data else None,
+            prompt=str(data["prompt"]) if data.get("prompt") is not None else None,
         )
 
 
 @dataclass(frozen=True, slots=True)
-class Observation:
+class TurnStartObservation:
     game_id: str
     player_id: str
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
+    public_history_since_last_turn: tuple[Event, ...] = ()
     game_rules: str | None = None
-    decision_prompt: str | None = None
-    public_history: tuple[Event, ...] = ()
-    private_history: tuple[Event, ...] = ()
-    recent_public_events: tuple[Event, ...] = ()
-    recent_private_events: tuple[Event, ...] = ()
-    legal_actions: tuple[Action, ...] = ()
-    memory: MemoryEntry | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "game_id": self.game_id,
             "player_id": self.player_id,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
             "public_state": self.public_state,
             "private_state": self.private_state,
+            "public_history_since_last_turn": [
+                event.to_dict() for event in self.public_history_since_last_turn
+            ],
             "game_rules": self.game_rules,
-            "decision_prompt": self.decision_prompt,
+            "memory": self.memory.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ActionObservation:
+    game_id: str
+    player_id: str
+    history_index: int
+    turn_index: int
+    phase: str
+    decision_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    public_history: tuple[Event, ...] = ()
+    turn_public_events: tuple[Event, ...] = ()
+    legal_actions: tuple[Action, ...] = ()
+    decision_prompt: str | None = None
+    game_rules: str | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "history_index": self.history_index,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
             "public_history": [event.to_dict() for event in self.public_history],
-            "private_history": [event.to_dict() for event in self.private_history],
-            "recent_public_events": [event.to_dict() for event in self.recent_public_events],
-            "recent_private_events": [
-                event.to_dict() for event in self.recent_private_events
-            ],
+            "turn_public_events": [event.to_dict() for event in self.turn_public_events],
             "legal_actions": [action.to_dict() for action in self.legal_actions],
-            "memory": None if self.memory is None else self.memory.to_dict(),
+            "decision_prompt": self.decision_prompt,
+            "game_rules": self.game_rules,
+            "memory": self.memory.to_dict(),
         }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "Observation":
-        return cls(
-            game_id=str(data["game_id"]),
-            player_id=str(data["player_id"]),
-            turn_index=int(data["turn_index"]),
-            phase=str(data["phase"]),
-            decision_index=int(data["decision_index"]),
-            public_state=dict(data.get("public_state") or {}),
-            private_state=dict(data.get("private_state") or {}),
-            game_rules=data.get("game_rules") if "game_rules" in data else None,
-            decision_prompt=data.get("decision_prompt") if "decision_prompt" in data else None,
-            public_history=tuple(
-                Event.from_dict(e) for e in data.get("public_history", ())
-            ),
-            private_history=tuple(
-                Event.from_dict(e) for e in data.get("private_history", ())
-            ),
-            recent_public_events=tuple(
-                Event.from_dict(e) for e in data.get("recent_public_events", ())
-            ),
-            recent_private_events=tuple(
-                Event.from_dict(e) for e in data.get("recent_private_events", ())
-            ),
-            legal_actions=tuple(
-                Action.from_dict(a) for a in data.get("legal_actions", ())
-            ),
-            memory=(
-                None
-                if data.get("memory") is None
-                else MemoryEntry.from_dict(data["memory"])
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
-class RecallObservation:
+class TurnEndObservation:
     game_id: str
     player_id: str
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    turn_public_events: tuple[Event, ...] = ()
     game_rules: str | None = None
-    public_events_since_last_turn: tuple[Event, ...] = ()
-    private_events_since_last_turn: tuple[Event, ...] = ()
-    memory: MemoryEntry | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "game_id": self.game_id,
             "player_id": self.player_id,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
+            "turn_public_events": [event.to_dict() for event in self.turn_public_events],
             "game_rules": self.game_rules,
-            "public_events_since_last_turn": [
-                event.to_dict() for event in self.public_events_since_last_turn
-            ],
-            "private_events_since_last_turn": [
-                event.to_dict() for event in self.private_events_since_last_turn
-            ],
-            "memory": None if self.memory is None else self.memory.to_dict(),
+            "memory": self.memory.to_dict(),
         }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "RecallObservation":
-        return cls(
-            game_id=str(data["game_id"]),
-            player_id=str(data["player_id"]),
-            turn_index=int(data["turn_index"]),
-            phase=str(data["phase"]),
-            decision_index=int(data["decision_index"]),
-            game_rules=data.get("game_rules") if "game_rules" in data else None,
-            public_events_since_last_turn=tuple(
-                Event.from_dict(event)
-                for event in data.get("public_events_since_last_turn", ())
-            ),
-            private_events_since_last_turn=tuple(
-                Event.from_dict(event)
-                for event in data.get("private_events_since_last_turn", ())
-            ),
-            memory=(
-                None
-                if data.get("memory") is None
-                else MemoryEntry.from_dict(data["memory"])
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
-class ReflectionObservation:
+class ReactiveObservation:
     game_id: str
     player_id: str
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    public_history: tuple[Event, ...] = ()
+    legal_actions: tuple[Action, ...] = ()
+    decision_prompt: str | None = None
     game_rules: str | None = None
-    public_events_this_turn: tuple[Event, ...] = ()
-    private_events_this_turn: tuple[Event, ...] = ()
-    memory: MemoryEntry | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "game_id": self.game_id,
             "player_id": self.player_id,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
+            "public_history": [event.to_dict() for event in self.public_history],
+            "legal_actions": [action.to_dict() for action in self.legal_actions],
+            "decision_prompt": self.decision_prompt,
             "game_rules": self.game_rules,
-            "public_events_this_turn": [
-                event.to_dict() for event in self.public_events_this_turn
-            ],
-            "private_events_this_turn": [
-                event.to_dict() for event in self.private_events_this_turn
-            ],
-            "memory": None if self.memory is None else self.memory.to_dict(),
+            "memory": self.memory.to_dict(),
         }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "ReflectionObservation":
-        return cls(
-            game_id=str(data["game_id"]),
-            player_id=str(data["player_id"]),
-            turn_index=int(data["turn_index"]),
-            phase=str(data["phase"]),
-            decision_index=int(data["decision_index"]),
-            game_rules=data.get("game_rules") if "game_rules" in data else None,
-            public_events_this_turn=tuple(
-                Event.from_dict(event) for event in data.get("public_events_this_turn", ())
-            ),
-            private_events_this_turn=tuple(
-                Event.from_dict(event) for event in data.get("private_events_this_turn", ())
-            ),
-            memory=(
-                None
-                if data.get("memory") is None
-                else MemoryEntry.from_dict(data["memory"])
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,23 +337,14 @@ class TradeChatQuote:
     owner_gets: dict[str, JsonValue] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "player_id": self.player_id,
             "owner_gives": self.owner_gives,
             "owner_gets": self.owner_gets,
         }
         if self.message is not None:
-            data["message"] = self.message
-        return data
-
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "TradeChatQuote":
-        return cls(
-            player_id=str(data["player_id"]),
-            message=data.get("message") if "message" in data else None,
-            owner_gives=dict(data.get("owner_gives") or {}),
-            owner_gets=dict(data.get("owner_gets") or {}),
-        )
+            payload["message"] = self.message
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +352,7 @@ class TradeChatObservation:
     game_id: str
     player_id: str
     owner_player_id: str
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
@@ -365,7 +365,7 @@ class TradeChatObservation:
     other_player_ids: tuple[str, ...] = ()
     quotes: tuple[TradeChatQuote, ...] = ()
     game_rules: str | None = None
-    memory: MemoryEntry | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
     message_char_limit: int = 160
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -373,6 +373,7 @@ class TradeChatObservation:
             "game_id": self.game_id,
             "player_id": self.player_id,
             "owner_player_id": self.owner_player_id,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
@@ -385,70 +386,40 @@ class TradeChatObservation:
             "other_player_ids": list(self.other_player_ids),
             "quotes": [quote.to_dict() for quote in self.quotes],
             "game_rules": self.game_rules,
-            "memory": None if self.memory is None else self.memory.to_dict(),
+            "memory": self.memory.to_dict(),
             "message_char_limit": self.message_char_limit,
         }
 
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "TradeChatObservation":
-        return cls(
-            game_id=str(data["game_id"]),
-            player_id=str(data["player_id"]),
-            owner_player_id=str(data["owner_player_id"]),
-            turn_index=int(data["turn_index"]),
-            phase=str(data["phase"]),
-            decision_index=int(data["decision_index"]),
-            stage=str(data["stage"]),
-            attempt_index=int(data["attempt_index"]),
-            public_state=dict(data.get("public_state") or {}),
-            private_state=dict(data.get("private_state") or {}),
-            transcript=tuple(Event.from_dict(event) for event in data.get("transcript", ())),
-            requested_resources=dict(data.get("requested_resources") or {}),
-            other_player_ids=tuple(str(player_id) for player_id in data.get("other_player_ids", ())),
-            quotes=tuple(TradeChatQuote.from_dict(quote) for quote in data.get("quotes", ())),
-            game_rules=data.get("game_rules") if "game_rules" in data else None,
-            memory=(
-                None
-                if data.get("memory") is None
-                else MemoryEntry.from_dict(data["memory"])
-            ),
-            message_char_limit=int(data.get("message_char_limit", 160)),
-        )
-
 
 @dataclass(frozen=True, slots=True)
-class MemoryResponse:
-    memory: JsonValue | None = None
+class TurnStartResponse:
+    short_term: JsonValue | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {"memory": self.memory}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "MemoryResponse":
-        return cls(memory=data.get("memory"))
+        return {"short_term": self.short_term}
 
 
 @dataclass(frozen=True, slots=True)
-class PlayerResponse:
+class ActionDecision:
     action: Action
-    memory_write: JsonValue | None = None
+    short_term: JsonValue | None = None
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {"action": self.action.to_dict()}
-        if self.memory_write is not None:
-            data["memory_write"] = self.memory_write
+        payload: dict[str, JsonValue] = {"action": self.action.to_dict()}
+        if self.short_term is not None:
+            payload["short_term"] = self.short_term
         if self.reasoning is not None:
-            data["reasoning"] = self.reasoning
-        return data
+            payload["reasoning"] = self.reasoning
+        return payload
 
-    @classmethod
-    def from_dict(cls, data: dict[str, JsonValue]) -> "PlayerResponse":
-        return cls(
-            action=Action.from_dict(data["action"]),
-            memory_write=data.get("memory_write"),
-            reasoning=data.get("reasoning") if "reasoning" in data else None,
-        )
+
+@dataclass(frozen=True, slots=True)
+class TurnEndResponse:
+    long_term: JsonValue | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {"long_term": self.long_term}
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,15 +430,15 @@ class TradeChatOpenResponse:
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "open_chat": self.open_chat,
             "requested_resources": self.requested_resources,
         }
         if self.message is not None:
-            data["message"] = self.message
+            payload["message"] = self.message
         if self.reasoning is not None:
-            data["reasoning"] = self.reasoning
-        return data
+            payload["reasoning"] = self.reasoning
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,15 +449,15 @@ class TradeChatReplyResponse:
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "owner_gives": self.owner_gives,
             "owner_gets": self.owner_gets,
         }
         if self.message is not None:
-            data["message"] = self.message
+            payload["message"] = self.message
         if self.reasoning is not None:
-            data["reasoning"] = self.reasoning
-        return data
+            payload["reasoning"] = self.reasoning
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,30 +467,25 @@ class TradeChatSelectionResponse:
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {}
+        payload: dict[str, JsonValue] = {}
         if self.selected_player_id is not None:
-            data["selected_player_id"] = self.selected_player_id
+            payload["selected_player_id"] = self.selected_player_id
         if self.message is not None:
-            data["message"] = self.message
+            payload["message"] = self.message
         if self.reasoning is not None:
-            data["reasoning"] = self.reasoning
-        return data
+            payload["reasoning"] = self.reasoning
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
 class TransitionResult:
     public_events: tuple[Event, ...] = ()
-    private_events_by_player: dict[str, tuple[Event, ...]] = field(default_factory=dict)
     terminal: bool = False
     result_metadata: dict[str, JsonValue] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "public_events": [event.to_dict() for event in self.public_events],
-            "private_events_by_player": {
-                player_id: [event.to_dict() for event in events]
-                for player_id, events in self.private_events_by_player.items()
-            },
             "terminal": self.terminal,
             "result_metadata": self.result_metadata,
         }
@@ -528,12 +494,8 @@ class TransitionResult:
     def from_dict(cls, data: dict[str, JsonValue]) -> "TransitionResult":
         return cls(
             public_events=tuple(
-                Event.from_dict(e) for e in data.get("public_events", ())
+                Event.from_dict(event) for event in data.get("public_events", ())
             ),
-            private_events_by_player={
-                str(pid): tuple(Event.from_dict(e) for e in events)
-                for pid, events in (data.get("private_events_by_player") or {}).items()
-            },
             terminal=bool(data.get("terminal", False)),
             result_metadata=dict(data.get("result_metadata") or {}),
         )
@@ -546,29 +508,41 @@ class PromptTraceAttempt:
     response_text: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        data: dict[str, JsonValue] = {
+        payload: dict[str, JsonValue] = {
             "messages": [dict(message) for message in self.messages],
             "response": self.response,
         }
         if self.response_text is not None:
-            data["response_text"] = self.response_text
-        return data
+            payload["response_text"] = self.response_text
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "PromptTraceAttempt":
+        return cls(
+            messages=tuple(
+                dict(message) for message in data.get("messages", ()) if isinstance(message, dict)
+            ),
+            response=dict(data.get("response") or {}),
+            response_text=str(data["response_text"]) if data.get("response_text") is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class PromptTrace:
     player_id: str
+    history_index: int
     turn_index: int
     phase: str
     decision_index: int
+    stage: str
     model: str
     temperature: float
-    stage: str
     attempts: tuple[PromptTraceAttempt, ...]
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "player_id": self.player_id,
+            "history_index": self.history_index,
             "turn_index": self.turn_index,
             "phase": self.phase,
             "decision_index": self.decision_index,
@@ -578,6 +552,24 @@ class PromptTrace:
             "attempts": [attempt.to_dict() for attempt in self.attempts],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "PromptTrace":
+        return cls(
+            player_id=str(data["player_id"]),
+            history_index=int(data.get("history_index", 0)),
+            turn_index=int(data.get("turn_index", 0)),
+            phase=str(data.get("phase", "unknown")),
+            decision_index=int(data.get("decision_index", 0)),
+            stage=str(data.get("stage", "unknown")),
+            model=str(data.get("model", "")),
+            temperature=float(data.get("temperature", 0.0)),
+            attempts=tuple(
+                PromptTraceAttempt.from_dict(attempt)
+                for attempt in data.get("attempts", ())
+                if isinstance(attempt, dict)
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class GameResult:
@@ -585,7 +577,6 @@ class GameResult:
     winner_ids: tuple[str, ...]
     total_decisions: int
     public_event_count: int
-    private_event_count: int
     memory_writes: int
     metadata: dict[str, JsonValue] = field(default_factory=dict)
 
@@ -595,7 +586,6 @@ class GameResult:
             "winner_ids": list(self.winner_ids),
             "total_decisions": self.total_decisions,
             "public_event_count": self.public_event_count,
-            "private_event_count": self.private_event_count,
             "memory_writes": self.memory_writes,
             "metadata": self.metadata,
         }
@@ -604,10 +594,9 @@ class GameResult:
     def from_dict(cls, data: dict[str, JsonValue]) -> "GameResult":
         return cls(
             game_id=str(data["game_id"]),
-            winner_ids=tuple(str(w) for w in data.get("winner_ids", ())),
+            winner_ids=tuple(str(player_id) for player_id in data.get("winner_ids", ())),
             total_decisions=int(data["total_decisions"]),
             public_event_count=int(data["public_event_count"]),
-            private_event_count=int(data["private_event_count"]),
             memory_writes=int(data["memory_writes"]),
             metadata=dict(data.get("metadata") or {}),
         )

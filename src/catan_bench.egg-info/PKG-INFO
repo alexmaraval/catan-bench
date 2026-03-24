@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: catan-bench
-Version: 0.2.0
+Version: 0.3.0
 Summary: Harness for benchmarking LLM players in multi-player Settlers of Catan.
 Author: Alexandre Maraval
 License: MIT License
@@ -28,113 +28,80 @@ License: MIT License
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Requires-Dist: jinja2>=3.1.6
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: streamlit>=1.55.0
 Dynamic: license-file
 
-# catan-bench v0.2.0
+# catan-bench v0.3.0
 
-`catan-bench` is an early harness for benchmarking LLM players in multi-player Settlers of Catan.
+`catan-bench` is a benchmark harness for running multi-player Settlers of Catan games with baseline bots and LLM players on top of a live `catanatron` engine.
 
-Version `0.2.0` adds LLM player support on top of the benchmark core:
+Version `0.3.0` is a simplification pass. The benchmark now revolves around:
 
-- a game orchestrator that owns full engine state,
-- player-scoped observations with public and private information,
-- append-only public/private logs,
-- per-player private memory writes,
-- rule/instruction bundles suitable for LLM prompting,
-- action validation before the engine applies a move,
-- a live `catanatron` engine adapter,
-- an `LLMPlayer` backed by an OpenAI-compatible chat client,
-- prompt trace recording for every LLM decision,
-- static HTML replay export from completed run artifacts.
+- one shared public history stream for the whole table,
+- one two-slot `PlayerMemory` per player with `long_term` and `short_term`,
+- one explicit active-turn loop with `start_turn`, `choose_action`, and `end_turn`,
+- compact prompt-facing state derived from `catanatron`,
+- prompt templates stored as package-local Jinja files,
+- a single cursor-based dashboard that shows the board, public log, and every player panel at once.
 
-The adapter targets the current GitHub version of `catanatron`, not the older PyPI release, because the GitHub version includes the domestic trade flow needed for this benchmark.
-
-The previous long-form research summary and roadmap were moved to [docs/PROJECT_NOTES.md](/Users/alexandremaraval/Documents/Projects/catan-bench/docs/PROJECT_NOTES.md).
+See [plan.md](plan.md) for the refactor plan and [docs/PROJECT_NOTES.md](docs/PROJECT_NOTES.md) for the longer research notes and benchmark background.
 
 ## Why this project exists
 
-Settlers of Catan is a good benchmark candidate for LLM agents because it combines:
+Settlers of Catan is a useful benchmark for LLM agents because it mixes long-horizon planning, hidden information, multi-player interaction, negotiation, and partial observability. The goal here is to measure decision-making under controlled observability, not who built the heaviest agent scaffolding.
 
-- long-horizon planning,
-- hidden information,
-- multi-player interaction,
-- negotiation and trading,
-- partial observability.
+## Core model
 
-The design goal is to measure **decision-making under controlled observability**, not who built the heaviest agent scaffolding.
+The runtime is organized around a small set of boundaries:
 
-## Architecture
+- `EngineAdapter`
+  - exposes the current decision point,
+  - exposes compact public state,
+  - exposes player-private state,
+  - applies validated actions to the live engine.
+- `GameOrchestrator`
+  - auto-rolls at the start of the active turn,
+  - starts the player's short-term turn plan,
+  - loops on action choice until the player stops or the turn is interrupted,
+  - routes setup, robber, discard, and trade responses through a reactive path,
+  - rewrites long-term memory at the end of the turn,
+  - persists public events, public state snapshots, memory snapshots, and prompt traces.
+- `Player`
+  - `start_turn(observation) -> short_term`
+  - `choose_action(observation) -> {action, short_term}`
+  - `end_turn(observation) -> long_term`
+  - `respond_reactive(observation) -> action`
+  - optional trade-chat helpers for open / reply / select.
+- `Storage`
+  - `public_history.jsonl`
+  - `public_state_trace.jsonl`
+  - `players/<id>/memory.json`
+  - `players/<id>/memory_trace.jsonl`
+  - `players/<id>/prompt_trace.jsonl`
 
-The harness is centered on four boundaries:
+The turn model is intentionally simple:
 
-1. `EngineAdapter`
-   - exposes the current decision point,
-   - exposes public state,
-   - exposes player-private state,
-   - applies validated actions.
+- `long_term` survives across turns and is overwritten once at turn end.
+- `short_term` is written at turn start, can be revised after each action, and is cleared when the turn ends.
+- Reactive off-turn decisions can read `long_term`, but they do not persist `short_term`.
+- Public history is the only shared transcript. There is no private history stream anymore.
 
-2. `GameOrchestrator`
-   - identifies the next acting player,
-   - builds the observation,
-   - calls the player adapter,
-   - validates the action,
-   - persists logs and memory writes.
+## What ships in 0.3.0
 
-3. `Player`
-   - receives an `Observation`,
-   - receives game rules, public history, private history, and decision prompt context,
-   - returns `{action, private_reasoning, private_memory_write}`.
+- a live `CatanatronEngineAdapter` for the current GitHub version of `catanatron`,
+- baseline `RandomLegalPlayer`, `FirstLegalPlayer`, and `ScriptedPlayer` implementations,
+- an `LLMPlayer` backed by an OpenAI-compatible chat client,
+- compact observation builders for turn-start, action, turn-end, reactive, and trade-chat stages,
+- Jinja prompt templates under `src/catan_bench/templates/`,
+- append-only storage for public events, public state snapshots, memory snapshots, and prompt traces,
+- a Streamlit dashboard with one global history cursor and concurrent player panels,
+- a simple public replay exporter built from the public event log.
 
-4. `Storage`
-   - `public_history.jsonl`
-   - `players/<id>/private_history.jsonl`
-   - `players/<id>/memory.jsonl`
-   - `players/<id>/prompt_trace.jsonl`
+The adapter targets the current GitHub version of `catanatron`, not the older PyPI release, because the GitHub version includes the domestic trade flow needed for this benchmark.
 
-Each player's `private_history.jsonl` now also captures their own prior decisions, including the chosen action and their fuller private reasoning for that turn. The long-term `memory.jsonl` remains a distilled summary store rather than a dump of verbose reasoning.
-For LLM-backed players, `prompt_trace.jsonl` records the exact prompt messages and JSON response for each decision, including any repair attempt after an illegal move.
-
-The harness is modeled around **decision points**, not just turns, so it can support trade responses, robber choices, initial placements, and other non-standard turn interactions.
-
-## What is implemented in v0.2.0
-
-- Core dataclasses for actions, events, observations, decisions, memory entries, and game results.
-- A protocol-based engine interface.
-- An observation builder that combines engine state with stored history.
-- A prompt/rules bundle that explains the game to LLM-backed players.
-- Append-only event and memory stores with optional JSONL persistence.
-- A game orchestrator with legal-action checking.
-- A small scripted player adapter for tests and demos.
-- An `LLMPlayer` plus an OpenAI-compatible chat client adapter.
-- A live `CatanatronEngineAdapter` with public/private state extraction.
-- Support for dynamic domestic trade offers via adapter-side validation of `OFFER_TRADE`.
-- Semantic public event logs for replay-friendly game interactions.
-- A static replay exporter that renders a public `replay.html` plus per-player personal replay pages.
-- Post-game trade metadata in completed results.
-- Unit tests covering both the mock harness flow and a real `catanatron` trade flow.
-
-## Repository layout
-
-- [src/catan_bench/schemas.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/schemas.py)
-- [src/catan_bench/engine.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/engine.py)
-- [src/catan_bench/observations.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/observations.py)
-- [src/catan_bench/orchestrator.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/orchestrator.py)
-- [src/catan_bench/storage.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/storage.py)
-- [src/catan_bench/players.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/players.py)
-- [src/catan_bench/config.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/config.py)
-- [src/catan_bench/runner.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/runner.py)
-- [src/catan_bench/catanatron_adapter.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/catanatron_adapter.py)
-- [src/catan_bench/replay.py](/Users/alexandremaraval/Documents/Projects/catan-bench/src/catan_bench/replay.py)
-- [configs/game.toml](/Users/alexandremaraval/Documents/Projects/catan-bench/configs/game.toml)
-- [configs/players.toml](/Users/alexandremaraval/Documents/Projects/catan-bench/configs/players.toml)
-- [tests/test_catanatron_adapter.py](/Users/alexandremaraval/Documents/Projects/catan-bench/tests/test_catanatron_adapter.py)
-- [tests/test_config_and_runner.py](/Users/alexandremaraval/Documents/Projects/catan-bench/tests/test_config_and_runner.py)
-- [tests/test_orchestrator.py](/Users/alexandremaraval/Documents/Projects/catan-bench/tests/test_orchestrator.py)
-- [tests/test_replay.py](/Users/alexandremaraval/Documents/Projects/catan-bench/tests/test_replay.py)
-
-## Quick start
+## Installation
 
 Create a virtual environment and install the package:
 
@@ -150,107 +117,73 @@ Install the trade-capable `catanatron` engine from GitHub:
 pip install git+https://github.com/bcollazo/catanatron.git
 ```
 
-Run a benchmark game from the provided TOML configs:
+If you use `uv`, the repo already includes a lockfile:
 
 ```bash
-./.venv/bin/python -m catan_bench --game configs/game.toml --players configs/openai-players.toml
+uv sync --group dev --group dashboard
 ```
 
-The CLI auto-loads a `.env` file by searching from the players config directory upward for up to four parent directories, so you can keep credentials in a project-local `.env`:
+## Quick start
+
+1. Put your API key in the environment or in a nearby `.env` file:
 
 ```bash
-OPENAI_API_KEY=<your_api_key>
+export OPENAI_API_KEY=<your_api_key>
 ```
 
-An example file is included at [`.env.example`](/Users/alexandremaraval/Documents/Projects/catan-bench/.env.example). Keep the real `.env` untracked.
+An example file lives at [`.env.example`](.env.example). The CLI looks for `.env` starting from the players config directory and walks up to four parent directories.
 
-This writes run artifacts to the `run_dir` defined in [configs/game.toml](/Users/alexandremaraval/Documents/Projects/catan-bench/configs/game.toml), which currently points to `runs/quickstart`.
-
-Generate a replay page from that run directory:
+2. Run a benchmark game:
 
 ```bash
-./.venv/bin/python -m catan_bench.replay runs/quickstart
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml
 ```
 
-This creates:
+3. The configured `run_dir` is treated as a base directory. Each execution creates a timestamped child directory such as:
 
-- `runs/quickstart/replay.html`
-- `runs/quickstart/players/RED/replay.html`
-- `runs/quickstart/players/BLUE/replay.html`
-- `runs/quickstart/players/ORANGE/replay.html`
-- `runs/quickstart/players/WHITE/replay.html`
+```text
+runs/0.3.0/dev/<game-id>-<timestamp>-<token>/
+```
 
-Open `runs/quickstart/replay.html` in a browser to inspect the shared public transcript as a long chat-style timeline with:
+The resolved run directory is written into both `metadata.json` and `result.json`.
 
-- one color-coded bubble per player,
-- special bubbles for major game events like trades and dice rolls,
-- turn/phase/decision metadata on each entry,
-- expandable raw event payloads for debugging.
-
-That public page now links to each player's personal replay page.
-
-Each player-specific page combines:
-
-- the shared public transcript,
-- that player's `private_history.jsonl`,
-- that player's `memory.jsonl`.
-
-The personal replay pages also include simple filters so you can isolate:
-
-- `Public`
-- `Private`
-- `Memory`
-
-The replay exporter reads:
-
-- `metadata.json`
-- `public_history.jsonl`
-- `result.json`
-- `players/<id>/private_history.jsonl`
-- `players/<id>/memory.jsonl`
-
-Run the current test suite:
+4. Export a simple public replay page for a completed run:
 
 ```bash
-./.venv/bin/python -m unittest discover -s tests -v
+python -m catan_bench.replay runs/0.3.0/dev/<run-name>
 ```
 
-Minimal example:
+This writes `replay.html` inside that run directory.
 
-```python
-from catan_bench import CatanatronEngineAdapter, GameOrchestrator
+5. Open the live dashboard against the same run:
 
-adapter = CatanatronEngineAdapter(seed=1)
-decision = adapter.current_decision()
-print(decision.phase, decision.acting_player_id)
-print(decision.legal_actions[:3])
+```bash
+streamlit run dashboard.py -- --run-dir runs/0.3.0/dev/<run-name>
 ```
 
-Minimal replay export example:
-
-```python
-from catan_bench import export_player_replay_html, export_replay_html
-
-public_path = export_replay_html("runs/quickstart")
-red_private_path = export_player_replay_html("runs/quickstart", "RED")
-print(public_path)
-print(red_private_path)
-```
+The dashboard reads the live artifacts directly, so it can stay open while a game is still running.
 
 ## Config files
 
-The repo now includes TOML config files for both the engine and the player table.
+The repository includes sample config files under [`configs/`](configs/):
+
+- [`configs/game.toml`](configs/game.toml)
+- [`configs/openai-players.toml`](configs/openai-players.toml)
+- [`configs/groq-players.toml`](configs/groq-players.toml)
+- [`configs/local-players.toml`](configs/local-players.toml)
+- [`configs/mixed-players.toml`](configs/mixed-players.toml)
 
 Game config example:
 
 ```toml
 [game]
 engine = "catanatron"
-seed = 7
+seed = 12
 discard_limit = 7
-vps_to_win = 6
-history_window = 40
-run_dir = "runs/quickstart"
+vps_to_win = 10
+history_window = 100
+trading_chat_enabled = false
+run_dir = "runs/0.3.0/dev/"
 ```
 
 Player config example:
@@ -262,78 +195,83 @@ type = "llm"
 model = "gpt-4o-mini"
 api_key_env = "OPENAI_API_KEY"
 temperature = 0.2
+prompt_history_limit = 12
 ```
 
-Supported player types right now:
+Supported player types:
 
 - `random`
 - `first_legal`
 - `llm`
 
-For an OpenAI-compatible endpoint, set the API key in the configured environment variable and optionally override `api_base`.
-For the sample config in [configs/players.toml](/Users/alexandremaraval/Documents/Projects/catan-bench/configs/players.toml), that means either exporting:
+`llm` players can point to any OpenAI-compatible chat endpoint by setting `api_base` and `api_key_env`. The bundled sample configs show OpenAI, Groq, Together, and local Ollama-style endpoints.
+
+## Run artifacts
+
+Each run directory contains a small set of canonical artifacts:
+
+- `metadata.json`
+- `public_history.jsonl`
+- `public_state_trace.jsonl`
+- `players/<id>/memory.json`
+- `players/<id>/memory_trace.jsonl`
+- `players/<id>/prompt_trace.jsonl`
+- `result.json`
+
+These files are keyed around the shared `history_index`, which lets the dashboard move a single cursor through the public timeline while showing each player's latest memory and prompt activity at that point.
+
+## Dashboard and replay
+
+The dashboard is designed for monitoring and debugging live runs:
+
+- one global history cursor,
+- the selected public board and trade state,
+- the public log around the cursor,
+- one panel per player shown concurrently,
+- prompt trace inspection for the selected history window.
+
+The replay exporter is intentionally simpler. It turns `public_history.jsonl` into a lightweight static HTML timeline for quick inspection and sharing.
+
+## Prompt templates
+
+Prompt text lives in package-local Jinja templates under [`src/catan_bench/templates/`](src/catan_bench/templates/). The current template set covers:
+
+- turn start,
+- action choice,
+- turn end,
+- reactive decisions,
+- trade chat open / reply / select,
+- shared rules and response-contract partials.
+
+This keeps prompt editing out of Python source and makes it easier to iterate on stage-specific instructions.
+
+## Development
+
+Run the test suite with:
 
 ```bash
-export OPENAI_API_KEY=<your_api_key>
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-or placing the same key in a nearby `.env` file.
+The `catanatron` adapter tests are skipped automatically when `catanatron` is not installed in the environment.
 
-The built-in LLM player sends:
+Useful entry points:
 
-- a compact rules summary,
-- the public game state,
-- player-private state,
-- recent public history,
-- recent private history,
-- prior private memory,
-- the legal action set.
+- `python -m catan_bench`
+- `python -m catan_bench.replay`
+- `streamlit run dashboard.py -- --run-dir <run-dir>`
 
-It expects strict JSON back with:
+Useful source files:
 
-- `action_index`
-- `action`
-- `private_reasoning`
-- `private_memory_write`
-
-## Status
-
-What works now:
-
-- harness orchestration,
-- player-scoped observation construction,
-- public/private log persistence,
-- private memory persistence,
-- LLM-ready rules and history context in observations,
-- action validation,
-- OpenAI-compatible LLM players,
-- a live `catanatron` adapter,
-- semantic public event logs for replay/export,
-- static HTML public and per-player replay generation from completed runs,
-- real domestic trade progression through `OFFER_TRADE`, `ACCEPT_TRADE`, and `REJECT_TRADE`,
-- trade-like benchmark flow in tests,
-- post-game trade metadata in result payloads.
-
-What is next:
-
-- improve observation redaction and presentation for LLM prompting,
-- improve replay polish and summarization beyond the current transcript-style views,
-- add richer evaluation metrics,
-- add tournament runners and seat-rotation evaluation.
-- support richer structured negotiation interfaces on top of domestic trade.
-- harden packaging so the trade-capable `catanatron` dependency is easier to install.
-
-## Design principles
-
-- The engine owns the full game state.
-- Players only see information they are allowed to know.
-- Public history is shared.
-- Private history and memory are player-scoped.
-- Memory is authored by the player but persisted by the harness.
-- The benchmark should not depend on hidden chain-of-thought.
+- [`src/catan_bench/orchestrator.py`](src/catan_bench/orchestrator.py)
+- [`src/catan_bench/players.py`](src/catan_bench/players.py)
+- [`src/catan_bench/observations.py`](src/catan_bench/observations.py)
+- [`src/catan_bench/storage.py`](src/catan_bench/storage.py)
+- [`src/catan_bench/prompting.py`](src/catan_bench/prompting.py)
+- [`src/catan_bench/dashboard.py`](src/catan_bench/dashboard.py)
 
 ## License
 
-This repository is licensed under the terms in [LICENSE](/Users/alexandremaraval/Documents/Projects/catan-bench/LICENSE).
+This repository is licensed under the terms in [LICENSE](LICENSE).
 
 If this project integrates tightly with `catanatron`, its GPL-3.0 license implications should be reviewed before distribution.

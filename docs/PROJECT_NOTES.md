@@ -302,7 +302,7 @@ That is actually a good fit for v1 of this benchmark. You can benchmark strategi
 2. **Referee / harness**
    - controls decision-point order,
    - manages seeds,
-   - stores public and private logs,
+   - stores one public history stream plus snapshot artifacts,
    - calls model adapters,
    - persists player-authored memory,
    - handles retries / invalid outputs / timeouts.
@@ -315,9 +315,9 @@ That is actually a good fit for v1 of this benchmark. You can benchmark strategi
 
 4. **Logs**
    - `public_history.jsonl`
-   - `players/<id>/private_history.jsonl`
-   - `players/<id>/memory.jsonl`
-   - `referee_state.json` or replay artifact
+   - `public_state_trace.jsonl`
+   - `players/<id>/memory_trace.jsonl`
+   - `players/<id>/prompt_trace.jsonl`
 
 5. **Evaluation runner**
    - runs fixed-seed suites,
@@ -329,15 +329,15 @@ That is actually a good fit for v1 of this benchmark. You can benchmark strategi
 The initial harness scaffold is now in place.
 
 - `src/catan_bench/schemas.py`
-  - core dataclasses for `Action`, `DecisionPoint`, `Observation`, `Event`, `MemoryEntry`, and `GameResult`
+  - core dataclasses for `Action`, `DecisionPoint`, turn/reactive observations, public events, memory snapshots, and results
 - `src/catan_bench/engine.py`
   - the minimal `EngineAdapter` protocol the orchestrator expects from a game engine
 - `src/catan_bench/observations.py`
-  - the `ObservationBuilder` that constructs player-scoped observations from engine state plus stored logs
+  - the `ObservationBuilder` that constructs compact player-scoped observations from engine state plus the shared public log and player memory
 - `src/catan_bench/storage.py`
-  - append-only public/private event logs and per-player memory storage with optional JSONL persistence
+  - append-only public event logs, public state snapshots, per-player memory snapshots, and prompt trace storage
 - `src/catan_bench/orchestrator.py`
-  - the `GameOrchestrator` that validates actions, applies them to the engine, and persists histories
+  - the `GameOrchestrator` that runs the simplified turn loop, validates actions, applies them to the engine, and persists the new artifacts
 - `src/catan_bench/players.py`
   - the `Player` protocol plus a small `ScriptedPlayer` for tests and demos
 - `tests/test_orchestrator.py`

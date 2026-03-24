@@ -1,0 +1,10 @@
+{% include "partials/game_context.jinja" %}
+
+### What happened this turn
+{% if payload.turn_public_events %}
+{% for event in payload.turn_public_events %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}

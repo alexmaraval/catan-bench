@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 from typing import Iterable, TextIO
 
-from .schemas import Event, JsonValue, MemoryEntry, PromptTrace
+from .schemas import (
+    Event,
+    JsonValue,
+    MemorySnapshot,
+    PlayerMemory,
+    PromptTrace,
+    PublicStateSnapshot,
+)
 
 
 def write_json(path: Path, payload: dict[str, JsonValue]) -> None:
@@ -14,8 +21,7 @@ def write_json(path: Path, payload: dict[str, JsonValue]) -> None:
 
 def _open_jsonl_handle(path: Path, *, truncate: bool) -> TextIO:
     path.parent.mkdir(parents=True, exist_ok=True)
-    mode = "w" if truncate else "a"
-    return path.open(mode, encoding="utf-8")
+    return path.open("w" if truncate else "a", encoding="utf-8")
 
 
 def _write_jsonl(handle: TextIO, payload: dict[str, JsonValue]) -> None:
@@ -24,149 +30,251 @@ def _write_jsonl(handle: TextIO, payload: dict[str, JsonValue]) -> None:
 
 
 class EventLog:
-    """Append-only public/private event log with optional JSONL persistence."""
+    """Append-only public event log with optional JSONL persistence."""
 
     def __init__(self, run_dir: str | Path | None = None) -> None:
         self.run_dir = Path(run_dir) if run_dir is not None else None
         self.public_events: list[Event] = []
-        self.private_events_by_player: dict[str, list[Event]] = {}
-        self._public_handle: TextIO | None = None
-        self._private_handles: dict[str, TextIO] = {}
+        self._handle: TextIO | None = None
 
-    def reset(self, player_ids: Iterable[str]) -> None:
-        player_ids = tuple(player_ids)
+    @property
+    def current_history_index(self) -> int:
+        return len(self.public_events)
+
+    def reset(self) -> None:
         self.close()
         self.public_events = []
-        self.private_events_by_player = {player_id: [] for player_id in player_ids}
-
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            self._public_handle = _open_jsonl_handle(
-                self.run_dir / "public_history.jsonl",
-                truncate=True,
-            )
-            for player_id in player_ids:
-                players_dir = self.run_dir / "players" / player_id
-                players_dir.mkdir(parents=True, exist_ok=True)
-                self._private_handles[player_id] = _open_jsonl_handle(
-                    players_dir / "private_history.jsonl",
-                    truncate=True,
-                )
+            self._handle = _open_jsonl_handle(self.run_dir / "public_history.jsonl", truncate=True)
 
-    def append_public(self, events: Iterable[Event]) -> None:
+    def append(self, events: Iterable[Event]) -> tuple[Event, ...]:
+        stored_events: list[Event] = []
         for event in events:
-            self.public_events.append(event)
+            stored_event = Event(
+                kind=event.kind,
+                payload=dict(event.payload),
+                history_index=self.current_history_index + 1,
+                turn_index=event.turn_index,
+                phase=event.phase,
+                decision_index=event.decision_index,
+                actor_player_id=event.actor_player_id,
+            )
+            self.public_events.append(stored_event)
+            stored_events.append(stored_event)
             if self.run_dir is not None:
-                handle = self._public_handle
+                handle = self._handle
                 if handle is None:
                     handle = _open_jsonl_handle(
                         self.run_dir / "public_history.jsonl",
                         truncate=False,
                     )
-                    self._public_handle = handle
-                _write_jsonl(handle, event.to_dict())
+                    self._handle = handle
+                _write_jsonl(handle, stored_event.to_dict())
+        return tuple(stored_events)
 
-    def append_private(self, player_id: str, events: Iterable[Event]) -> None:
-        player_events = self.private_events_by_player.setdefault(player_id, [])
-        for event in events:
-            player_events.append(event)
-            if self.run_dir is not None:
-                handle = self._private_handles.get(player_id)
-                if handle is None:
-                    handle = _open_jsonl_handle(
-                        self.run_dir / "players" / player_id / "private_history.jsonl",
-                        truncate=False,
-                    )
-                    self._private_handles[player_id] = handle
-                _write_jsonl(handle, event.to_dict())
-
-    def recent_public(self, limit: int | None = None) -> tuple[Event, ...]:
+    def recent(self, limit: int | None = None) -> tuple[Event, ...]:
         if limit is None:
             return tuple(self.public_events)
         return tuple(self.public_events[-limit:])
 
-    def recent_private(self, player_id: str, limit: int | None = None) -> tuple[Event, ...]:
-        events = self.private_events_by_player.get(player_id, [])
+    def since(self, history_index: int, limit: int | None = None) -> tuple[Event, ...]:
+        events = tuple(event for event in self.public_events if event.history_index > history_index)
         if limit is None:
-            return tuple(events)
-        return tuple(events[-limit:])
+            return events
+        return events[-limit:]
 
     def close(self) -> None:
-        if self._public_handle is not None:
-            self._public_handle.close()
-            self._public_handle = None
-        for handle in self._private_handles.values():
-            handle.close()
-        self._private_handles = {}
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
 
-    def __del__(self) -> None:  # pragma: no cover - cleanup best effort only.
+    def __del__(self) -> None:  # pragma: no cover - best effort only.
+        self.close()
+
+
+class PublicStateStore:
+    """Append-only public state snapshots keyed by history index."""
+
+    def __init__(self, run_dir: str | Path | None = None) -> None:
+        self.run_dir = Path(run_dir) if run_dir is not None else None
+        self.snapshots: list[PublicStateSnapshot] = []
+        self._handle: TextIO | None = None
+
+    def reset(self, initial_snapshot: PublicStateSnapshot) -> None:
+        self.close()
+        self.snapshots = [initial_snapshot]
+        if self.run_dir is not None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self._handle = _open_jsonl_handle(
+                self.run_dir / "public_state_trace.jsonl",
+                truncate=True,
+            )
+            _write_jsonl(self._handle, initial_snapshot.to_dict())
+
+    def append(self, snapshot: PublicStateSnapshot) -> None:
+        self.snapshots.append(snapshot)
+        if self.run_dir is not None:
+            handle = self._handle
+            if handle is None:
+                handle = _open_jsonl_handle(
+                    self.run_dir / "public_state_trace.jsonl",
+                    truncate=False,
+                )
+                self._handle = handle
+            _write_jsonl(handle, snapshot.to_dict())
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+
+    def __del__(self) -> None:  # pragma: no cover - best effort only.
         self.close()
 
 
 class MemoryStore:
-    """Single-snapshot private memory store with optional trace persistence."""
+    """Per-player two-slot memory snapshots keyed by history index."""
 
     def __init__(self, run_dir: str | Path | None = None) -> None:
         self.run_dir = Path(run_dir) if run_dir is not None else None
-        self._entries_by_player: dict[str, MemoryEntry | None] = {}
-        self._history_by_player: dict[str, list[MemoryEntry]] = {}
+        self._current_by_player: dict[str, PlayerMemory] = {}
+        self._history_by_player: dict[str, list[MemorySnapshot]] = {}
         self._trace_handles_by_player: dict[str, TextIO] = {}
 
     def reset(self, player_ids: Iterable[str]) -> None:
         player_ids = tuple(player_ids)
         self.close()
-        self._entries_by_player = {player_id: None for player_id in player_ids}
+        self._current_by_player = {player_id: PlayerMemory() for player_id in player_ids}
         self._history_by_player = {player_id: [] for player_id in player_ids}
-
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             for player_id in player_ids:
-                players_dir = self.run_dir / "players" / player_id
-                players_dir.mkdir(parents=True, exist_ok=True)
-                write_json(
-                    players_dir / "memory.json",
-                    {"memory": None},
-                )
+                player_dir = self.run_dir / "players" / player_id
+                player_dir.mkdir(parents=True, exist_ok=True)
+                write_json(player_dir / "memory.json", {"memory": PlayerMemory().to_dict()})
                 self._trace_handles_by_player[player_id] = _open_jsonl_handle(
-                    players_dir / "memory_trace.jsonl",
+                    player_dir / "memory_trace.jsonl",
                     truncate=True,
                 )
 
-    def set(self, entry: MemoryEntry) -> None:
-        self._entries_by_player[entry.player_id] = entry
-        self._history_by_player.setdefault(entry.player_id, []).append(entry)
+    def get(self, player_id: str) -> PlayerMemory:
+        return self._current_by_player.get(player_id, PlayerMemory())
+
+    def write(
+        self,
+        *,
+        player_id: str,
+        memory: PlayerMemory,
+        history_index: int,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        stage: str,
+    ) -> MemorySnapshot:
+        snapshot = MemorySnapshot(
+            player_id=player_id,
+            history_index=history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage=stage,
+            memory=memory,
+        )
+        self._current_by_player[player_id] = memory
+        self._history_by_player.setdefault(player_id, []).append(snapshot)
         if self.run_dir is not None:
-            player_dir = self.run_dir / "players" / entry.player_id
-            write_json(player_dir / "memory.json", entry.to_dict())
-            handle = self._trace_handles_by_player.get(entry.player_id)
+            player_dir = self.run_dir / "players" / player_id
+            write_json(player_dir / "memory.json", snapshot.to_dict())
+            handle = self._trace_handles_by_player.get(player_id)
             if handle is None:
-                handle = _open_jsonl_handle(
-                    player_dir / "memory_trace.jsonl",
-                    truncate=False,
-                )
-                self._trace_handles_by_player[entry.player_id] = handle
-            _write_jsonl(handle, entry.to_dict())
+                handle = _open_jsonl_handle(player_dir / "memory_trace.jsonl", truncate=False)
+                self._trace_handles_by_player[player_id] = handle
+            _write_jsonl(handle, snapshot.to_dict())
+        return snapshot
 
-    def get(self, player_id: str) -> MemoryEntry | None:
-        return self._entries_by_player.get(player_id)
+    def set_short_term(
+        self,
+        *,
+        player_id: str,
+        short_term: JsonValue | None,
+        history_index: int,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        stage: str,
+    ) -> MemorySnapshot:
+        current = self.get(player_id)
+        return self.write(
+            player_id=player_id,
+            memory=PlayerMemory(long_term=current.long_term, short_term=short_term),
+            history_index=history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage=stage,
+        )
 
-    def history(self, player_id: str) -> tuple[MemoryEntry, ...]:
+    def set_long_term(
+        self,
+        *,
+        player_id: str,
+        long_term: JsonValue | None,
+        history_index: int,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        stage: str,
+    ) -> MemorySnapshot:
+        current = self.get(player_id)
+        return self.write(
+            player_id=player_id,
+            memory=PlayerMemory(long_term=long_term, short_term=current.short_term),
+            history_index=history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage=stage,
+        )
+
+    def clear_short_term(
+        self,
+        *,
+        player_id: str,
+        history_index: int,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        stage: str,
+    ) -> MemorySnapshot:
+        current = self.get(player_id)
+        return self.write(
+            player_id=player_id,
+            memory=PlayerMemory(long_term=current.long_term, short_term=None),
+            history_index=history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage=stage,
+        )
+
+    def history(self, player_id: str) -> tuple[MemorySnapshot, ...]:
         return tuple(self._history_by_player.get(player_id, ()))
 
     def count(self) -> int:
-        return sum(len(entries) for entries in self._history_by_player.values())
+        return sum(len(snapshots) for snapshots in self._history_by_player.values())
 
     def close(self) -> None:
         for handle in self._trace_handles_by_player.values():
             handle.close()
         self._trace_handles_by_player = {}
 
-    def __del__(self) -> None:  # pragma: no cover - cleanup best effort only.
+    def __del__(self) -> None:  # pragma: no cover - best effort only.
         self.close()
 
 
 class PromptTraceStore:
-    """Append-only prompt/response trace store with optional JSONL persistence."""
+    """Append-only prompt/response traces keyed by player."""
 
     def __init__(self, run_dir: str | Path | None = None) -> None:
         self.run_dir = Path(run_dir) if run_dir is not None else None
@@ -177,14 +285,13 @@ class PromptTraceStore:
         player_ids = tuple(player_ids)
         self.close()
         self._traces_by_player = {player_id: [] for player_id in player_ids}
-
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             for player_id in player_ids:
-                players_dir = self.run_dir / "players" / player_id
-                players_dir.mkdir(parents=True, exist_ok=True)
+                player_dir = self.run_dir / "players" / player_id
+                player_dir.mkdir(parents=True, exist_ok=True)
                 self._handles_by_player[player_id] = _open_jsonl_handle(
-                    players_dir / "prompt_trace.jsonl",
+                    player_dir / "prompt_trace.jsonl",
                     truncate=True,
                 )
 
@@ -208,5 +315,5 @@ class PromptTraceStore:
             handle.close()
         self._handles_by_player = {}
 
-    def __del__(self) -> None:  # pragma: no cover - cleanup best effort only.
+    def __del__(self) -> None:  # pragma: no cover - best effort only.
         self.close()

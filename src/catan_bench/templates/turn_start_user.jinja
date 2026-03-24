@@ -1,0 +1,10 @@
+{% include "partials/game_context.jinja" %}
+
+### Events since your last turn
+{% if payload.public_history_since_last_turn %}
+{% for event in payload.public_history_since_last_turn %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}

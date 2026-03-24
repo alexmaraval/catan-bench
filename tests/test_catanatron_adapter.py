@@ -195,15 +195,14 @@ class CatanatronAdapterTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                "action_index" in candidate
+                "action_index" in candidate and "edge" in candidate
                 for candidate in public_state["board"]["road_candidates"]
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             any(
-                endpoint.get("owner_player_id") == decision.acting_player_id
+                "endpoints" in candidate
                 for candidate in public_state["board"]["road_candidates"]
-                for endpoint in candidate["endpoints"]
             )
         )
 

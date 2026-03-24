@@ -1,0 +1,39 @@
+## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+
+### Your hand
+Resources: {{ fmt_resources(payload.private_state.resources) }}
+VP: {{ fmt_vp(payload.private_state) }}
+{% if payload.memory.short_term %}
+Current plan: {{ payload.memory.short_term }}
+{% endif %}
+
+{% if payload.public_state.players %}
+### Standings
+{% for pid, info in payload.public_state.players.items() %}
+- {{ pid }}: {{ info.vp }}VP  {{ info.res_cards }}res  {{ info.dev_cards }}dev
+{% endfor %}
+{% endif %}
+
+### Chat transcript
+{% if payload.transcript %}
+{% for event in payload.transcript %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(no messages)
+{% endif %}
+
+### Quotes received
+{% if payload.quotes %}
+{% for q in payload.quotes %}
+- {{ q.player_id }}: you give {{ fmt_resources(q.owner_gives) }}, you receive {{ fmt_resources(q.owner_gets) }}{% if q.message %}  "{{ q.message }}"{% endif %}
+
+{% endfor %}
+{% else %}
+(no quotes)
+{% endif %}
+{% if payload.memory.long_term %}
+
+### Long-term memory
+{{ payload.memory.long_term }}
+{% endif %}

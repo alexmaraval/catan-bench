@@ -1,0 +1,25 @@
+{% include "partials/game_context.jinja" %}
+
+### Recent history
+{% if payload.public_history %}
+{% for event in payload.public_history %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+{% if payload.decision_prompt %}
+
+**Decision:** {{ payload.decision_prompt }}
+{% endif %}
+{% if payload.legal_actions %}
+
+### Legal actions
+{% for action in payload.legal_actions %}
+[{{ loop.index0 }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+
+{% endfor %}
+{% elif payload.candidate_source %}
+
+**Select action_index from `{{ payload.candidate_source }}` listed in the Board section above.**
+{% endif %}

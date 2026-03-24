@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, TextIO
 if TYPE_CHECKING:
     from .schemas import (
         Action,
+        ActionDecision,
         DecisionPoint,
         GameResult,
-        PlayerResponse,
         PromptTrace,
         TransitionResult,
     )
@@ -59,7 +59,7 @@ class TerminalReporter:
         *,
         decision: DecisionPoint,
         action: Action,
-        response: PlayerResponse,
+        response: ActionDecision,
         transition: TransitionResult,
     ) -> None:
         if decision.turn_index != self._last_turn:
@@ -97,6 +97,10 @@ class TerminalReporter:
         print(text, file=self._file, flush=True)
 
 
+_SETUP_PHASES = {"build_initial_settlement", "build_initial_road"}
+_TRADE_CHAT_STAGES = {"open", "reply", "select"}
+
+
 class DebugTerminalReporter(TerminalReporter):
     """Interactive terminal reporter that prints prompt traces and pauses after each one."""
 
@@ -105,11 +109,23 @@ class DebugTerminalReporter(TerminalReporter):
         *,
         file: TextIO | None = None,
         input_file: TextIO | None = None,
+        skip_setup: bool = False,
+        debug_trade: bool = False,
     ) -> None:
         super().__init__(file=file)
         self._input_file = input_file or sys.stdin
+        self._skip_setup = skip_setup
+        self._debug_trade = debug_trade
+        self._trade_chat_triggered = False
 
     def on_prompt_trace(self, trace: PromptTrace) -> None:
+        if self._skip_setup and trace.phase in _SETUP_PHASES:
+            return
+        if self._debug_trade and not self._trade_chat_triggered:
+            if trace.stage in _TRADE_CHAT_STAGES:
+                self._trade_chat_triggered = True
+            else:
+                return
         header = (
             f" Debug {trace.player_id} "
             f"[turn={trace.turn_index} phase={trace.phase} decision={trace.decision_index} "

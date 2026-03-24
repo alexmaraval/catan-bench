@@ -6,6 +6,8 @@ api_base = "https://api.groq.com/openai/v1"
 api_key_env = "GROQ_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "BLUE"
@@ -15,6 +17,8 @@ api_base = "https://api.groq.com/openai/v1"
 api_key_env = "GROQ_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "ORANGE"
@@ -24,6 +28,8 @@ api_base = "https://api.groq.com/openai/v1"
 api_key_env = "GROQ_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "WHITE"
@@ -33,3 +39,5 @@ api_base = "https://api.groq.com/openai/v1"
 api_key_env = "GROQ_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95

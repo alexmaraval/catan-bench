@@ -1,0 +1,29 @@
+## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+
+### Your hand
+Resources: {{ fmt_resources(payload.private_state.resources) }}
+{% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
+{% if dc != "none" %}
+Dev cards: {{ dc }}
+{% endif %}
+VP: {{ fmt_vp(payload.private_state) }}
+{% if payload.memory.short_term %}
+Current plan: {{ payload.memory.short_term }}
+{% endif %}
+
+{% if payload.public_state.players %}
+### Standings
+{% for pid, info in payload.public_state.players.items() %}
+- {{ pid }}: {{ info.vp }}VP  {{ info.res_cards }}res  {{ info.dev_cards }}dev
+{% endfor %}
+{% endif %}
+
+### Trade situation
+Current request draft: {{ fmt_resources(payload.requested_resources) }}
+Other players: {{ payload.other_player_ids | join(", ") }}
+Message character limit: {{ payload.message_char_limit }}
+{% if payload.memory.long_term %}
+
+### Long-term memory
+{{ payload.memory.long_term }}
+{% endif %}

@@ -78,7 +78,6 @@ def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | Non
                 top_p=player_config.top_p,
                 reasoning_enabled=player_config.reasoning_enabled,
                 prompt_history_limit=player_config.prompt_history_limit,
-                prompt_memory_limit=player_config.prompt_memory_limit,
             )
         else:  # pragma: no cover - validated in config loading.
             raise ValueError(f"Unsupported player type {player_config.type!r}.")
@@ -91,6 +90,8 @@ def run_from_config_files(
     game_config_path: str | Path,
     players_config_path: str | Path,
     debug: bool = False,
+    debug_from_setup: bool = False,
+    debug_trade: bool = False,
 ):
     _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
@@ -110,7 +111,13 @@ def run_from_config_files(
         ),
         trading_chat_message_chars=game_config.trading_chat_message_chars,
         trading_chat_history_limit=game_config.trading_chat_history_limit,
-        reporter=DebugTerminalReporter() if debug else TerminalReporter(),
+        reporter=(
+            DebugTerminalReporter(
+                skip_setup=debug_from_setup,
+                debug_trade=debug_trade,
+            ) if (debug or debug_from_setup or debug_trade)
+            else TerminalReporter()
+        ),
     )
     return orchestrator.run()
 
@@ -145,12 +152,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Print each player prompt/answer and pause for N before continuing.",
     )
+    parser.add_argument(
+        "--debug-from-setup",
+        action="store_true",
+        help="Like --debug but skips pausing during the initial placement phase.",
+    )
+    parser.add_argument(
+        "--debug-trade",
+        action="store_true",
+        help="Run silently until the first trade chat opens, then pause for every prompt.",
+    )
     args = parser.parse_args(argv)
 
     result = run_from_config_files(
         game_config_path=args.game,
         players_config_path=args.players,
         debug=args.debug,
+        debug_from_setup=args.debug_from_setup,
+        debug_trade=args.debug_trade,
     )
     print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     return 0

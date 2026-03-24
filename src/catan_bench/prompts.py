@@ -5,11 +5,21 @@ CATAN_RULES_SUMMARY = """You are playing Settlers of Catan in a benchmark harnes
 
 Core rules:
 - Players collect WOOD, BRICK, SHEEP, WHEAT, and ORE.
-- Settlements and cities score victory points; roads help expand and contest longest road.
+- On your turn, resolve the dice roll first, then trade/build. You may also play at most 1 development card at any time during your turn.
+- Settlements are worth 1 victory point, cities are worth 2, Longest Road is worth 2, Largest Army is worth 2, and victory point development cards are worth 1.
+- Roads extend your network and contest Longest Road. The first player with a continuous road of at least 5 segments takes Longest Road; a longer road steals it.
+- The first player to play 3 knight cards takes Largest Army; a player with more played knights steals it.
+- New settlements must follow the distance rule: no adjacent settlement/city on neighboring intersections, and outside set-up they must connect to your own road.
 - The first player to reach the configured victory-point target wins.
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
-- Domestic trades are voluntary exchanges between players. A trade offer proposes resources to give and resources to receive.
-- When deciding on a trade, consider both immediate value and how much you improve an opponent's position.
+- When a 7 is rolled, no resources are produced. Every player with more than 7 resource cards discards half, rounded down, then the active player must move the robber and may steal 1 random resource from an adjacent opponent.
+- The robber blocks resource production on its hex, but does not block building or harbor access.
+- Domestic trades are voluntary exchanges between the active player and exactly one other player. Non-active players may not trade with each other.
+- Trades must exchange resources for resources. No gifts, no trades on credit, no secret side deals, and no triangular trades.
+- Maritime trade is with the bank at 4:1 by default, improved by your own harbor access to 3:1 or 2:1 as applicable.
+- You may buy any number of development cards you can afford, but you may not play a development card on the same turn you bought it, except that a victory point card may be revealed immediately if it wins the game.
+- Development cards stay hidden until played or revealed, and development cards themselves cannot be traded.
+- When deciding on a trade or action, consider both immediate value and how much you improve an opponent's position.
 
 Benchmark expectations:
 - Use only the information in your observation.

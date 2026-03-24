@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catan-bench"
-version = "0.2.0"
+version = "0.3.0"
 description = "Harness for benchmarking LLM players in multi-player Settlers of Catan."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,12 +13,16 @@ authors = [
   { name = "Alexandre Maraval" }
 ]
 dependencies = [
+    "jinja2>=3.1.6",
     "python-dotenv>=1.0.1",
     "streamlit>=1.55.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"catan_bench" = ["templates/*.jinja", "templates/partials/*.jinja"]
 
 [dependency-groups]
 dev = [

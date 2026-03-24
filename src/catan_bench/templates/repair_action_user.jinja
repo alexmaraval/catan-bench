@@ -1,0 +1,12 @@
+**Error:** {{ payload.error }}
+
+**Your previous response:** {{ payload.previous_response }}
+{% if payload.legal_actions %}
+**Legal actions:**
+{% for action in payload.legal_actions %}
+[{{ loop.index0 }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+
+{% endfor %}
+{% elif payload.candidate_source %}
+**Select action_index from `{{ payload.candidate_source }}`.**
+{% endif %}

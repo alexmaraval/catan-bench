@@ -31,7 +31,6 @@ class PlayerConfig:
     top_p: float | None = None
     reasoning_enabled: bool | None = None
     prompt_history_limit: int | None = 12
-    prompt_memory_limit: int | None = 8
     timeout_seconds: float = 60.0
 
 
@@ -124,11 +123,6 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
             prompt_history_limit = int(prompt_history_limit)
             if prompt_history_limit < 0:
                 raise ValueError("`prompt_history_limit` must be non-negative when provided.")
-        prompt_memory_limit = entry.get("prompt_memory_limit", 8)
-        if prompt_memory_limit is not None:
-            prompt_memory_limit = int(prompt_memory_limit)
-            if prompt_memory_limit < 0:
-                raise ValueError("`prompt_memory_limit` must be non-negative when provided.")
         timeout_seconds = float(entry.get("timeout_seconds", 60.0))
         configs.append(
             PlayerConfig(
@@ -142,7 +136,6 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
                 top_p=top_p,
                 reasoning_enabled=reasoning_enabled,
                 prompt_history_limit=prompt_history_limit,
-                prompt_memory_limit=prompt_memory_limit,
                 timeout_seconds=timeout_seconds,
             )
         )

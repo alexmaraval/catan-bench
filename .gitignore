@@ -30,3 +30,6 @@ htmlcov/
 runs/
 .coverage
 .coverage.*
+
+# Local planning docs
+plan.md

@@ -10,6 +10,8 @@ api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "BLUE"
@@ -20,6 +22,8 @@ api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "ORANGE"
@@ -30,6 +34,8 @@ api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95
 
 [[players]]
 id = "WHITE"
@@ -40,3 +46,5 @@ api_base = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
+temperature = 0.6
+top_p = 0.95

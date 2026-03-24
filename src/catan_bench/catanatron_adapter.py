@@ -89,6 +89,11 @@ class CatanatronEngineAdapter:
     def player_ids(self) -> tuple[str, ...]:
         return tuple(color.value for color in self.game.state.colors)
 
+    @property
+    def turn_owner_id(self) -> str:
+        state = self.game.state
+        return state.colors[state.current_turn_index].value
+
     def is_terminal(self) -> bool:
         return (
             self.game.winning_color() is not None
@@ -343,19 +348,11 @@ class CatanatronEngineAdapter:
     def apply_action(self, action: Action) -> TransitionResult:
         logger.debug("Applying action %s for %s", action.action_type, self.game.state.current_color().value)
         state_before = self.game.state.copy()
-        public_before = self.public_state()
-        private_before = {
-            player_id: dict(self.private_state(player_id)) for player_id in self.player_ids
-        }
 
         native_action = self._action_to_native(action)
         action_record = self.game.execute(native_action, validate_action=True)
 
         state_after = self.game.state
-        public_after = self.public_state()
-        private_after = {
-            player_id: dict(self.private_state(player_id)) for player_id in self.player_ids
-        }
 
         public_event = self._public_event_for_action(
             native_action=action_record.action,
@@ -364,32 +361,11 @@ class CatanatronEngineAdapter:
             state_after=state_after,
         )
 
-        private_events_by_player: dict[str, tuple[Event, ...]] = {}
-        for player_id in self.player_ids:
-            diff = self._dict_diff(private_before[player_id], private_after[player_id])
-            if diff:
-                private_events_by_player[player_id] = (
-                    Event(
-                        kind="private_state_changed",
-                        payload=diff,
-                        turn_index=state_before.num_turns,
-                        phase=self._phase_name(state_before.current_prompt),
-                        decision_index=len(state_before.action_records),
-                        actor_player_id=action_record.action.color.value,
-                    ),
-                )
-
         terminal = self.is_terminal()
         result_metadata = dict(self.result()) if terminal else {}
 
-        if public_before != public_after:
-            public_events = (public_event,)
-        else:
-            public_events = ()
-
         return TransitionResult(
-            public_events=public_events,
-            private_events_by_player=private_events_by_player,
+            public_events=(public_event,),
             terminal=terminal,
             result_metadata=result_metadata,
         )
@@ -684,19 +660,19 @@ class CatanatronEngineAdapter:
         edge: tuple[int, int],
         game_json: Mapping[str, Any],
     ) -> dict[str, JsonValue]:
-        return {
+        adjacent: dict[str, None] = {}
+        for node_id in edge:
+            for tile in game_json["adjacent_tiles"].get(str(node_id), []):
+                summary = self._tile_prompt_value(tile)
+                if not summary.startswith("PORT:") and summary not in ("WATER", "DESERT"):
+                    adjacent.setdefault(summary, None)
+        result: dict[str, JsonValue] = {
             "action_index": action_index,
             "edge": list(edge),
-            "endpoints": [
-                self._node_candidate_view(
-                    action_index=action_index,
-                    node_id=node_id,
-                    game_json=game_json,
-                    include_owner=True,
-                )
-                for node_id in edge
-            ],
         }
+        if adjacent:
+            result["adjacent_tiles"] = list(adjacent.keys())
+        return result
 
     @staticmethod
     def _should_include_ports(

@@ -38,7 +38,7 @@ The runtime is organized around a small set of boundaries:
   - `choose_action(observation) -> {action, short_term}`
   - `end_turn(observation) -> long_term`
   - `respond_reactive(observation) -> action`
-  - optional trade-chat helpers for open / reply / select.
+  - optional trade-chat helpers for open / reply / owner decision.
 - `Storage`
   - `public_history.jsonl`
   - `public_state_trace.jsonl`
@@ -147,7 +147,10 @@ seed = 12
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
-trading_chat_enabled = false
+trading_chat_enabled = true
+trading_chat_max_failed_attempts_per_turn = 5
+trading_chat_max_rooms_per_turn = 5
+trading_chat_max_rounds_per_attempt = 3
 run_dir = "runs/0.3.0/dev/"
 ```
 
@@ -205,7 +208,7 @@ Prompt text lives in package-local Jinja templates under [`src/catan_bench/templ
 - action choice,
 - turn end,
 - reactive decisions,
-- trade chat open / reply / select,
+- trade chat open / reply / owner decision,
 - shared rules and response-contract partials.
 
 This keeps prompt editing out of Python source and makes it easier to iterate on stage-specific instructions.

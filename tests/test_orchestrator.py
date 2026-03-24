@@ -15,8 +15,8 @@ from catan_bench import (
     OpeningStrategyResponse,
     ScriptedPlayer,
     TradeChatOpenResponse,
+    TradeChatOwnerDecisionResponse,
     TradeChatReplyResponse,
-    TradeChatSelectionResponse,
     TransitionResult,
     TurnEndResponse,
     TurnStartResponse,
@@ -240,7 +240,7 @@ class MockTradeChatEngine:
         }
 
     def private_state(self, player_id: str):
-        return {"player_id": player_id, "resources": {"WOOD": 1, "BRICK": 1}}
+        return {"player_id": player_id, "resources": {"WOOD": 1, "BRICK": 1, "SHEEP": 1}}
 
     def apply_action(self, action: Action) -> TransitionResult:
         match self._step:
@@ -269,6 +269,188 @@ class MockTradeChatEngine:
                 self._terminal = True
                 return TransitionResult(
                     public_events=(Event("turn_ended", {}, turn_index=1, phase="play_turn", decision_index=4, actor_player_id="RED"),),
+                    terminal=True,
+                    result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+                )
+            case _:
+                raise RuntimeError("Unexpected action.")
+
+    def result(self):
+        return {"winner_ids": ["RED"], "num_turns": 1}
+
+
+class MockTradeChatInvalidSelectionEngine:
+    def __init__(self) -> None:
+        self._game_id = "trade-chat-invalid-selection-game"
+        self._player_ids = ("RED", "BLUE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        match self._step:
+            case 0:
+                return DecisionPoint("RED", 1, "play_turn", (Action("ROLL"),), 0, "Roll.")
+            case 1:
+                return DecisionPoint(
+                    "RED",
+                    1,
+                    "play_turn",
+                    (
+                        Action("OFFER_TRADE", payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}}),
+                        Action("END_TURN"),
+                    ),
+                    1,
+                    "Choose an action.",
+                )
+            case 2:
+                return DecisionPoint("BLUE", 1, "decide_trade", (Action("REJECT_TRADE"),), 2, "Respond.")
+            case 3:
+                return DecisionPoint(
+                    "RED",
+                    1,
+                    "decide_acceptees",
+                    (Action("CANCEL_TRADE"),),
+                    3,
+                    "Cancel trade.",
+                )
+            case 4:
+                return DecisionPoint("RED", 1, "play_turn", (Action("END_TURN"),), 4, "Choose an action.")
+            case _:
+                raise RuntimeError("No more decisions.")
+
+    def public_state(self):
+        return {
+            "turn": {
+                "turn_player_id": "RED" if self._step < 5 else "BLUE",
+                "current_player_id": self.current_decision().acting_player_id if not self._terminal else "BLUE",
+            },
+            "players": {"RED": {"vp": 2}, "BLUE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {},
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        return {"player_id": player_id, "resources": {"WOOD": 1, "BRICK": 1}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        match self._step:
+            case 0:
+                self._step = 1
+                return TransitionResult(
+                    public_events=(Event("dice_rolled", {"result": [2, 5]}, turn_index=1, phase="play_turn", decision_index=0, actor_player_id="RED"),)
+                )
+            case 1:
+                self._step = 2
+                return TransitionResult(
+                    public_events=(Event("trade_offered", {"offer": {"WOOD": 1}, "request": {"BRICK": 1}}, turn_index=1, phase="play_turn", decision_index=1, actor_player_id="RED"),)
+                )
+            case 2:
+                self._step = 3
+                return TransitionResult(
+                    public_events=(Event("trade_rejected", {"offering_player_id": "RED"}, turn_index=1, phase="decide_trade", decision_index=2, actor_player_id="BLUE"),)
+                )
+            case 3:
+                self._step = 4
+                return TransitionResult(
+                    public_events=(Event("trade_cancelled", {"offering_player_id": "RED"}, turn_index=1, phase="decide_acceptees", decision_index=3, actor_player_id="RED"),)
+                )
+            case 4:
+                self._step = 5
+                self._terminal = True
+                return TransitionResult(
+                    public_events=(Event("turn_ended", {}, turn_index=1, phase="play_turn", decision_index=4, actor_player_id="RED"),),
+                    terminal=True,
+                    result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+                )
+            case _:
+                raise RuntimeError("Unexpected action.")
+
+    def result(self):
+        return {"winner_ids": ["RED"], "num_turns": 1}
+
+
+class MockTradeChatInsufficientOwnerResourcesEngine:
+    def __init__(self) -> None:
+        self._game_id = "trade-chat-insufficient-owner-resources-game"
+        self._player_ids = ("RED", "BLUE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        match self._step:
+            case 0:
+                return DecisionPoint("RED", 1, "play_turn", (Action("ROLL"),), 0, "Roll.")
+            case 1:
+                return DecisionPoint(
+                    "RED",
+                    1,
+                    "play_turn",
+                    (
+                        Action("OFFER_TRADE", payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}}),
+                        Action("END_TURN"),
+                    ),
+                    1,
+                    "Choose an action.",
+                )
+            case 2:
+                raise RuntimeError("No more decisions.")
+            case _:
+                raise RuntimeError("Unexpected step.")
+
+    def public_state(self):
+        return {
+            "turn": {
+                "turn_player_id": "RED" if not self._terminal else "BLUE",
+                "current_player_id": self.current_decision().acting_player_id if not self._terminal else "BLUE",
+            },
+            "players": {"RED": {"vp": 2}, "BLUE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {},
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        if player_id == "RED":
+            return {"player_id": player_id, "resources": {"WOOD": 0, "BRICK": 1}}
+        return {"player_id": player_id, "resources": {"WOOD": 1, "BRICK": 1}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        match self._step:
+            case 0:
+                self._step = 1
+                return TransitionResult(
+                    public_events=(Event("dice_rolled", {"result": [4, 3]}, turn_index=1, phase="play_turn", decision_index=0, actor_player_id="RED"),)
+                )
+            case 1:
+                if action.action_type != "END_TURN":
+                    raise RuntimeError(f"Expected END_TURN after no-deal, got {action.action_type}")
+                self._step = 2
+                self._terminal = True
+                return TransitionResult(
+                    public_events=(Event("turn_ended", {}, turn_index=1, phase="play_turn", decision_index=1, actor_player_id="RED"),),
                     terminal=True,
                     result_metadata={"winner_ids": ["RED"], "num_turns": 1},
                 )
@@ -859,7 +1041,16 @@ class GameOrchestratorTests(unittest.TestCase):
     def test_orchestrator_keeps_trade_chat_public_and_first_class(self) -> None:
         red = ScriptedPlayer(
             start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],
-            action_responses=[ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
             end_turn_responses=[TurnEndResponse(long_term={"goal": "Trade earlier."})],
             trade_chat_open_responses=[
                 TradeChatOpenResponse(
@@ -868,15 +1059,25 @@ class GameOrchestratorTests(unittest.TestCase):
                     requested_resources={"BRICK": 1},
                 )
             ],
-            trade_chat_selection_responses=[
-                TradeChatSelectionResponse(selected_player_id="BLUE", message="Let's do it.")
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(decision="continue", message="I can offer sheep instead."),
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="attempt-1-round-2-proposal-1",
+                    message="Let's do it.",
+                ),
             ],
         )
         blue = ScriptedPlayer(
             trade_chat_reply_responses=[
                 TradeChatReplyResponse(
-                    message="I can do that.",
-                    owner_gives={"WOOD": 1},
+                    message="Not for wood.",
+                    owner_gives={},
+                    owner_gets={},
+                ),
+                TradeChatReplyResponse(
+                    message="I can do that for sheep.",
+                    owner_gives={"SHEEP": 1},
                     owner_gets={"BRICK": 1},
                 )
             ]
@@ -894,12 +1095,302 @@ class GameOrchestratorTests(unittest.TestCase):
             run_dir = Path(orchestrator.run_dir)
 
             self.assertEqual(result.winner_ids, ("RED",))
-            event_kinds = [event.kind for event in orchestrator.event_log.public_events]
-            self.assertIn("trade_chat_opened", event_kinds)
-            self.assertIn("trade_chat_message", event_kinds)
-            self.assertIn("trade_chat_quote_selected", event_kinds)
-            self.assertIn("trade_confirmed", event_kinds)
+            events = orchestrator.event_log.public_events
+            event_kinds = [event.kind for event in events]
+            self.assertEqual(
+                event_kinds,
+                [
+                    "dice_rolled",
+                    "trade_chat_opened",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                    "trade_chat_quote_selected",
+                    "trade_chat_closed",
+                    "trade_confirmed",
+                    "turn_ended",
+                ],
+            )
+            selected_event = next(event for event in events if event.kind == "trade_chat_quote_selected")
+            self.assertEqual(selected_event.payload["selected_player_id"], "BLUE")
+            self.assertEqual(
+                selected_event.payload["selected_proposal_id"],
+                "attempt-1-round-2-proposal-1",
+            )
+            reply_events = [
+                event
+                for event in events
+                if event.kind == "trade_chat_message" and event.actor_player_id == "BLUE"
+            ]
+            self.assertEqual([event.payload["round_index"] for event in reply_events], [1, 2])
+            self.assertEqual(reply_events[-1].payload["offer"], {"SHEEP": 1})
+            self.assertEqual(reply_events[-1].payload["request"], {"BRICK": 1})
+            self.assertEqual(len(red.action_observations), 2)
+            self.assertTrue(red.action_observations[0].trade_chat_enabled)
+            self.assertEqual(red.action_observations[0].trade_chat_attempts_remaining, 5)
+            self.assertIsNone(red.action_observations[1].trade_chat_attempts_remaining)
+            self.assertEqual(red.action_observations[1].decision_index, 4)
             self.assertFalse(Path(run_dir, "players", "RED", "private_history.jsonl").exists())
+
+    def test_orchestrator_handles_invalid_selected_trade_without_crashing(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
+            end_turn_responses=[TurnEndResponse(long_term={"goal": "Try a different trade next time."})],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need brick.",
+                    requested_resources={"BRICK": 1},
+                )
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="attempt-1-round-1-proposal-1",
+                    message="Let's do it.",
+                ),
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do that.",
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                MockTradeChatInvalidSelectionEngine(),
+                {"RED": red, "BLUE": blue},
+                run_dir=tmpdir,
+                trading_chat_enabled=True,
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.winner_ids, ("RED",))
+            self.assertEqual(
+                [event.kind for event in orchestrator.event_log.public_events],
+                [
+                    "dice_rolled",
+                    "trade_chat_opened",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                    "trade_chat_quote_selected",
+                    "trade_chat_closed",
+                    "turn_ended",
+                ],
+            )
+
+    def test_orchestrator_recovers_trade_chat_selection_from_invalid_hint(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
+            end_turn_responses=[TurnEndResponse(long_term={"goal": "Trade earlier."})],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need brick.",
+                    requested_resources={"BRICK": 1},
+                )
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="BLUE_WOOD_FOR_BRICK",
+                    message="Let's do it.",
+                ),
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do that.",
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockTradeChatEngine(),
+            {"RED": red, "BLUE": blue},
+            trading_chat_enabled=True,
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("RED",))
+        selected_event = next(
+            event
+            for event in orchestrator.event_log.public_events
+            if event.kind == "trade_chat_quote_selected"
+        )
+        self.assertEqual(selected_event.payload["selected_player_id"], "BLUE")
+        self.assertEqual(
+            selected_event.payload["selected_proposal_id"],
+            "attempt-1-round-1-proposal-1",
+        )
+        self.assertFalse(
+            any(event.kind == "trade_chat_no_deal" for event in orchestrator.event_log.public_events)
+        )
+
+    def test_orchestrator_filters_trade_chat_proposals_owner_cannot_pay(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Open trade chat."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
+            end_turn_responses=[TurnEndResponse(long_term={"goal": "Wait for better resources."})],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                )
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="attempt-1-round-1-proposal-1",
+                    message="Let's do it.",
+                ),
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do wood for brick.",
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                MockTradeChatInsufficientOwnerResourcesEngine(),
+                {"RED": red, "BLUE": blue},
+                run_dir=tmpdir,
+                trading_chat_enabled=True,
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.winner_ids, ("RED",))
+            self.assertEqual(
+                [event.kind for event in orchestrator.event_log.public_events],
+                [
+                    "dice_rolled",
+                    "trade_chat_opened",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                    "trade_chat_no_deal",
+                    "trade_chat_closed",
+                    "turn_ended",
+                ],
+            )
+            self.assertFalse(
+                any(event.kind == "trade_confirmed" for event in orchestrator.event_log.public_events)
+            )
+
+    def test_orchestrator_rejects_duplicate_trade_chat_room_in_same_turn(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Ask for wood once."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Try the table."},
+                ),
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Try the exact same room again."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Move on."}),
+            ],
+            end_turn_responses=[TurnEndResponse(long_term={"goal": "Change the ask next time."})],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(decision="close", message="No deal."),
+            ],
+        )
+        blue = ScriptedPlayer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                MockTradeChatInsufficientOwnerResourcesEngine(),
+                {"RED": red, "BLUE": blue},
+                run_dir=tmpdir,
+                trading_chat_enabled=True,
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.winner_ids, ("RED",))
+            self.assertEqual(
+                [event.kind for event in orchestrator.event_log.public_events],
+                [
+                    "dice_rolled",
+                    "trade_chat_opened",
+                    "trade_chat_message",
+                    "trade_chat_no_deal",
+                    "trade_chat_closed",
+                    "turn_ended",
+                ],
+            )
+            self.assertEqual(red.action_observations[-1].decision_index, 1)
+            self.assertEqual(red.trade_chat_observations[0].attempt_index, 1)
+            self.assertEqual(
+                orchestrator._trade_chat_turn_state.opened_attempts if orchestrator._trade_chat_turn_state else None,
+                1,
+            )
 
     def test_orchestrator_snapshots_only_after_final_event_in_transition(self) -> None:
         red = ScriptedPlayer(

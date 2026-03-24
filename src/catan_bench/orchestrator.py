@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
@@ -22,9 +22,9 @@ from .schemas import (
     JsonValue,
     PublicStateSnapshot,
     TradeChatOpenResponse,
-    TradeChatQuote,
+    TradeChatOwnerDecisionResponse,
+    TradeChatProposal,
     TradeChatReplyResponse,
-    TradeChatSelectionResponse,
     TransitionResult,
 )
 from .storage import (
@@ -78,7 +78,9 @@ class _ActiveTurnSession:
 class _TradeChatTurnState:
     owner_player_id: str
     turn_index: int
+    opened_attempts: int = 0
     failed_attempts: int = 0
+    opened_room_signatures: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)
@@ -108,7 +110,9 @@ class GameOrchestrator:
         resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
         trading_chat_enabled: bool = False,
-        trading_chat_max_failed_attempts_per_turn: int = 4,
+        trading_chat_max_failed_attempts_per_turn: int = 5,
+        trading_chat_max_rooms_per_turn: int = 5,
+        trading_chat_max_rounds_per_attempt: int = 3,
         trading_chat_message_chars: int = 160,
         trading_chat_history_limit: int | None = 16,
         reporter: TerminalReporter | None = None,
@@ -135,6 +139,8 @@ class GameOrchestrator:
         self.trading_chat_max_failed_attempts_per_turn = (
             trading_chat_max_failed_attempts_per_turn
         )
+        self.trading_chat_max_rooms_per_turn = max(1, trading_chat_max_rooms_per_turn)
+        self.trading_chat_max_rounds_per_attempt = max(1, trading_chat_max_rounds_per_attempt)
         self.trading_chat_message_chars = trading_chat_message_chars
         self.trading_chat_history_limit = trading_chat_history_limit
         self.reporter = reporter
@@ -287,9 +293,11 @@ class GameOrchestrator:
                     },
                     "trading_chat": {
                         "enabled": self.trading_chat_enabled,
+                        "max_rooms_per_turn": self.trading_chat_max_rooms_per_turn,
                         "max_failed_attempts_per_turn": (
                             self.trading_chat_max_failed_attempts_per_turn
                         ),
+                        "max_rounds_per_attempt": self.trading_chat_max_rounds_per_attempt,
                         "message_chars": self.trading_chat_message_chars,
                         "history_limit": self.trading_chat_history_limit,
                     },
@@ -396,7 +404,18 @@ class GameOrchestrator:
             self._trade_chat_turn_state = _TradeChatTurnState(
                 owner_player_id=str(trade_chat_turn_state["owner_player_id"]),
                 turn_index=int(trade_chat_turn_state["turn_index"]),
+                opened_attempts=int(
+                    trade_chat_turn_state.get(
+                        "opened_attempts",
+                        trade_chat_turn_state.get("failed_attempts", 0),
+                    )
+                ),
                 failed_attempts=int(trade_chat_turn_state.get("failed_attempts", 0)),
+                opened_room_signatures={
+                    str(signature)
+                    for signature in trade_chat_turn_state.get("opened_room_signatures", [])
+                    if isinstance(signature, str)
+                },
             )
         else:
             self._trade_chat_turn_state = None
@@ -467,7 +486,11 @@ class GameOrchestrator:
             trade_chat_turn_state = {
                 "owner_player_id": self._trade_chat_turn_state.owner_player_id,
                 "turn_index": self._trade_chat_turn_state.turn_index,
+                "opened_attempts": self._trade_chat_turn_state.opened_attempts,
                 "failed_attempts": self._trade_chat_turn_state.failed_attempts,
+                "opened_room_signatures": sorted(
+                    self._trade_chat_turn_state.opened_room_signatures
+                ),
             }
 
         pending_trade_chat_selection: dict[str, JsonValue] | None = None
@@ -623,6 +646,36 @@ class GameOrchestrator:
             for resource in sorted(normalized)
         )
 
+    @staticmethod
+    def _canonical_chat_message_signature(value: str | None) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = " ".join(value.lower().split())
+        return normalized or None
+
+    @classmethod
+    def _trade_chat_room_signature(
+        cls,
+        *,
+        action_payload: Mapping[str, JsonValue],
+        requested_resources: Mapping[str, JsonValue],
+        opening_message: str | None,
+    ) -> str | None:
+        market = cls._trade_market_signature(action_payload)
+        requested = cls._canonical_trade_resource_map(requested_resources)
+        components: list[str] = []
+        if market is not None:
+            components.append(f"market={market}")
+        if requested is not None:
+            components.append(f"requested={requested}")
+        if not components:
+            message = cls._canonical_chat_message_signature(opening_message)
+            if message is not None:
+                components.append(f"message={message}")
+        if not components:
+            return None
+        return "|".join(components)
+
     def _maybe_run_opening_strategy_phase(self, decision: DecisionPoint) -> None:
         if self._opening_strategy_done or decision.phase != "play_turn":
             return
@@ -704,25 +757,78 @@ class GameOrchestrator:
         )
 
     def _turn_owner_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
-        chat_events: tuple[Event, ...] = ()
-        selected_action: Action | None = None
-        if self._can_offer_trade_chat(decision):
-            chat_events, selected_action = self._run_trade_chat(player=player, decision=decision)
-        if selected_action is not None:
-            return ActionDecision(
-                action=selected_action,
-                short_term=self.memory_store.get(decision.acting_player_id).short_term,
-            )
-        observation = self.observation_builder.build_action(
-            engine=self.engine,
-            decision=decision,
-            event_log=self.event_log,
-            memory_store=self.memory_store,
-            turn_start_history_index=self._turn_start_history_index(),
-        )
-        response = player.choose_action(observation)
-        self._append_player_prompt_traces(player)
-        return response
+        pending_response: ActionDecision | None = None
+        while True:
+            if pending_response is None:
+                observation = self.observation_builder.build_action(
+                    engine=self.engine,
+                    decision=decision,
+                    event_log=self.event_log,
+                    memory_store=self.memory_store,
+                    turn_start_history_index=self._turn_start_history_index(),
+                    trade_chat_enabled=self._trade_chat_available_for_decision(decision),
+                    trade_chat_attempts_remaining=self._trade_chat_attempts_remaining(decision),
+                )
+                response = player.choose_action(observation)
+                self._append_player_prompt_traces(player)
+            else:
+                response = pending_response
+                pending_response = None
+            if not self._should_route_trade_action_to_chat(decision=decision, action=response.action):
+                return response
+            if not self._can_offer_trade_chat(decision):
+                pending_response = self._retry_after_invalid_action(
+                    player=player,
+                    decision=decision,
+                    previous_response=response,
+                    error_message=(
+                        "Public trade room attempts are exhausted for this turn. "
+                        "Choose a different legal action instead of OFFER_TRADE."
+                    ),
+                    is_turn_owner_choice=True,
+                )
+                if pending_response is None:
+                    return ActionDecision(
+                        action=self._fallback_non_trade_action(decision.legal_actions),
+                        short_term=response.short_term,
+                    )
+                if not self._should_route_trade_action_to_chat(
+                    decision=decision,
+                    action=pending_response.action,
+                ):
+                    return pending_response
+                continue
+            try:
+                _, selected_action = self._run_trade_chat(
+                    player=player,
+                    decision=decision,
+                    selected_trade_action=response.action,
+                )
+            except InvalidActionError as exc:
+                pending_response = self._retry_after_invalid_action(
+                    player=player,
+                    decision=decision,
+                    previous_response=response,
+                    error_message=str(exc),
+                    is_turn_owner_choice=True,
+                )
+                if pending_response is None:
+                    return ActionDecision(
+                        action=self._fallback_non_trade_action(decision.legal_actions),
+                        short_term=response.short_term,
+                    )
+                if not self._should_route_trade_action_to_chat(
+                    decision=decision,
+                    action=pending_response.action,
+                ):
+                    return pending_response
+                continue
+            if selected_action is not None:
+                return ActionDecision(
+                    action=selected_action,
+                    short_term=response.short_term,
+                    reasoning=response.reasoning,
+                )
 
     def _reactive_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
         forced = self._forced_trade_response(decision)
@@ -757,7 +863,11 @@ class GameOrchestrator:
             proposed_action=proposed_action,
         )
         engine_transition = self.engine.apply_action(action)
-        transition = self._record_transition(decision=decision, transition=engine_transition)
+        transition = self._record_transition(
+            decision=decision,
+            action=action,
+            transition=engine_transition,
+        )
         self.action_trace_store.append(
             ActionTraceEntry(
                 acting_player_id=decision.acting_player_id,
@@ -887,6 +997,10 @@ class GameOrchestrator:
                     event_log=self.event_log,
                     memory_store=self.memory_store,
                     turn_start_history_index=self._turn_start_history_index(),
+                    trade_chat_enabled=self._trade_chat_available_for_decision(retry_decision),
+                    trade_chat_attempts_remaining=self._trade_chat_attempts_remaining(
+                        retry_decision
+                    ),
                 )
                 response = player.choose_action(observation)
             else:
@@ -948,6 +1062,7 @@ class GameOrchestrator:
         engine_transition = self.engine.apply_action(reject_action)
         transition = self._record_transition(
             decision=decision,
+            action=action,
             transition=TransitionResult(
                 public_events=(counter_event, *engine_transition.public_events),
                 terminal=engine_transition.terminal,
@@ -1002,14 +1117,57 @@ class GameOrchestrator:
         return stored
 
     def _record_transition(
-        self, *, decision: DecisionPoint, transition: TransitionResult
+        self, *, decision: DecisionPoint, action: Action, transition: TransitionResult
     ) -> TransitionResult:
-        stored_events = self._store_events(transition.public_events)
+        filtered_events, hidden_internal_step = self._filtered_transition_public_events(
+            decision=decision,
+            action=action,
+            public_events=transition.public_events,
+        )
+        stored_events = self._store_events(filtered_events)
+        result_metadata = dict(transition.result_metadata)
+        if hidden_internal_step:
+            result_metadata["hidden_internal_step"] = True
         return TransitionResult(
             public_events=stored_events,
             terminal=transition.terminal,
-            result_metadata=transition.result_metadata,
+            result_metadata=result_metadata,
         )
+
+    def _filtered_transition_public_events(
+        self,
+        *,
+        decision: DecisionPoint,
+        action: Action,
+        public_events: tuple[Event, ...],
+    ) -> tuple[tuple[Event, ...], bool]:
+        pending = self._pending_trade_chat_selection
+        if pending is None or pending.turn_index != decision.turn_index:
+            return public_events, False
+
+        # After a public chat proposal has been selected, the remaining engine
+        # trade-resolution steps are internal plumbing. Keep the chat selection
+        # and final confirmation public, but hide the legacy offer/accept/reject
+        # events so the transcript matches what players actually saw.
+        if (
+            decision.phase == "play_turn"
+            and action.action_type == "OFFER_TRADE"
+            and decision.acting_player_id == pending.owner_player_id
+        ):
+            return (), True
+        if decision.phase == "decide_trade":
+            if (
+                action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE"}
+                and decision.acting_player_id != pending.owner_player_id
+            ):
+                return (), True
+        if (
+            decision.phase == "decide_acceptees"
+            and decision.acting_player_id == pending.owner_player_id
+            and action.action_type == "CANCEL_TRADE"
+        ):
+            return (), True
+        return public_events, False
 
     @staticmethod
     def _resolved_counter_offer_for_decision(
@@ -1166,7 +1324,57 @@ class GameOrchestrator:
         state = self._trade_chat_turn_state
         if state is None:
             return False
-        return state.failed_attempts < self.trading_chat_max_failed_attempts_per_turn
+        return (
+            state.opened_attempts < self.trading_chat_max_rooms_per_turn
+            and state.failed_attempts < self.trading_chat_max_failed_attempts_per_turn
+        )
+
+    def _trade_chat_available_for_decision(self, decision: DecisionPoint) -> bool:
+        return self._can_offer_trade_chat(decision)
+
+    def _trade_chat_attempts_remaining(self, decision: DecisionPoint) -> int | None:
+        if not self._trade_chat_available_for_decision(decision):
+            return None
+        state = self._trade_chat_turn_state
+        if state is None:
+            return min(
+                self.trading_chat_max_rooms_per_turn,
+                self.trading_chat_max_failed_attempts_per_turn,
+            )
+        return max(
+            0,
+            min(
+                self.trading_chat_max_rooms_per_turn - state.opened_attempts,
+                self.trading_chat_max_failed_attempts_per_turn - state.failed_attempts,
+            ),
+        )
+
+    def _should_route_trade_action_to_chat(
+        self, *, decision: DecisionPoint, action: Action
+    ) -> bool:
+        return (
+            self.trading_chat_enabled
+            and decision.phase == "play_turn"
+            and action.action_type == "OFFER_TRADE"
+        )
+
+    @staticmethod
+    def _fallback_non_trade_action(legal_actions: tuple[Action, ...]) -> Action:
+        for action in legal_actions:
+            if action.action_type != "OFFER_TRADE":
+                return action
+        return GameOrchestrator._fallback_action_for_decision(legal_actions)
+
+    @staticmethod
+    def _first_legal_action(
+        legal_actions: tuple[Action, ...],
+        *,
+        action_type: str,
+    ) -> Action | None:
+        for action in legal_actions:
+            if action.action_type == action_type:
+                return action
+        return None
 
     def _forced_trade_response(self, decision: DecisionPoint) -> ActionDecision | None:
         pending = self._pending_trade_chat_selection
@@ -1176,43 +1384,99 @@ class GameOrchestrator:
                 decision.phase == "decide_trade"
                 and decision.acting_player_id == trade_owner_id
             ):
-                return ActionDecision(action=Action("REJECT_TRADE"))
+                reject_action = self._first_legal_action(
+                    decision.legal_actions,
+                    action_type="REJECT_TRADE",
+                )
+                if reject_action is not None:
+                    return ActionDecision(action=reject_action)
             return None
 
         if decision.phase == "decide_trade":
             if decision.acting_player_id == pending.counterparty_player_id:
-                return ActionDecision(action=Action("ACCEPT_TRADE"))
+                accept_action = self._first_legal_action(
+                    decision.legal_actions,
+                    action_type="ACCEPT_TRADE",
+                )
+                if accept_action is not None:
+                    return ActionDecision(action=accept_action)
+                reject_action = self._first_legal_action(
+                    decision.legal_actions,
+                    action_type="REJECT_TRADE",
+                )
+                if reject_action is not None:
+                    return ActionDecision(action=reject_action)
+                return None
             if decision.acting_player_id != pending.owner_player_id:
-                return ActionDecision(action=Action("REJECT_TRADE"))
+                reject_action = self._first_legal_action(
+                    decision.legal_actions,
+                    action_type="REJECT_TRADE",
+                )
+                if reject_action is not None:
+                    return ActionDecision(action=reject_action)
             return None
 
         if (
             decision.phase == "decide_acceptees"
             and decision.acting_player_id == pending.owner_player_id
         ):
-            return ActionDecision(
-                action=Action(
-                    "CONFIRM_TRADE",
-                    payload={"accepting_player_id": pending.counterparty_player_id},
-                )
+            for action in decision.legal_actions:
+                if (
+                    action.action_type == "CONFIRM_TRADE"
+                    and action.payload.get("accepting_player_id")
+                    == pending.counterparty_player_id
+                ):
+                    return ActionDecision(action=action)
+            cancel_action = self._first_legal_action(
+                decision.legal_actions,
+                action_type="CANCEL_TRADE",
             )
+            if cancel_action is not None:
+                return ActionDecision(action=cancel_action)
         return None
 
     def _run_trade_chat(
-        self, *, player: Player, decision: DecisionPoint
+        self,
+        *,
+        player: Player,
+        decision: DecisionPoint,
+        selected_trade_action: Action,
     ) -> tuple[tuple[Event, ...], Action | None]:
-        open_response = self._open_trade_chat(player=player, decision=decision)
-        if not open_response.open_chat or not open_response.requested_resources:
-            return (), None
+        initial_requested_resources = self._normalize_resource_map(
+            selected_trade_action.payload.get("request")
+        )
+        open_response = self._open_trade_chat(
+            player=player,
+            decision=decision,
+            requested_resources=initial_requested_resources,
+        )
+        requested_resources = (
+            open_response.requested_resources
+            if open_response.requested_resources
+            else initial_requested_resources
+        )
+        room_signature = self._trade_chat_room_signature(
+            action_payload=selected_trade_action.payload,
+            requested_resources=requested_resources,
+            opening_message=open_response.message,
+        )
+        self._validate_trade_chat_open_turn_constraints(
+            decision=decision,
+            room_signature=room_signature,
+        )
 
         state = self._trade_chat_turn_state
-        attempt_index = state.failed_attempts + 1 if state is not None else 1
+        attempt_index = state.opened_attempts + 1 if state is not None else 1
+        if state is not None:
+            state.opened_attempts = attempt_index
+            if room_signature is not None:
+                state.opened_room_signatures.add(room_signature)
         events: list[Event] = [
             Event(
                 kind="trade_chat_opened",
                 payload={
                     "owner_player_id": decision.acting_player_id,
-                    "requested_resources": open_response.requested_resources,
+                    "requested_resources": requested_resources,
                     "message": self._truncate_chat_message(open_response.message),
                     "attempt_index": attempt_index,
                 },
@@ -1232,68 +1496,168 @@ class GameOrchestrator:
                     phase=decision.phase,
                     decision_index=decision.decision_index,
                     attempt_index=attempt_index,
+                    round_index=0,
                 )
             )
         self._record_public_events(events)
 
-        quotes: list[TradeChatQuote] = []
-        for other_player_id in self._trade_chat_participants(decision.acting_player_id):
-            reply = self._reply_trade_chat(
-                player_id=other_player_id,
+        proposals: list[TradeChatProposal] = []
+        for round_index in range(1, self.trading_chat_max_rounds_per_attempt + 1):
+            for other_player_id in self._trade_chat_participants(decision.acting_player_id):
+                reply = self._reply_trade_chat(
+                    player_id=other_player_id,
+                    decision=decision,
+                    attempt_index=attempt_index,
+                    round_index=round_index,
+                    requested_resources=requested_resources,
+                    proposals=tuple(proposals),
+                )
+                proposal: TradeChatProposal | None = None
+                if reply.owner_gives and reply.owner_gets:
+                    counterparty_can_pay = self._player_has_resources(
+                        other_player_id,
+                        reply.owner_gets,
+                    )
+                    owner_can_pay = self._player_has_resources(
+                        decision.acting_player_id,
+                        reply.owner_gives,
+                    )
+                    if counterparty_can_pay and owner_can_pay:
+                        proposal = TradeChatProposal(
+                            proposal_id=self._next_trade_chat_proposal_id(
+                                attempt_index=attempt_index,
+                                round_index=round_index,
+                                proposal_count=len(proposals) + 1,
+                            ),
+                            player_id=other_player_id,
+                            round_index=round_index,
+                            message=self._truncate_chat_message(reply.message),
+                            owner_gives=reply.owner_gives,
+                            owner_gets=reply.owner_gets,
+                        )
+                        proposals.append(proposal)
+                    else:
+                        if not counterparty_can_pay:
+                            logger.debug(
+                                "Skipping proposal from %s: insufficient resources for %s",
+                                other_player_id,
+                                reply.owner_gets,
+                            )
+                        if not owner_can_pay:
+                            logger.debug(
+                                "Skipping proposal from %s: owner %s lacks resources for %s",
+                                other_player_id,
+                                decision.acting_player_id,
+                                reply.owner_gives,
+                            )
+                if reply.message is None and proposal is None:
+                    continue
+                message_event = self._trade_chat_message_event(
+                    owner_player_id=decision.acting_player_id,
+                    speaker_player_id=other_player_id,
+                    message=reply.message,
+                    turn_index=decision.turn_index,
+                    phase=decision.phase,
+                    decision_index=decision.decision_index,
+                    attempt_index=attempt_index,
+                    round_index=round_index,
+                    proposal=proposal,
+                )
+                events.append(message_event)
+                self._record_public_events((message_event,))
+
+            owner_decision = self._decide_trade_chat(
+                player=player,
                 decision=decision,
                 attempt_index=attempt_index,
-                requested_resources=open_response.requested_resources,
-                quotes=tuple(quotes),
+                round_index=round_index,
+                requested_resources=requested_resources,
+                proposals=tuple(proposals),
             )
-            # Require a complete, valid quote (both sides non-empty and respondent
-            # actually holds what the owner wants to receive).
-            if not reply.owner_gives or not reply.owner_gets:
+            if owner_decision.decision == "continue":
+                if owner_decision.message is not None:
+                    owner_message_event = self._trade_chat_message_event(
+                        owner_player_id=decision.acting_player_id,
+                        speaker_player_id=decision.acting_player_id,
+                        message=owner_decision.message,
+                        turn_index=decision.turn_index,
+                        phase=decision.phase,
+                        decision_index=decision.decision_index,
+                        attempt_index=attempt_index,
+                        round_index=round_index,
+                    )
+                    events.append(owner_message_event)
+                    self._record_public_events((owner_message_event,))
                 continue
-            if not self._player_has_resources(other_player_id, reply.owner_gets):
-                logger.debug(
-                    "Skipping quote from %s: insufficient resources for %s",
-                    other_player_id,
-                    reply.owner_gets,
-                )
-                continue
-            quote = TradeChatQuote(
-                player_id=other_player_id,
-                message=self._truncate_chat_message(reply.message),
-                owner_gives=reply.owner_gives,
-                owner_gets=reply.owner_gets,
-            )
-            quotes.append(quote)
-            message_event = self._trade_chat_message_event(
-                owner_player_id=decision.acting_player_id,
-                speaker_player_id=other_player_id,
-                message=reply.message,
-                turn_index=decision.turn_index,
-                phase=decision.phase,
-                decision_index=decision.decision_index,
-                attempt_index=attempt_index,
-                quote=quote,
-            )
-            events.append(message_event)
-            self._record_public_events((message_event,))
 
-        selection = self._select_trade_chat_offer(
-            player=player,
-            decision=decision,
-            attempt_index=attempt_index,
-            requested_resources=open_response.requested_resources,
-            quotes=tuple(quotes),
-        )
-        selected_quote = next(
-            (quote for quote in quotes if quote.player_id == selection.selected_player_id),
-            None,
-        )
-        if selected_quote is None:
-            no_deal_event = Event(
-                kind="trade_chat_no_deal",
+            selected_proposal = None
+            if owner_decision.decision == "select":
+                selected_proposal = next(
+                    (
+                        proposal
+                        for proposal in proposals
+                        if proposal.proposal_id == owner_decision.selected_proposal_id
+                    ),
+                    None,
+                )
+                if selected_proposal is not None:
+                    owner_can_pay = self._player_has_resources(
+                        decision.acting_player_id,
+                        selected_proposal.owner_gives,
+                    )
+                    counterparty_can_pay = self._player_has_resources(
+                        selected_proposal.player_id,
+                        selected_proposal.owner_gets,
+                    )
+                    if not owner_can_pay or not counterparty_can_pay:
+                        logger.debug(
+                            "Selected proposal %s became invalid before execution.",
+                            selected_proposal.proposal_id,
+                        )
+                        selected_proposal = None
+            if selected_proposal is None:
+                no_deal_event = Event(
+                    kind="trade_chat_no_deal",
+                    payload={
+                        "owner_player_id": decision.acting_player_id,
+                        "attempt_index": attempt_index,
+                        "round_index": round_index,
+                        "message": self._truncate_chat_message(owner_decision.message),
+                    },
+                    turn_index=decision.turn_index,
+                    phase=decision.phase,
+                    decision_index=decision.decision_index,
+                    actor_player_id=decision.acting_player_id,
+                )
+                close_event = Event(
+                    kind="trade_chat_closed",
+                    payload={
+                        "owner_player_id": decision.acting_player_id,
+                        "attempt_index": attempt_index,
+                        "round_index": round_index,
+                        "outcome": "no_deal",
+                    },
+                    turn_index=decision.turn_index,
+                    phase=decision.phase,
+                    decision_index=decision.decision_index,
+                    actor_player_id=decision.acting_player_id,
+                )
+                events.extend((no_deal_event, close_event))
+                self._record_public_events((no_deal_event, close_event))
+                self._increment_failed_trade_chat_attempt()
+                return tuple(events), None
+
+            selected_event = Event(
+                kind="trade_chat_quote_selected",
                 payload={
                     "owner_player_id": decision.acting_player_id,
+                    "selected_player_id": selected_proposal.player_id,
+                    "selected_proposal_id": selected_proposal.proposal_id,
+                    "offer": selected_proposal.owner_gives,
+                    "request": selected_proposal.owner_gets,
+                    "message": self._truncate_chat_message(owner_decision.message),
                     "attempt_index": attempt_index,
-                    "message": self._truncate_chat_message(selection.message),
+                    "round_index": round_index,
                 },
                 turn_index=decision.turn_index,
                 phase=decision.phase,
@@ -1305,27 +1669,47 @@ class GameOrchestrator:
                 payload={
                     "owner_player_id": decision.acting_player_id,
                     "attempt_index": attempt_index,
-                    "outcome": "no_deal",
+                    "round_index": round_index,
+                    "outcome": "selected",
+                    "selected_player_id": selected_proposal.player_id,
+                    "selected_proposal_id": selected_proposal.proposal_id,
                 },
                 turn_index=decision.turn_index,
                 phase=decision.phase,
                 decision_index=decision.decision_index,
                 actor_player_id=decision.acting_player_id,
             )
-            events.extend((no_deal_event, close_event))
-            self._record_public_events((no_deal_event, close_event))
-            self._increment_failed_trade_chat_attempt()
-            return tuple(events), None
+            events.extend((selected_event, close_event))
+            self._record_public_events((selected_event, close_event))
+            self._pending_trade_chat_selection = _PendingTradeChatSelection(
+                owner_player_id=decision.acting_player_id,
+                counterparty_player_id=selected_proposal.player_id,
+                owner_gives={
+                    key: int(value) for key, value in selected_proposal.owner_gives.items()
+                },
+                owner_gets={
+                    key: int(value) for key, value in selected_proposal.owner_gets.items()
+                },
+                turn_index=decision.turn_index,
+            )
+            return (
+                tuple(events),
+                Action(
+                    "OFFER_TRADE",
+                    payload={
+                        "offer": dict(selected_proposal.owner_gives),
+                        "request": dict(selected_proposal.owner_gets),
+                    },
+                ),
+            )
 
-        selected_event = Event(
-            kind="trade_chat_quote_selected",
+        no_deal_event = Event(
+            kind="trade_chat_no_deal",
             payload={
                 "owner_player_id": decision.acting_player_id,
-                "selected_player_id": selected_quote.player_id,
-                "offer": selected_quote.owner_gives,
-                "request": selected_quote.owner_gets,
-                "message": self._truncate_chat_message(selection.message),
                 "attempt_index": attempt_index,
+                "round_index": self.trading_chat_max_rounds_per_attempt,
+                "message": "Reached round limit.",
             },
             turn_index=decision.turn_index,
             phase=decision.phase,
@@ -1337,49 +1721,41 @@ class GameOrchestrator:
             payload={
                 "owner_player_id": decision.acting_player_id,
                 "attempt_index": attempt_index,
-                "outcome": "selected",
-                "selected_player_id": selected_quote.player_id,
+                "round_index": self.trading_chat_max_rounds_per_attempt,
+                "outcome": "max_rounds",
             },
             turn_index=decision.turn_index,
             phase=decision.phase,
             decision_index=decision.decision_index,
             actor_player_id=decision.acting_player_id,
         )
-        events.extend((selected_event, close_event))
-        self._record_public_events((selected_event, close_event))
-        self._pending_trade_chat_selection = _PendingTradeChatSelection(
-            owner_player_id=decision.acting_player_id,
-            counterparty_player_id=selected_quote.player_id,
-            owner_gives={key: int(value) for key, value in selected_quote.owner_gives.items()},
-            owner_gets={key: int(value) for key, value in selected_quote.owner_gets.items()},
-            turn_index=decision.turn_index,
-        )
-        return (
-            tuple(events),
-            Action(
-                "OFFER_TRADE",
-                payload={
-                    "offer": dict(selected_quote.owner_gives),
-                    "request": dict(selected_quote.owner_gets),
-                },
-            ),
-        )
+        events.extend((no_deal_event, close_event))
+        self._record_public_events((no_deal_event, close_event))
+        self._increment_failed_trade_chat_attempt()
+        return tuple(events), None
 
-    def _open_trade_chat(self, *, player: Player, decision: DecisionPoint) -> TradeChatOpenResponse:
+    def _open_trade_chat(
+        self,
+        *,
+        player: Player,
+        decision: DecisionPoint,
+        requested_resources: dict[str, JsonValue],
+    ) -> TradeChatOpenResponse:
         open_trade_chat = getattr(player, "open_trade_chat", None)
         if not callable(open_trade_chat):
-            return TradeChatOpenResponse(open_chat=False)
+            return TradeChatOpenResponse(open_chat=True, requested_resources=requested_resources)
         observation = self.observation_builder.build_trade_chat(
             engine=self.engine,
             player_id=decision.acting_player_id,
             owner_player_id=decision.acting_player_id,
             decision=decision,
             stage="open",
-            attempt_index=(self._trade_chat_turn_state.failed_attempts + 1)
+            attempt_index=(self._trade_chat_turn_state.opened_attempts + 1)
             if self._trade_chat_turn_state is not None
             else 1,
-            requested_resources={},
-            quotes=(),
+            round_index=0,
+            requested_resources=requested_resources,
+            proposals=(),
             event_log=self.event_log,
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
@@ -1388,9 +1764,13 @@ class GameOrchestrator:
         response = open_trade_chat(observation)
         self._append_player_prompt_traces(player)
         return TradeChatOpenResponse(
-            open_chat=response.open_chat,
+            open_chat=True,
             message=self._truncate_chat_message(response.message),
-            requested_resources=self._normalize_resource_map(response.requested_resources),
+            requested_resources=(
+                self._normalize_resource_map(response.requested_resources)
+                if response.requested_resources
+                else requested_resources
+            ),
             reasoning=response.reasoning,
         )
 
@@ -1400,8 +1780,9 @@ class GameOrchestrator:
         player_id: str,
         decision: DecisionPoint,
         attempt_index: int,
+        round_index: int,
         requested_resources: dict[str, JsonValue],
-        quotes: tuple[TradeChatQuote, ...],
+        proposals: tuple[TradeChatProposal, ...],
     ) -> TradeChatReplyResponse:
         player = self.players[player_id]
         respond_trade_chat = getattr(player, "respond_trade_chat", None)
@@ -1414,8 +1795,9 @@ class GameOrchestrator:
             decision=decision,
             stage="reply",
             attempt_index=attempt_index,
+            round_index=round_index,
             requested_resources=requested_resources,
-            quotes=quotes,
+            proposals=proposals,
             event_log=self.event_log,
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
@@ -1430,41 +1812,62 @@ class GameOrchestrator:
             reasoning=response.reasoning,
         )
 
-    def _select_trade_chat_offer(
+    def _decide_trade_chat(
         self,
         *,
         player: Player,
         decision: DecisionPoint,
         attempt_index: int,
+        round_index: int,
         requested_resources: dict[str, JsonValue],
-        quotes: tuple[TradeChatQuote, ...],
-    ) -> TradeChatSelectionResponse:
-        select_trade_chat_offer = getattr(player, "select_trade_chat_offer", None)
-        if not callable(select_trade_chat_offer):
-            return TradeChatSelectionResponse()
+        proposals: tuple[TradeChatProposal, ...],
+    ) -> TradeChatOwnerDecisionResponse:
+        decide_trade_chat = getattr(player, "decide_trade_chat", None)
+        if not callable(decide_trade_chat):
+            decide_trade_chat = getattr(player, "select_trade_chat_offer", None)
+        if not callable(decide_trade_chat):
+            return TradeChatOwnerDecisionResponse(decision="close")
         observation = self.observation_builder.build_trade_chat(
             engine=self.engine,
             player_id=decision.acting_player_id,
             owner_player_id=decision.acting_player_id,
             decision=decision,
-            stage="select",
+            stage="owner_decision",
             attempt_index=attempt_index,
+            round_index=round_index,
             requested_resources=requested_resources,
-            quotes=quotes,
+            proposals=proposals,
             event_log=self.event_log,
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
             transcript_limit=self.trading_chat_history_limit,
         )
-        response = select_trade_chat_offer(observation)
+        response = decide_trade_chat(observation)
         self._append_player_prompt_traces(player)
-        selected_player_id = response.selected_player_id
-        if isinstance(selected_player_id, str):
-            selected_player_id = selected_player_id.upper()
-        return TradeChatSelectionResponse(
-            selected_player_id=selected_player_id,
-            message=self._truncate_chat_message(response.message),
-            reasoning=response.reasoning,
+        decision_value = getattr(response, "decision", None)
+        selected_proposal_id = getattr(response, "selected_proposal_id", None)
+        if not isinstance(decision_value, str):
+            selected_player_id = getattr(response, "selected_player_id", None)
+            if isinstance(selected_player_id, str):
+                decision_value = "select"
+                selected_proposal_id = self._selected_proposal_id_for_player(
+                    selected_player_id=selected_player_id,
+                    proposals=proposals,
+                )
+            else:
+                decision_value = "close"
+        decision_value = decision_value.lower()
+        if decision_value not in {"continue", "select", "close"}:
+            decision_value = "close"
+        selected_proposal_id = self._coerce_selected_proposal_id_hint(
+            proposals=proposals,
+            selected_proposal_id=selected_proposal_id,
+        )
+        return TradeChatOwnerDecisionResponse(
+            decision=decision_value,
+            selected_proposal_id=selected_proposal_id,
+            message=self._truncate_chat_message(getattr(response, "message", None)),
+            reasoning=getattr(response, "reasoning", None),
         )
 
     def _record_public_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
@@ -1485,18 +1888,21 @@ class GameOrchestrator:
         phase: str,
         decision_index: int,
         attempt_index: int,
-        quote: TradeChatQuote | None = None,
+        round_index: int,
+        proposal: TradeChatProposal | None = None,
     ) -> Event:
         payload: dict[str, JsonValue] = {
             "owner_player_id": owner_player_id,
             "speaker_player_id": speaker_player_id,
             "attempt_index": attempt_index,
+            "round_index": round_index,
         }
         if message is not None:
             payload["message"] = self._truncate_chat_message(message)
-        if quote is not None and quote.owner_gives and quote.owner_gets:
-            payload["offer"] = dict(quote.owner_gives)
-            payload["request"] = dict(quote.owner_gets)
+        if proposal is not None and proposal.owner_gives and proposal.owner_gets:
+            payload["proposal_id"] = proposal.proposal_id
+            payload["offer"] = dict(proposal.owner_gives)
+            payload["request"] = dict(proposal.owner_gets)
         return Event(
             kind="trade_chat_message",
             payload=payload,
@@ -1510,6 +1916,67 @@ class GameOrchestrator:
         state = self._trade_chat_turn_state
         if state is not None:
             state.failed_attempts += 1
+
+    def _validate_trade_chat_open_turn_constraints(
+        self,
+        *,
+        decision: DecisionPoint,
+        room_signature: str | None,
+    ) -> None:
+        if room_signature is None or decision.phase != "play_turn":
+            return
+        state = self._trade_chat_turn_state
+        if state is None:
+            return
+        if room_signature in state.opened_room_signatures:
+            raise InvalidActionError(
+                "Cannot reopen the same public trade room in the same turn. "
+                "Choose a meaningfully different trade request or another action."
+            )
+
+    @staticmethod
+    def _next_trade_chat_proposal_id(
+        *, attempt_index: int, round_index: int, proposal_count: int
+    ) -> str:
+        return f"attempt-{attempt_index}-round-{round_index}-proposal-{proposal_count}"
+
+    @staticmethod
+    def _selected_proposal_id_for_player(
+        *, selected_player_id: str, proposals: tuple[TradeChatProposal, ...]
+    ) -> str | None:
+        normalized_player_id = selected_player_id.upper()
+        for proposal in reversed(proposals):
+            if proposal.player_id == normalized_player_id:
+                return proposal.proposal_id
+        return None
+
+    @staticmethod
+    def _coerce_selected_proposal_id_hint(
+        *,
+        proposals: tuple[TradeChatProposal, ...],
+        selected_proposal_id: str | None,
+    ) -> str | None:
+        if isinstance(selected_proposal_id, str):
+            for proposal in proposals:
+                if proposal.proposal_id == selected_proposal_id:
+                    return selected_proposal_id
+
+            hint_tokens = {
+                token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+            }
+            matching_players = {
+                proposal.player_id for proposal in proposals if proposal.player_id in hint_tokens
+            }
+            if len(matching_players) == 1:
+                matching_player_id = next(iter(matching_players))
+                return GameOrchestrator._selected_proposal_id_for_player(
+                    selected_player_id=matching_player_id,
+                    proposals=proposals,
+                )
+
+        if len(proposals) == 1:
+            return proposals[0].proposal_id
+        return None
 
     def _update_trade_chat_after_action(
         self,

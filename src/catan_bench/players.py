@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from collections import deque
 from typing import Callable, Iterable, Protocol
 
@@ -22,8 +23,8 @@ from .schemas import (
     ReactiveObservation,
     TradeChatObservation,
     TradeChatOpenResponse,
+    TradeChatOwnerDecisionResponse,
     TradeChatReplyResponse,
-    TradeChatSelectionResponse,
     TurnEndObservation,
     TurnEndResponse,
     TurnStartObservation,
@@ -77,6 +78,34 @@ def _normalize_offer_trade_payload(payload: dict) -> dict:
     return {k: v for k, v in result.items() if k in {"offer", "request"}}
 
 
+def _coerce_trade_chat_selected_proposal_id(
+    observation: TradeChatObservation,
+    selected_proposal_id: object,
+) -> str | None:
+    if isinstance(selected_proposal_id, str):
+        for proposal in observation.proposals:
+            if proposal.proposal_id == selected_proposal_id:
+                return selected_proposal_id
+
+        hint_tokens = {
+            token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+        }
+        matching_players = {
+            proposal.player_id
+            for proposal in observation.proposals
+            if proposal.player_id.upper() in hint_tokens
+        }
+        if len(matching_players) == 1:
+            matching_player_id = next(iter(matching_players))
+            for proposal in reversed(observation.proposals):
+                if proposal.player_id == matching_player_id:
+                    return proposal.proposal_id
+
+    if len(observation.proposals) == 1:
+        return observation.proposals[0].proposal_id
+    return None
+
+
 class ScriptedPlayer:
     """Small utility adapter for tests and scripted demos."""
 
@@ -90,7 +119,7 @@ class ScriptedPlayer:
         reactive_responses: Iterable[ActionDecision | Action] = (),
         trade_chat_open_responses: Iterable[TradeChatOpenResponse] = (),
         trade_chat_reply_responses: Iterable[TradeChatReplyResponse] = (),
-        trade_chat_selection_responses: Iterable[TradeChatSelectionResponse] = (),
+        trade_chat_owner_decision_responses: Iterable[TradeChatOwnerDecisionResponse] = (),
     ) -> None:
         self._opening_strategy_responses = deque(opening_strategy_responses)
         self._start_turn_responses = deque(start_turn_responses)
@@ -99,7 +128,7 @@ class ScriptedPlayer:
         self._reactive_responses = deque(reactive_responses)
         self._trade_chat_open_responses = deque(trade_chat_open_responses)
         self._trade_chat_reply_responses = deque(trade_chat_reply_responses)
-        self._trade_chat_selection_responses = deque(trade_chat_selection_responses)
+        self._trade_chat_owner_decision_responses = deque(trade_chat_owner_decision_responses)
         self.opening_strategy_observations: list[OpeningStrategyObservation] = []
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
@@ -166,13 +195,18 @@ class ScriptedPlayer:
             return TradeChatReplyResponse()
         return self._trade_chat_reply_responses.popleft()
 
+    def decide_trade_chat(
+        self, observation: TradeChatObservation
+    ) -> TradeChatOwnerDecisionResponse:
+        self.trade_chat_observations.append(observation)
+        if not self._trade_chat_owner_decision_responses:
+            return TradeChatOwnerDecisionResponse()
+        return self._trade_chat_owner_decision_responses.popleft()
+
     def select_trade_chat_offer(
         self, observation: TradeChatObservation
-    ) -> TradeChatSelectionResponse:
-        self.trade_chat_observations.append(observation)
-        if not self._trade_chat_selection_responses:
-            return TradeChatSelectionResponse()
-        return self._trade_chat_selection_responses.popleft()
+    ) -> TradeChatOwnerDecisionResponse:
+        return self.decide_trade_chat(observation)
 
 
 class FirstLegalPlayer:
@@ -643,7 +677,10 @@ class LLMPlayer:
                 attempts=trace_attempts,
             )
             raise
-        response = self._trade_chat_reply_response_from_payload(response_payload)
+        response = self._trade_chat_reply_response_from_payload(
+            observation=observation,
+            response_payload=response_payload,
+        )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
             history_index=observation.history_index,
@@ -655,11 +692,11 @@ class LLMPlayer:
         )
         return response
 
-    def select_trade_chat_offer(
+    def decide_trade_chat(
         self, observation: TradeChatObservation
-    ) -> TradeChatSelectionResponse:
+    ) -> TradeChatOwnerDecisionResponse:
         trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_trade_chat_select(observation)
+        messages = self._messages_for_trade_chat_owner_decision(observation)
         try:
             response_payload = self._complete_and_trace(
                 messages=messages,
@@ -672,21 +709,29 @@ class LLMPlayer:
                 turn_index=observation.turn_index,
                 phase=observation.phase,
                 decision_index=observation.decision_index,
-                stage="trade_chat_select",
+                stage="trade_chat_owner_decision",
                 attempts=trace_attempts,
             )
             raise
-        response = self._trade_chat_selection_response_from_payload(response_payload)
+        response = self._trade_chat_owner_decision_response_from_payload(
+            observation=observation,
+            response_payload=response_payload,
+        )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
             history_index=observation.history_index,
             turn_index=observation.turn_index,
             phase=observation.phase,
             decision_index=observation.decision_index,
-            stage="trade_chat_select",
+            stage="trade_chat_owner_decision",
             attempts=trace_attempts,
         )
         return response
+
+    def select_trade_chat_offer(
+        self, observation: TradeChatObservation
+    ) -> TradeChatOwnerDecisionResponse:
+        return self.decide_trade_chat(observation)
 
     def take_last_prompt_trace(self) -> PromptTrace | None:
         if not self._prompt_traces:
@@ -788,6 +833,8 @@ class LLMPlayer:
             ],
             "memory": observation.memory.to_dict(),
             "decision_prompt": observation.decision_prompt,
+            "trade_chat_enabled": observation.trade_chat_enabled,
+            "trade_chat_attempts_remaining": observation.trade_chat_attempts_remaining,
             "context_window": {
                 "compact_retry": compact,
                 "history_limit": self._effective_history_limit(compact=compact),
@@ -883,6 +930,7 @@ class LLMPlayer:
             "phase": observation.phase,
             "decision_index": observation.decision_index,
             "attempt_index": observation.attempt_index,
+            "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
             "memory": observation.memory.to_dict(),
@@ -912,10 +960,12 @@ class LLMPlayer:
             "phase": observation.phase,
             "decision_index": observation.decision_index,
             "attempt_index": observation.attempt_index,
+            "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
+            "proposals": [proposal.to_dict() for proposal in observation.proposals],
             "transcript": [
                 event.to_dict()
                 for event in self._tail_events(observation.transcript, compact=False)
@@ -929,7 +979,7 @@ class LLMPlayer:
             game_rules=observation.game_rules,
         )
 
-    def _messages_for_trade_chat_select(
+    def _messages_for_trade_chat_owner_decision(
         self, observation: TradeChatObservation
     ) -> list[dict[str, object]]:
         payload = {
@@ -940,11 +990,12 @@ class LLMPlayer:
             "phase": observation.phase,
             "decision_index": observation.decision_index,
             "attempt_index": observation.attempt_index,
+            "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
-            "quotes": [quote.to_dict() for quote in observation.quotes],
+            "proposals": [proposal.to_dict() for proposal in observation.proposals],
             "transcript": [
                 event.to_dict()
                 for event in self._tail_events(observation.transcript, compact=False)
@@ -952,8 +1003,8 @@ class LLMPlayer:
             "message_char_limit": observation.message_char_limit,
         }
         return self.renderer.render_messages(
-            system_template="trade_chat_select_system.jinja",
-            user_template="trade_chat_select_user.jinja",
+            system_template="trade_chat_owner_decision_system.jinja",
+            user_template="trade_chat_owner_decision_user.jinja",
             payload=payload,
             game_rules=observation.game_rules,
         )
@@ -1125,50 +1176,166 @@ class LLMPlayer:
         self, response_payload: dict[str, object]
     ) -> TradeChatOpenResponse:
         open_chat = bool(response_payload.get("open_chat", False))
+        message = self._coerce_public_message(response_payload.get("message"))
         requested_resources = self._coerce_resource_map(
             response_payload.get("requested_resources")
             or response_payload.get("request")
             or response_payload.get("owner_gets")
         )
-        if not open_chat or not requested_resources:
+        if not open_chat or (message is None and not requested_resources):
             return TradeChatOpenResponse(open_chat=False, reasoning=self._coerce_reasoning(response_payload))
         return TradeChatOpenResponse(
             open_chat=True,
-            message=self._coerce_public_message(response_payload.get("message")),
+            message=message,
             requested_resources=requested_resources,
             reasoning=self._coerce_reasoning(response_payload),
         )
 
     def _trade_chat_reply_response_from_payload(
-        self, response_payload: dict[str, object]
+        self,
+        *,
+        observation: TradeChatObservation,
+        response_payload: dict[str, object],
     ) -> TradeChatReplyResponse:
+        owner_gives: dict[str, JsonValue]
+        owner_gets: dict[str, JsonValue]
+        if "owner_gives" in response_payload or "owner_gets" in response_payload:
+            owner_gives = self._coerce_resource_map(response_payload.get("owner_gives"))
+            owner_gets = self._coerce_resource_map(response_payload.get("owner_gets"))
+        else:
+            generic_offer = self._coerce_resource_map(
+                response_payload.get("offer") or response_payload.get("give")
+            )
+            generic_request = self._coerce_resource_map(
+                response_payload.get("request")
+                or response_payload.get("want")
+                or response_payload.get("take")
+            )
+            owner_gives, owner_gets = self._normalize_trade_chat_terms(
+                observation=observation,
+                generic_offer=generic_offer,
+                generic_request=generic_request,
+            )
         return TradeChatReplyResponse(
             message=self._coerce_public_message(response_payload.get("message")),
-            owner_gives=self._coerce_resource_map(
-                response_payload.get("owner_gives")
-                or response_payload.get("offer")
-                or response_payload.get("give")
-            ),
-            owner_gets=self._coerce_resource_map(
-                response_payload.get("owner_gets")
-                or response_payload.get("request")
-                or response_payload.get("want")
-            ),
+            owner_gives=owner_gives,
+            owner_gets=owner_gets,
             reasoning=self._coerce_reasoning(response_payload),
         )
 
-    def _trade_chat_selection_response_from_payload(
-        self, response_payload: dict[str, object]
-    ) -> TradeChatSelectionResponse:
-        selected_player_id = response_payload.get("selected_player_id")
-        if not isinstance(selected_player_id, str):
-            selected_player_id = response_payload.get("player_id")
-        if isinstance(selected_player_id, str):
-            selected_player_id = selected_player_id.upper()
-        else:
-            selected_player_id = None
-        return TradeChatSelectionResponse(
-            selected_player_id=selected_player_id,
+    def _normalize_trade_chat_terms(
+        self,
+        *,
+        observation: TradeChatObservation,
+        generic_offer: dict[str, JsonValue],
+        generic_request: dict[str, JsonValue],
+    ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+        if not generic_offer and not generic_request:
+            return {}, {}
+
+        owner_relative = (dict(generic_offer), dict(generic_request))
+        responder_relative = (dict(generic_request), dict(generic_offer))
+        if (
+            self._score_trade_chat_candidate(observation=observation, candidate=owner_relative)
+            >= self._score_trade_chat_candidate(
+                observation=observation,
+                candidate=responder_relative,
+            )
+        ):
+            return owner_relative
+        return responder_relative
+
+    def _score_trade_chat_candidate(
+        self,
+        *,
+        observation: TradeChatObservation,
+        candidate: tuple[dict[str, JsonValue], dict[str, JsonValue]],
+    ) -> int:
+        owner_gives, owner_gets = candidate
+        if not owner_gives and not owner_gets:
+            return -1000
+
+        score = 0
+        player_resources = self._coerce_resource_map(observation.private_state.get("resources"))
+        if owner_gets:
+            if self._resource_map_is_subset(player_resources, owner_gets):
+                score += 100
+            else:
+                score -= 100
+
+        requested_resources = self._coerce_resource_map(observation.requested_resources)
+        if requested_resources:
+            score += 10 * self._resource_map_overlap(owner_gets, requested_resources)
+            if owner_gets == requested_resources:
+                score += 5
+
+        if owner_gives and owner_gets:
+            score += 1
+        return score
+
+    @staticmethod
+    def _resource_map_is_subset(
+        owned: dict[str, JsonValue],
+        required: dict[str, JsonValue],
+    ) -> bool:
+        for resource, amount in required.items():
+            if not isinstance(amount, int):
+                return False
+            if int(owned.get(resource, 0)) < amount:
+                return False
+        return True
+
+    @staticmethod
+    def _resource_map_overlap(
+        left: dict[str, JsonValue],
+        right: dict[str, JsonValue],
+    ) -> int:
+        overlap = 0
+        for resource, left_amount in left.items():
+            right_amount = right.get(resource)
+            if isinstance(left_amount, int) and isinstance(right_amount, int):
+                overlap += min(left_amount, right_amount)
+        return overlap
+
+    def _trade_chat_owner_decision_response_from_payload(
+        self,
+        *,
+        observation: TradeChatObservation,
+        response_payload: dict[str, object],
+    ) -> TradeChatOwnerDecisionResponse:
+        decision = response_payload.get("decision")
+        if not isinstance(decision, str):
+            if response_payload.get("selected_proposal_id") is not None:
+                decision = "select"
+            elif response_payload.get("selected_player_id") is not None:
+                decision = "select"
+            elif bool(response_payload.get("continue_chat")):
+                decision = "continue"
+            else:
+                decision = "close"
+        decision = decision.lower()
+        if decision not in {"continue", "select", "close"}:
+            decision = "close"
+
+        selected_proposal_id = response_payload.get("selected_proposal_id")
+        if not isinstance(selected_proposal_id, str):
+            selected_player_id = response_payload.get("selected_player_id")
+            if not isinstance(selected_player_id, str):
+                selected_player_id = response_payload.get("player_id")
+            if isinstance(selected_player_id, str):
+                selected_player_id = selected_player_id.upper()
+                for proposal in reversed(observation.proposals):
+                    if proposal.player_id == selected_player_id:
+                        selected_proposal_id = proposal.proposal_id
+                        break
+        selected_proposal_id = _coerce_trade_chat_selected_proposal_id(
+            observation,
+            selected_proposal_id,
+        )
+
+        return TradeChatOwnerDecisionResponse(
+            decision=decision,
+            selected_proposal_id=selected_proposal_id,
             message=self._coerce_public_message(response_payload.get("message")),
             reasoning=self._coerce_reasoning(response_payload),
         )

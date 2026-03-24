@@ -7,17 +7,52 @@ import unittest
 from pathlib import Path
 
 from catan_bench.dashboard import (
+    DashboardSnapshot,
+    _render_player_summary_table,
     build_board_svg,
     build_player_timelines,
     discover_run_directories,
     load_dashboard_snapshot,
+    _recent_turn_event_sections,
     _jump_history_to_next_turn,
     _jump_history_to_previous_turn,
+    _turn_event_digest_body,
     _turn_index_for_cursor,
 )
+from catan_bench.schemas import Event
 
 
 class DashboardTests(unittest.TestCase):
+    def test_render_player_summary_table_includes_army_column(self) -> None:
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.markdown_calls: list[tuple[str, bool]] = []
+
+            def markdown(self, body: str, unsafe_allow_html: bool = False) -> None:
+                self.markdown_calls.append((body, unsafe_allow_html))
+
+        st = FakeStreamlit()
+
+        _render_player_summary_table(
+            st,
+            {
+                "RED": {
+                    "visible_victory_points": 3,
+                    "resource_card_count": 4,
+                    "development_card_count": 1,
+                    "longest_road_length": 5,
+                    "has_longest_road": True,
+                    "has_largest_army": True,
+                }
+            },
+        )
+
+        self.assertEqual(len(st.markdown_calls), 1)
+        html, unsafe = st.markdown_calls[0]
+        self.assertTrue(unsafe)
+        self.assertIn("<th>Army</th>", html)
+        self.assertIn("<td style='text-align:center'>🏆</td>", html)
+
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
@@ -326,6 +361,155 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(
             _jump_history_to_next_turn(12, turn_markers, max_history_index=12),
             12,
+        )
+
+    def test_turn_event_digest_body_formats_compact_summaries(self) -> None:
+        self.assertEqual(
+            _turn_event_digest_body(
+                Event(
+                    "dice_rolled",
+                    {"result": [5, 5]},
+                    history_index=1,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                )
+            ),
+            "rolled 10 (5+5)",
+        )
+        self.assertEqual(
+            _turn_event_digest_body(
+                Event(
+                    "trade_confirmed",
+                    {
+                        "accepting_player_id": "RED",
+                        "offer": {"WOOD": 1},
+                        "request": {"BRICK": 1},
+                    },
+                    history_index=2,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                )
+            ),
+            "↔ RED: 1 WOOD for 1 BRICK",
+        )
+        self.assertEqual(
+            _turn_event_digest_body(
+                Event(
+                    "trade_chat_opened",
+                    {
+                        "message": "Looking to trade 1×ORE for 1×BRICK to build roads.",
+                        "requested_resources": {"BRICK": 1},
+                    },
+                    history_index=3,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                )
+            ),
+            "opened trade chat: Looking to trade 1×ORE for 1×BRICK to build roads.",
+        )
+        self.assertEqual(
+            _turn_event_digest_body(
+                Event(
+                    "action_taken",
+                    {
+                        "action": {
+                            "action_type": "MARITIME_TRADE",
+                            "description": "Trade 3 WOOD to the bank for 1 BRICK.",
+                        }
+                    },
+                    history_index=3,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                )
+            ),
+            "Trade 3 WOOD to the bank for 1 BRICK.",
+        )
+
+    def test_recent_turn_event_sections_group_recent_turns_and_filter_chat_noise(self) -> None:
+        snapshot = DashboardSnapshot(
+            run_dir=Path("/tmp/fake-run"),
+            metadata={},
+            player_ids=("WHITE", "RED", "BLUE"),
+            public_events=(
+                Event(
+                    "road_built",
+                    {"edge": [17, 39]},
+                    history_index=1,
+                    turn_index=5,
+                    phase="play_turn",
+                    actor_player_id="BLUE",
+                ),
+                Event(
+                    "trade_chat_opened",
+                    {
+                        "message": "Looking to trade 1×WOOD for 1×BRICK.",
+                        "requested_resources": {"BRICK": 1},
+                    },
+                    history_index=2,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                ),
+                Event(
+                    "trade_chat_message",
+                    {"message": "I'll give you wood for brick."},
+                    history_index=3,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="RED",
+                ),
+                Event(
+                    "dice_rolled",
+                    {"result": [5, 5]},
+                    history_index=4,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                ),
+                Event(
+                    "trade_confirmed",
+                    {
+                        "accepting_player_id": "RED",
+                        "offer": {"WOOD": 1},
+                        "request": {"BRICK": 1},
+                    },
+                    history_index=5,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                ),
+                Event(
+                    "turn_ended",
+                    {},
+                    history_index=6,
+                    turn_index=6,
+                    phase="play_turn",
+                    actor_player_id="WHITE",
+                ),
+            ),
+            public_state_snapshots=(),
+            memory_traces_by_player={},
+            prompt_traces_by_player={},
+            result=None,
+        )
+
+        sections = _recent_turn_event_sections(snapshot, cursor=6, max_turns=2)
+
+        self.assertEqual([turn_index for turn_index, _label, _rows in sections], [5, 6])
+        self.assertEqual(sections[0][1], "Turn 5")
+        self.assertEqual(sections[0][2], (("BLUE", "road on [17, 39]"),))
+        self.assertEqual(
+            sections[1][2],
+            (
+                ("WHITE", "opened trade chat: Looking to trade 1×WOOD for 1×BRICK."),
+                ("WHITE", "rolled 10 (5+5)"),
+                ("WHITE", "↔ RED: 1 WOOD for 1 BRICK"),
+                ("WHITE", "End the current turn."),
+            ),
         )
 
     @staticmethod

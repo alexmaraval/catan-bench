@@ -14,6 +14,30 @@ from catan_bench import Action
 
 @unittest.skipIf(CatanatronEngineAdapter is None, "catanatron dependency is not installed")
 class CatanatronAdapterTests(unittest.TestCase):
+    @staticmethod
+    def _affordable_trade_payload(adapter: CatanatronEngineAdapter) -> dict[str, dict[str, int]]:
+        decision = adapter.current_decision()
+        private_state = adapter.private_state(decision.acting_player_id)
+        resources = private_state.get("resources", {})
+        if not isinstance(resources, dict):
+            raise AssertionError("Expected resource map in private state.")
+
+        offered_resource = next(
+            (resource for resource, amount in resources.items() if isinstance(amount, int) and amount > 0),
+            None,
+        )
+        if offered_resource is None:
+            raise AssertionError("Expected at least one resource to offer for trade.")
+        requested_resource = next(
+            resource
+            for resource in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
+            if resource != offered_resource
+        )
+        return {
+            "offer": {str(offered_resource): 1},
+            "request": {requested_resource: 1},
+        }
+
     def test_resolve_action_canonicalizes_unique_move_robber_coordinate(self) -> None:
         adapter = object.__new__(CatanatronEngineAdapter)
         legal_actions = (
@@ -248,11 +272,12 @@ class CatanatronAdapterTests(unittest.TestCase):
 
         while adapter.current_decision().phase != "play_turn":
             adapter.apply_action(adapter.current_decision().legal_actions[0])
+        trade_payload = self._affordable_trade_payload(adapter)
         adapter.apply_action(
             adapter.resolve_action(
                 proposed_action=Action(
                     "OFFER_TRADE",
-                    payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    payload=trade_payload,
                 ),
                 legal_actions=adapter.current_decision().legal_actions,
             )
@@ -296,11 +321,12 @@ class CatanatronAdapterTests(unittest.TestCase):
         decision = adapter.current_decision()
         trade_actions = [action for action in decision.legal_actions if action.action_type == "OFFER_TRADE"]
         self.assertEqual(len(trade_actions), 1)
+        trade_payload = self._affordable_trade_payload(adapter)
 
         canonical_offer = adapter.resolve_action(
             proposed_action=Action(
                 "OFFER_TRADE",
-                payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                payload=trade_payload,
             ),
             legal_actions=decision.legal_actions,
         )
@@ -310,8 +336,8 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertTrue(any(event.kind == "trade_offered" for event in transition.public_events))
         offered_event = transition.public_events[0]
         self.assertEqual(offered_event.actor_player_id, decision.acting_player_id)
-        self.assertEqual(offered_event.payload["offer"], {"WOOD": 1})
-        self.assertEqual(offered_event.payload["request"], {"BRICK": 1})
+        self.assertEqual(offered_event.payload["offer"], trade_payload["offer"])
+        self.assertEqual(offered_event.payload["request"], trade_payload["request"])
         self.assertEqual(adapter.current_decision().phase, "decide_trade")
         self.assertTrue(
             all(
@@ -319,6 +345,26 @@ class CatanatronAdapterTests(unittest.TestCase):
                 for action in adapter.current_decision().legal_actions
             )
         )
+
+    def test_resolve_action_rejects_trade_offer_when_player_lacks_resources(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=1)
+
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        adapter.apply_action(Action("ROLL"))
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        decision = adapter.current_decision()
+        with self.assertRaises(ValueError):
+            adapter.resolve_action(
+                proposed_action=Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 99}, "request": {"BRICK": 1}},
+                ),
+                legal_actions=decision.legal_actions,
+            )
 
     def test_decide_trade_exposes_counter_offer_template(self) -> None:
         adapter = CatanatronEngineAdapter(seed=1)
@@ -330,11 +376,12 @@ class CatanatronAdapterTests(unittest.TestCase):
             adapter.apply_action(adapter.current_decision().legal_actions[0])
 
         decision = adapter.current_decision()
+        trade_payload = self._affordable_trade_payload(adapter)
         adapter.apply_action(
             adapter.resolve_action(
                 proposed_action=Action(
                     "OFFER_TRADE",
-                    payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    payload=trade_payload,
                 ),
                 legal_actions=decision.legal_actions,
             )

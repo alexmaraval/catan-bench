@@ -119,6 +119,8 @@ def run_from_config_files(
         trading_chat_max_failed_attempts_per_turn=(
             game_config.trading_chat_max_failed_attempts_per_turn
         ),
+        trading_chat_max_rooms_per_turn=game_config.trading_chat_max_rooms_per_turn,
+        trading_chat_max_rounds_per_attempt=game_config.trading_chat_max_rounds_per_attempt,
         trading_chat_message_chars=game_config.trading_chat_message_chars,
         trading_chat_history_limit=game_config.trading_chat_history_limit,
         reporter=(

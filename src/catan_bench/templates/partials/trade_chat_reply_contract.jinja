@@ -1,5 +1,8 @@
 Return strict JSON with keys:
-- `message`: optional short public quote or decline.
-- `owner_gives`: resource-count map the owner would pay.
-- `owner_gets`: resource-count map the owner would receive.
+- `message`: optional short public chat message.
+- `owner_gives`: optional resource-count map from the owner's perspective: what the owner would pay if you are making a concrete proposal.
+- `owner_gets`: optional resource-count map from the owner's perspective: what the owner would receive from you.
 - `private_reasoning`: optional concise private note under 30 words.
+
+Example:
+- If the owner would give `1×WOOD` and receive `1×BRICK` from you, return `{"owner_gives": {"WOOD": 1}, "owner_gets": {"BRICK": 1}}`.

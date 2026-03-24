@@ -1392,6 +1392,81 @@ class GameOrchestratorTests(unittest.TestCase):
                 1,
             )
 
+    def test_orchestrator_falls_back_after_repeated_invalid_duplicate_trade_chat_retries(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[TurnStartResponse(short_term={"plan": "Ask for wood once."})],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Try the table."},
+                ),
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Try the same room again."},
+                ),
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Still trying the same room."},
+                ),
+            ],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(decision="close", message="No deal."),
+            ],
+        )
+        blue = ScriptedPlayer()
+
+        orchestrator = GameOrchestrator(
+            MockTradeChatInsufficientOwnerResourcesEngine(),
+            {"RED": red, "BLUE": blue},
+            trading_chat_enabled=True,
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("RED",))
+        self.assertEqual(
+            [event.kind for event in orchestrator.event_log.public_events],
+            [
+                "dice_rolled",
+                "trade_chat_opened",
+                "trade_chat_message",
+                "trade_chat_no_deal",
+                "trade_chat_closed",
+                "turn_ended",
+            ],
+        )
+        self.assertEqual(len(red.action_observations), 3)
+        self.assertIn(
+            "Cannot reopen the same public trade room",
+            red.action_observations[-1].decision_prompt or "",
+        )
+
     def test_orchestrator_snapshots_only_after_final_event_in_transition(self) -> None:
         red = ScriptedPlayer(
             start_turn_responses=[TurnStartResponse(short_term={"plan": "Build then end."})],

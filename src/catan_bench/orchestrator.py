@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import secrets
@@ -212,14 +213,16 @@ class GameOrchestrator:
         if self._is_turn_owner_choice(decision, turn_owner_id):
             self._ensure_turn_started(player=player, decision=decision)
             response = self._turn_owner_response(player=player, decision=decision)
+            is_turn_owner_choice = True
         else:
             response = self._reactive_response(player=player, decision=decision)
+            is_turn_owner_choice = False
 
-        transition = self._apply_decision(
+        transition = self._apply_decision_with_recovery(
+            player=player,
             decision=decision,
-            proposed_action=response.action,
             response=response,
-            update_short_term=self._is_turn_owner_choice(decision, turn_owner_id),
+            is_turn_owner_choice=is_turn_owner_choice,
         )
         self._completed_step(transition)
         return transition
@@ -793,6 +796,128 @@ class GameOrchestrator:
 
         return transition
 
+    def _apply_decision_with_recovery(
+        self,
+        *,
+        player: Player,
+        decision: DecisionPoint,
+        response: ActionDecision,
+        is_turn_owner_choice: bool,
+    ) -> TransitionResult:
+        try:
+            return self._apply_decision(
+                decision=decision,
+                proposed_action=response.action,
+                response=response,
+                update_short_term=is_turn_owner_choice,
+            )
+        except InvalidActionError as exc:
+            logger.info(
+                "Player %s selected invalid action %s at turn=%s phase=%s decision=%s: %s",
+                decision.acting_player_id,
+                response.action.to_dict(),
+                decision.turn_index,
+                decision.phase,
+                decision.decision_index,
+                exc,
+            )
+            retry_response = self._retry_after_invalid_action(
+                player=player,
+                decision=decision,
+                previous_response=response,
+                error_message=str(exc),
+                is_turn_owner_choice=is_turn_owner_choice,
+            )
+            if retry_response is not None:
+                try:
+                    return self._apply_decision(
+                        decision=decision,
+                        proposed_action=retry_response.action,
+                        response=retry_response,
+                        update_short_term=is_turn_owner_choice,
+                    )
+                except InvalidActionError as retry_exc:
+                    logger.info(
+                        "Retry for player %s remained invalid at turn=%s phase=%s decision=%s: %s",
+                        decision.acting_player_id,
+                        decision.turn_index,
+                        decision.phase,
+                        decision.decision_index,
+                        retry_exc,
+                    )
+
+            fallback_response = ActionDecision(
+                action=self._fallback_action_for_decision(decision.legal_actions),
+                short_term=None,
+            )
+            return self._apply_decision(
+                decision=decision,
+                proposed_action=fallback_response.action,
+                response=fallback_response,
+                update_short_term=is_turn_owner_choice,
+            )
+
+    def _retry_after_invalid_action(
+        self,
+        *,
+        player: Player,
+        decision: DecisionPoint,
+        previous_response: ActionDecision,
+        error_message: str,
+        is_turn_owner_choice: bool,
+    ) -> ActionDecision | None:
+        retry_prompt = self._invalid_action_retry_prompt(
+            original_prompt=decision.prompt,
+            previous_action=previous_response.action,
+            error_message=error_message,
+        )
+        retry_decision = DecisionPoint(
+            acting_player_id=decision.acting_player_id,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+            decision_index=decision.decision_index,
+            prompt=retry_prompt,
+        )
+        try:
+            if is_turn_owner_choice:
+                observation = self.observation_builder.build_action(
+                    engine=self.engine,
+                    decision=retry_decision,
+                    event_log=self.event_log,
+                    memory_store=self.memory_store,
+                    turn_start_history_index=self._turn_start_history_index(),
+                )
+                response = player.choose_action(observation)
+            else:
+                observation = self.observation_builder.build_reactive(
+                    engine=self.engine,
+                    decision=retry_decision,
+                    event_log=self.event_log,
+                    memory_store=self.memory_store,
+                )
+                response = player.respond_reactive(observation)
+            self._append_player_prompt_traces(player)
+            return response
+        except RuntimeError:
+            self._append_player_prompt_traces(player)
+            return None
+
+    @staticmethod
+    def _invalid_action_retry_prompt(
+        *,
+        original_prompt: str | None,
+        previous_action: Action,
+        error_message: str,
+    ) -> str:
+        base_prompt = original_prompt or "Choose exactly one legal action."
+        return (
+            f"{base_prompt}\n\n"
+            f"Previous action was invalid: {json.dumps(previous_action.to_dict(), sort_keys=True)}\n"
+            f"Error: {error_message}\n"
+            "Choose a different legal action or, if trading again, a different market."
+        )
+
     def _apply_counter_offer_decision(
         self,
         *,
@@ -1046,6 +1171,12 @@ class GameOrchestrator:
     def _forced_trade_response(self, decision: DecisionPoint) -> ActionDecision | None:
         pending = self._pending_trade_chat_selection
         if pending is None or pending.turn_index != decision.turn_index:
+            trade_owner_id = self._trade_owner_for_decision(decision)
+            if (
+                decision.phase == "decide_trade"
+                and decision.acting_player_id == trade_owner_id
+            ):
+                return ActionDecision(action=Action("REJECT_TRADE"))
             return None
 
         if decision.phase == "decide_trade":
@@ -1500,6 +1631,18 @@ class GameOrchestrator:
         raise InvalidActionError(
             f"Action {proposed_action.to_dict()} is not in the current legal action set."
         )
+
+    @staticmethod
+    def _fallback_action_for_decision(legal_actions: tuple[Action, ...]) -> Action:
+        for action in legal_actions:
+            if not (
+                action.action_type in {"OFFER_TRADE", "COUNTER_OFFER"}
+                and action.payload == {"offer": {}, "request": {}}
+            ):
+                return action
+        if not legal_actions:
+            raise InvalidActionError("No legal fallback action was available.")
+        return legal_actions[0]
 
     @staticmethod
     def _winner_ids_from_metadata(metadata) -> tuple[str, ...]:

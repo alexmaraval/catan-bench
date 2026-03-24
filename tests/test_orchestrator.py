@@ -612,6 +612,96 @@ class MockRepeatAfterCounterTradeEngine(MockRepeatRejectedTradeEngine):
                 return super().current_decision()
 
 
+class MockSelfTradeResponseEngine:
+    def __init__(self) -> None:
+        self._game_id = "self-trade-response-game"
+        self._player_ids = ("BLUE", "WHITE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    @property
+    def turn_owner_id(self) -> str:
+        return "BLUE"
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        if self._step == 0:
+            return DecisionPoint(
+                "BLUE",
+                1,
+                "decide_trade",
+                (
+                    Action(
+                        "REJECT_TRADE",
+                        payload={
+                            "offer": {"SHEEP": 1},
+                            "request": {"BRICK": 1},
+                            "offering_player_id": "BLUE",
+                        },
+                    ),
+                ),
+                0,
+                "Respond to BLUE's trade offer.",
+            )
+        raise RuntimeError("No more decisions.")
+
+    def public_state(self):
+        return {
+            "turn": {"turn_player_id": "BLUE", "current_player_id": "BLUE"},
+            "players": {"BLUE": {"vp": 2}, "WHITE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {
+                "is_resolving_trade": True,
+                "offering_player_id": "BLUE",
+                "offer": {"SHEEP": 1},
+                "request": {"BRICK": 1},
+                "acceptees": [],
+            },
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        return {"player_id": player_id, "resources": {}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        if self._step != 0:
+            raise RuntimeError("Unexpected action.")
+        self._step = 1
+        self._terminal = True
+        return TransitionResult(
+            public_events=(
+                Event(
+                    "trade_rejected",
+                    {
+                        "offering_player_id": "BLUE",
+                        "offer": {"SHEEP": 1},
+                        "request": {"BRICK": 1},
+                        "responding_player_id": "BLUE",
+                    },
+                    turn_index=1,
+                    phase="decide_trade",
+                    decision_index=0,
+                    actor_player_id="BLUE",
+                ),
+            ),
+            terminal=True,
+            result_metadata={"winner_ids": ["WHITE"], "num_turns": 1},
+        )
+
+    def result(self):
+        return {"winner_ids": ["WHITE"], "num_turns": 1}
+
+
 class GameOrchestratorTests(unittest.TestCase):
     def test_opening_strategy_phase_runs_for_all_players_before_first_turn_start(self) -> None:
         red = ScriptedPlayer(
@@ -860,11 +950,12 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual(counter_event.payload["request"], {"WOOD": 1})
             self.assertEqual(orchestrator.action_trace_store.entries[0].action.action_type, "COUNTER_OFFER")
 
-    def test_same_trade_market_cannot_repeat_after_rejection_without_counteroffers(self) -> None:
+    def test_same_trade_market_gets_retry_feedback_and_continues_after_rejection(self) -> None:
         red = ScriptedPlayer(
             action_responses=[
                 Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
                 Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
+                Action("END_TURN"),
             ]
         )
         blue = ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")])
@@ -874,15 +965,18 @@ class GameOrchestratorTests(unittest.TestCase):
             {"RED": red, "BLUE": blue},
         )
 
-        orchestrator.step()
-        orchestrator.step()
-        orchestrator.step()
+        result = orchestrator.run()
 
-        with self.assertRaisesRegex(
-            InvalidActionError,
-            "Cannot repeat the same domestic trade market",
-        ):
-            orchestrator.step()
+        self.assertEqual(result.winner_ids, ("RED",))
+        self.assertEqual(len(red.action_observations), 3)
+        self.assertIsNotNone(red.action_observations[-1].decision_prompt)
+        assert red.action_observations[-1].decision_prompt is not None
+        self.assertIn("Previous action was invalid", red.action_observations[-1].decision_prompt)
+        self.assertIn("Cannot repeat the same domestic trade market", red.action_observations[-1].decision_prompt)
+        self.assertEqual(
+            [event.kind for event in orchestrator.event_log.public_events],
+            ["dice_rolled", "trade_offered", "trade_rejected", "turn_ended"],
+        )
 
     def test_same_trade_market_can_repeat_after_counteroffer(self) -> None:
         red = ScriptedPlayer(
@@ -911,6 +1005,20 @@ class GameOrchestratorTests(unittest.TestCase):
         latest_offer = transition.public_events[0]
         self.assertEqual(latest_offer.payload["offer"], {"ORE": 1})
         self.assertEqual(latest_offer.payload["request"], {"WOOD": 1})
+
+    def test_trade_owner_is_not_prompted_to_respond_to_own_offer(self) -> None:
+        blue = ScriptedPlayer()
+        orchestrator = GameOrchestrator(
+            MockSelfTradeResponseEngine(),
+            {"BLUE": blue, "WHITE": ScriptedPlayer()},
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("WHITE",))
+        self.assertEqual(len(blue.reactive_observations), 0)
+        self.assertEqual(len(orchestrator.action_trace_store.entries), 1)
+        self.assertEqual(orchestrator.action_trace_store.entries[0].action.action_type, "REJECT_TRADE")
 
 
 if __name__ == "__main__":

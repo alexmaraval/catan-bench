@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 
 try:
     from catan_bench.catanatron_adapter import CatanatronEngineAdapter
@@ -345,6 +346,77 @@ class CatanatronAdapterTests(unittest.TestCase):
             "COUNTER_OFFER",
             [action.action_type for action in decide_trade.legal_actions],
         )
+
+    def test_public_event_for_self_trade_response_is_suppressed(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter._native_action_to_action = lambda native_action: Action(  # type: ignore[method-assign]
+            "REJECT_TRADE",
+            payload={
+                "offer": {"SHEEP": 1},
+                "request": {"BRICK": 1},
+                "offering_player_id": "BLUE",
+            },
+        )
+        adapter._public_event_payload = lambda **kwargs: {  # type: ignore[method-assign]
+            "offering_player_id": "BLUE",
+            "responding_player_id": "BLUE",
+        }
+        adapter._phase_name = lambda prompt: "decide_trade"  # type: ignore[method-assign]
+
+        event = adapter._public_event_for_action(
+            native_action=SimpleNamespace(color=SimpleNamespace(value="BLUE")),
+            action_result=None,
+            state_before=SimpleNamespace(
+                num_turns=1,
+                current_prompt=SimpleNamespace(value="DECIDE_TRADE"),
+                action_records=[],
+            ),
+            state_after=SimpleNamespace(),
+        )
+
+        self.assertIsNone(event)
+
+    def test_current_decision_auto_skips_self_trade_response_state(self) -> None:
+        from catan_bench.catanatron_adapter import ActionPrompt, ActionType, Color, NativeAction
+
+        class _FakeState:
+            def __init__(self) -> None:
+                self.current_prompt = ActionPrompt.DECIDE_TRADE
+                self.is_resolving_trade = True
+                self.colors = (Color.BLUE, Color.WHITE)
+                self.current_trade = (0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0)
+                self.num_turns = 1
+                self.action_records = []
+                self._current_color = Color.BLUE
+
+            def current_color(self):
+                return self._current_color
+
+        class _FakeGame:
+            def __init__(self) -> None:
+                self.state = _FakeState()
+                self.playable_actions = [NativeAction(Color.BLUE, ActionType.REJECT_TRADE, self.state.current_trade)]
+
+            def execute(self, native_action, validate_action=True):
+                self.state.action_records.append(native_action)
+                self.state.current_prompt = ActionPrompt.PLAY_TURN
+                self.state._current_color = Color.WHITE
+                self.playable_actions = [NativeAction(Color.WHITE, ActionType.END_TURN, None)]
+                return None
+
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter.game = _FakeGame()
+        adapter._native_action_to_action = lambda native_action: Action(native_action.action_type.value)  # type: ignore[method-assign]
+        adapter._can_offer_trade = lambda: False  # type: ignore[method-assign]
+        adapter._can_counter_offer = lambda legal_actions: False  # type: ignore[method-assign]
+        adapter._ordered_legal_actions = lambda legal_actions: legal_actions  # type: ignore[method-assign]
+
+        decision = adapter.current_decision()
+
+        self.assertEqual(decision.phase, "play_turn")
+        self.assertEqual(decision.acting_player_id, "WHITE")
+        self.assertEqual(len(adapter.game.state.action_records), 1)
+        self.assertEqual(adapter.game.state.action_records[0].action_type, ActionType.REJECT_TRADE)
 
 
 if __name__ == "__main__":

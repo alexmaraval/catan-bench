@@ -108,6 +108,7 @@ class CatanatronEngineAdapter:
         )
 
     def current_decision(self) -> DecisionPoint:
+        self._advance_past_self_trade_response()
         state = self.game.state
         legal_actions = tuple(
             self._native_action_to_action(native_action)
@@ -127,6 +128,30 @@ class CatanatronEngineAdapter:
             decision_index=len(state.action_records),
             prompt=self._decision_prompt(state.current_prompt),
         )
+
+    def _advance_past_self_trade_response(self) -> None:
+        while self._is_self_trade_response_state():
+            logger.debug(
+                "Auto-skipping self trade response for %s",
+                self.game.state.current_color().value,
+            )
+            self.game.execute(
+                NativeAction(
+                    self.game.state.current_color(),
+                    ActionType.REJECT_TRADE,
+                    self.game.state.current_trade,
+                ),
+                validate_action=True,
+            )
+
+    def _is_self_trade_response_state(self) -> bool:
+        state = self.game.state
+        if state.current_prompt != ActionPrompt.DECIDE_TRADE:
+            return False
+        offering_player_id = self._trade_offering_player_id(state)
+        if offering_player_id is None:
+            return False
+        return state.current_color().value == offering_player_id
 
     @staticmethod
     def _ordered_legal_actions(legal_actions: tuple[Action, ...]) -> tuple[Action, ...]:
@@ -269,6 +294,14 @@ class CatanatronEngineAdapter:
     def resolve_action(
         self, *, proposed_action: Action, legal_actions: tuple[Action, ...]
     ) -> Action:
+        game = getattr(self, "game", None)
+        if (
+            proposed_action.action_type == "CONFIRM_TRADE"
+            and game is not None
+            and proposed_action.payload.get("accepting_player_id")
+            == self._trade_offering_player_id(game.state)
+        ):
+            raise ValueError("CONFIRM_TRADE cannot select the offering player as the counterparty.")
         for legal_action in legal_actions:
             if self._is_trade_template(legal_action):
                 continue
@@ -387,7 +420,7 @@ class CatanatronEngineAdapter:
         result_metadata = dict(self.result()) if terminal else {}
 
         return TransitionResult(
-            public_events=(public_event,),
+            public_events=() if public_event is None else (public_event,),
             terminal=terminal,
             result_metadata=result_metadata,
         )
@@ -949,7 +982,7 @@ class CatanatronEngineAdapter:
         action_result: Any,
         state_before,
         state_after,
-    ) -> Event:
+    ) -> Event | None:
         canonical_action = self._native_action_to_action(native_action)
         actor_player_id = native_action.color.value
         payload = self._public_event_payload(
@@ -959,6 +992,11 @@ class CatanatronEngineAdapter:
             state_before=state_before,
             state_after=state_after,
         )
+        if (
+            canonical_action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE"}
+            and payload.get("offering_player_id") == actor_player_id
+        ):
+            return None
         return Event(
             kind=self._event_kind(canonical_action.action_type),
             payload=payload,

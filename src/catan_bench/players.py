@@ -450,6 +450,19 @@ class LLMPlayer:
                     trace_attempts=trace_attempts,
                 )
             except RuntimeError:
+                if not self._should_salvage_invalid_response(trace_attempts):
+                    self._append_prompt_trace_entry(
+                        player_id=observation.player_id,
+                        history_index=observation.history_index,
+                        turn_index=observation.turn_index,
+                        phase=observation.phase,
+                        decision_index=observation.decision_index,
+                        stage="choose_action",
+                        attempts=trace_attempts,
+                    )
+                    raise
+        except RuntimeError:
+            if not self._should_salvage_invalid_response(trace_attempts):
                 self._append_prompt_trace_entry(
                     player_id=observation.player_id,
                     history_index=observation.history_index,
@@ -460,17 +473,6 @@ class LLMPlayer:
                     attempts=trace_attempts,
                 )
                 raise
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="choose_action",
-                attempts=trace_attempts,
-            )
-            raise
         return self._resolve_action_decision(
             observation=observation,
             initial_messages=messages,
@@ -559,6 +561,19 @@ class LLMPlayer:
                     trace_attempts=trace_attempts,
                 )
             except RuntimeError:
+                if not self._should_salvage_invalid_response(trace_attempts):
+                    self._append_prompt_trace_entry(
+                        player_id=observation.player_id,
+                        history_index=observation.history_index,
+                        turn_index=observation.turn_index,
+                        phase=observation.phase,
+                        decision_index=observation.decision_index,
+                        stage="reactive_action",
+                        attempts=trace_attempts,
+                    )
+                    raise
+        except RuntimeError:
+            if not self._should_salvage_invalid_response(trace_attempts):
                 self._append_prompt_trace_entry(
                     player_id=observation.player_id,
                     history_index=observation.history_index,
@@ -569,17 +584,6 @@ class LLMPlayer:
                     attempts=trace_attempts,
                 )
                 raise
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="reactive_action",
-                attempts=trace_attempts,
-            )
-            raise
         return self._resolve_action_decision(
             observation=observation,
             initial_messages=messages,
@@ -1324,6 +1328,18 @@ class LLMPlayer:
             return cls._coerce_reasoning(response_payload)
         except RuntimeError:
             return fallback
+
+    @staticmethod
+    def _should_salvage_invalid_response(
+        trace_attempts: list[PromptTraceAttempt],
+    ) -> bool:
+        if not trace_attempts:
+            return False
+        last_response = trace_attempts[-1].response
+        error_payload = last_response.get("error") if isinstance(last_response, dict) else None
+        if not isinstance(error_payload, dict):
+            return False
+        return error_payload.get("type") == "invalid_response"
 
     def _complete_and_trace(
         self,

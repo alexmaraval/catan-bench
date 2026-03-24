@@ -71,6 +71,84 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertEqual(captured_body["include_reasoning"], False)
         self.assertNotIn("reasoning", captured_body)
 
+    def test_complete_uses_reasoning_effort_none_for_supported_google_models(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key_env="GEMINI_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="gemini-2.5-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertEqual(captured_body["reasoning_effort"], "none")
+        self.assertNotIn("reasoning", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
+    def test_complete_omits_reasoning_field_for_unsupported_google_models(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key_env="GEMINI_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="gemini-2.0-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertNotIn("reasoning", captured_body)
+        self.assertNotIn("reasoning_effort", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
+    def test_complete_omits_reasoning_field_for_together_when_disabled(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://api.together.ai/v1",
+            api_key_env="TOGETHER_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"TOGETHER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="moonshotai/Kimi-K2.5",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertNotIn("reasoning", captured_body)
+        self.assertNotIn("reasoning_effort", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
     def test_complete_retries_retryable_http_errors(self) -> None:
         attempts: list[str] = []
 

@@ -16,6 +16,7 @@ Core rules:
 - The robber blocks resource production on its hex, but does not block building or harbor access.
 - Domestic trades are voluntary exchanges between the active player and exactly one other player. Non-active players may not trade with each other.
 - Trades must exchange resources for resources. No gifts, no trades on credit, no secret side deals, and no triangular trades.
+- If a domestic trade offer is rejected by everyone and draws no counteroffers, do not repeat that exact offer/request market again in the same turn.
 - Maritime trade is with the bank at 4:1 by default, improved by your own harbor access to 3:1 or 2:1 as applicable.
 - You may buy any number of development cards you can afford, but you may not play a development card on the same turn you bought it, except that a victory point card may be revealed immediately if it wins the game.
 - Development cards stay hidden until played or revealed, and development cards themselves cannot be traded.

@@ -44,6 +44,14 @@ class RawCompletionClient:
         return {"choices": [{"message": {"content": content}}]}
 
 
+class StructuredCompletionClient:
+    def __init__(self, *completions: dict[str, object]) -> None:
+        self._completions = list(completions)
+
+    def complete(self, *, model, messages, temperature, top_p=None, reasoning_enabled=None):
+        return self._completions.pop(0)
+
+
 class CapturingRenderer:
     def __init__(self) -> None:
         self.last_payload: dict[str, object] | None = None
@@ -649,6 +657,63 @@ class LLMPlayerTests(unittest.TestCase):
             trace.attempts[0].response["error"]["type"],  # type: ignore[index]
             "invalid_response",
         )
+
+    def test_reactive_stage_salvages_reasoning_only_output_via_repair(self) -> None:
+        player = LLMPlayer(
+            client=StructuredCompletionClient(
+                {
+                    "choices": [
+                        {
+                            "message": {"content": "", "reasoning": "Thinking through setup."},
+                            "finish_reason": "length",
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {"content": "", "reasoning": "Still thinking."},
+                            "finish_reason": "length",
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {"content": '{"action_index": 0, "private_reasoning": "Recovered."}'},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            ),
+            model="fake-model",
+        )
+
+        response = player.respond_reactive(
+            ReactiveObservation(
+                game_id="game-1",
+                player_id="BLUE",
+                history_index=4,
+                turn_index=3,
+                phase="build_initial_settlement",
+                decision_index=7,
+                public_state={"turn": {"turn_player_id": "BLUE"}},
+                private_state={"resources": {}},
+                public_history=(),
+                legal_actions=(Action("BUILD_INITIAL_SETTLEMENT", payload={"node_id": 4}),),
+                decision_prompt="Place your opening settlement.",
+                game_rules="Rules",
+                memory=PlayerMemory(),
+            )
+        )
+
+        self.assertEqual(response.action.action_type, "BUILD_INITIAL_SETTLEMENT")
+        self.assertEqual(response.reasoning, "Recovered.")
+        trace = player.take_last_prompt_trace()
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace.stage, "reactive_action")
+        self.assertEqual(len(trace.attempts), 3)
 
 
 if __name__ == "__main__":

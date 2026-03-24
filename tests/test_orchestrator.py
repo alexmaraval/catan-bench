@@ -11,6 +11,7 @@ from catan_bench import (
     DecisionPoint,
     Event,
     GameOrchestrator,
+    InvalidActionError,
     OpeningStrategyResponse,
     ScriptedPlayer,
     TradeChatOpenResponse,
@@ -445,6 +446,172 @@ class MockCounterOfferEngine:
         return {"winner_ids": ["WHITE"], "num_turns": 1}
 
 
+class MockRepeatRejectedTradeEngine:
+    def __init__(self) -> None:
+        self._game_id = "repeat-rejected-trade-game"
+        self._player_ids = ("RED", "BLUE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    @property
+    def turn_owner_id(self) -> str:
+        return "RED"
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        match self._step:
+            case 0:
+                return DecisionPoint("RED", 1, "play_turn", (Action("ROLL"),), 0, "Roll.")
+            case 1:
+                return DecisionPoint(
+                    "RED",
+                    1,
+                    "play_turn",
+                    (
+                        Action("OFFER_TRADE", payload={"offer": {}, "request": {}}),
+                        Action("END_TURN"),
+                    ),
+                    1,
+                    "Offer or end.",
+                )
+            case 2:
+                return DecisionPoint("BLUE", 1, "decide_trade", (Action("REJECT_TRADE"),), 2, "Respond.")
+            case 3:
+                return DecisionPoint(
+                    "RED",
+                    1,
+                    "play_turn",
+                    (
+                        Action("OFFER_TRADE", payload={"offer": {}, "request": {}}),
+                        Action("END_TURN"),
+                    ),
+                    3,
+                    "Offer again or end.",
+                )
+            case _:
+                raise RuntimeError("No more decisions.")
+
+    def public_state(self):
+        return {
+            "turn": {
+                "turn_player_id": "RED",
+                "current_player_id": (
+                    self.current_decision().acting_player_id if not self._terminal else "RED"
+                ),
+            },
+            "players": {"RED": {"vp": 2}, "BLUE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {},
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        if player_id == "RED":
+            return {"player_id": player_id, "resources": {"ORE": 2}}
+        return {"player_id": player_id, "resources": {"WOOD": 1}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        match self._step:
+            case 0:
+                self._step = 1
+                return TransitionResult(
+                    public_events=(Event("dice_rolled", {"result": [4, 3]}, turn_index=1, phase="play_turn", decision_index=0, actor_player_id="RED"),)
+                )
+            case 1:
+                self._step = 2
+                return TransitionResult(
+                    public_events=(
+                        Event(
+                            "trade_offered",
+                            {"offer": dict(action.payload.get("offer", {})), "request": dict(action.payload.get("request", {}))},
+                            turn_index=1,
+                            phase="play_turn",
+                            decision_index=1,
+                            actor_player_id="RED",
+                        ),
+                    )
+                )
+            case 2:
+                self._step = 3
+                return TransitionResult(
+                    public_events=(
+                        Event(
+                            "trade_rejected",
+                            {"offering_player_id": "RED"},
+                            turn_index=1,
+                            phase="decide_trade",
+                            decision_index=2,
+                            actor_player_id="BLUE",
+                        ),
+                    )
+                )
+            case 3:
+                self._step = 4
+                self._terminal = True
+                if action.action_type == "OFFER_TRADE":
+                    return TransitionResult(
+                        public_events=(
+                            Event(
+                                "trade_offered",
+                                {"offer": dict(action.payload.get("offer", {})), "request": dict(action.payload.get("request", {}))},
+                                turn_index=1,
+                                phase="play_turn",
+                                decision_index=3,
+                                actor_player_id="RED",
+                            ),
+                        ),
+                        terminal=True,
+                        result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+                    )
+                return TransitionResult(
+                    public_events=(Event("turn_ended", {}, turn_index=1, phase="play_turn", decision_index=3, actor_player_id="RED"),),
+                    terminal=True,
+                    result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+                )
+            case _:
+                raise RuntimeError("Unexpected action.")
+
+    def result(self):
+        return {"winner_ids": ["RED"], "num_turns": 1}
+
+
+class MockRepeatAfterCounterTradeEngine(MockRepeatRejectedTradeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self._game_id = "repeat-after-counter-trade-game"
+
+    def current_decision(self) -> DecisionPoint:
+        match self._step:
+            case 2:
+                return DecisionPoint(
+                    "BLUE",
+                    1,
+                    "decide_trade",
+                    (
+                        Action("REJECT_TRADE"),
+                        Action(
+                            "COUNTER_OFFER",
+                            payload={"offer": {}, "request": {}},
+                            description="Counter the trade.",
+                        ),
+                    ),
+                    2,
+                    "Respond.",
+                )
+            case _:
+                return super().current_decision()
+
+
 class GameOrchestratorTests(unittest.TestCase):
     def test_opening_strategy_phase_runs_for_all_players_before_first_turn_start(self) -> None:
         red = ScriptedPlayer(
@@ -692,6 +859,58 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual(counter_event.payload["offer"], {"BRICK": 1})
             self.assertEqual(counter_event.payload["request"], {"WOOD": 1})
             self.assertEqual(orchestrator.action_trace_store.entries[0].action.action_type, "COUNTER_OFFER")
+
+    def test_same_trade_market_cannot_repeat_after_rejection_without_counteroffers(self) -> None:
+        red = ScriptedPlayer(
+            action_responses=[
+                Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
+                Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
+            ]
+        )
+        blue = ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")])
+
+        orchestrator = GameOrchestrator(
+            MockRepeatRejectedTradeEngine(),
+            {"RED": red, "BLUE": blue},
+        )
+
+        orchestrator.step()
+        orchestrator.step()
+        orchestrator.step()
+
+        with self.assertRaisesRegex(
+            InvalidActionError,
+            "Cannot repeat the same domestic trade market",
+        ):
+            orchestrator.step()
+
+    def test_same_trade_market_can_repeat_after_counteroffer(self) -> None:
+        red = ScriptedPlayer(
+            action_responses=[
+                Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
+                Action("OFFER_TRADE", payload={"offer": {"ORE": 1}, "request": {"WOOD": 1}}),
+            ]
+        )
+        blue = ScriptedPlayer(
+            reactive_responses=[
+                Action("COUNTER_OFFER", payload={"offer": {"WOOD": 1}, "request": {"ORE": 1}})
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockRepeatAfterCounterTradeEngine(),
+            {"RED": red, "BLUE": blue},
+        )
+
+        orchestrator.step()
+        orchestrator.step()
+        orchestrator.step()
+        transition = orchestrator.step()
+
+        self.assertTrue(any(event.kind == "trade_offered" for event in transition.public_events))
+        latest_offer = transition.public_events[0]
+        self.assertEqual(latest_offer.payload["offer"], {"ORE": 1})
+        self.assertEqual(latest_offer.payload["request"], {"WOOD": 1})
 
 
 if __name__ == "__main__":

@@ -121,7 +121,12 @@ class OpenAICompatibleChatClient:
         if top_p is not None:
             body["top_p"] = top_p
         if reasoning_enabled is not None:
-            body.update(self._reasoning_request_fields(reasoning_enabled))
+            body.update(
+                self._reasoning_request_fields(
+                    model=model,
+                    reasoning_enabled=reasoning_enabled,
+                )
+            )
         return body
 
     @staticmethod
@@ -143,18 +148,38 @@ class OpenAICompatibleChatClient:
         )
 
     def _reasoning_request_fields(
-        self, reasoning_enabled: bool
+        self,
+        *,
+        model: str,
+        reasoning_enabled: bool,
     ) -> dict[str, object]:
         provider = self._provider_name()
         if provider == "groq":
             return {"include_reasoning": reasoning_enabled}
+        if provider == "google":
+            if reasoning_enabled is False and self._google_supports_reasoning_effort_none(model):
+                return {"reasoning_effort": "none"}
+            return {}
+        if provider == "together":
+            return {}
         return {"reasoning": {"enabled": reasoning_enabled}}
+
+    @staticmethod
+    def _google_supports_reasoning_effort_none(model: str) -> bool:
+        normalized = model.strip().lower()
+        return normalized.startswith("gemini-2.5-") and "pro" not in normalized and not normalized.startswith(
+            "gemini-3"
+        )
 
     def _provider_name(self) -> str:
         hostname = urlparse(self.api_base).hostname or ""
         hostname = hostname.lower()
         if hostname.endswith("groq.com"):
             return "groq"
+        if hostname.endswith("googleapis.com"):
+            return "google"
+        if hostname.endswith("together.ai"):
+            return "together"
         return "default"
 
     def _retry_delay(self, exc: error.HTTPError, attempt_index: int) -> float:

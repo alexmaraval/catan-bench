@@ -503,6 +503,10 @@ class GameOrchestrator:
         decision: DecisionPoint,
         proposed_action: Action,
     ) -> Action:
+        self._validate_trade_offer_turn_constraints(
+            decision=decision,
+            proposed_action=proposed_action,
+        )
         engine_resolve_action = getattr(self.engine, "resolve_action", None)
         if callable(engine_resolve_action):
             return engine_resolve_action(
@@ -518,6 +522,103 @@ class GameOrchestrator:
         if decision.phase != "play_turn":
             return False
         return any(action.action_type == "ROLL" for action in decision.legal_actions)
+
+    def _validate_trade_offer_turn_constraints(
+        self,
+        *,
+        decision: DecisionPoint,
+        proposed_action: Action,
+    ) -> None:
+        if proposed_action.action_type != "OFFER_TRADE" or decision.phase != "play_turn":
+            return
+        signature = self._trade_market_signature(proposed_action.payload)
+        if signature is None:
+            return
+        blocked_markets = self._blocked_trade_markets_this_turn(
+            player_id=decision.acting_player_id,
+            turn_index=decision.turn_index,
+        )
+        if signature in blocked_markets:
+            raise InvalidActionError(
+                "Cannot repeat the same domestic trade market in the same turn after it was "
+                "rejected without any counteroffers."
+            )
+
+    def _blocked_trade_markets_this_turn(
+        self,
+        *,
+        player_id: str,
+        turn_index: int,
+    ) -> set[str]:
+        start_history_index = self._turn_start_history_index()
+        turn_events = [
+            event
+            for event in self.event_log.public_events
+            if event.turn_index == turn_index and event.history_index > start_history_index
+        ]
+        blocked: set[str] = set()
+        current_attempt: dict[str, bool | str] | None = None
+        for event in turn_events:
+            if event.kind == "trade_offered" and event.actor_player_id == player_id:
+                if current_attempt is not None and self._is_blocked_trade_attempt(current_attempt):
+                    blocked.add(str(current_attempt["signature"]))
+                current_attempt = {
+                    "signature": self._trade_market_signature(event.payload) or "",
+                    "had_rejected": False,
+                    "had_counter": False,
+                    "had_accepted": False,
+                    "had_confirmed": False,
+                }
+                continue
+            if current_attempt is None:
+                continue
+            if event.kind == "trade_rejected" and event.payload.get("offering_player_id") == player_id:
+                current_attempt["had_rejected"] = True
+            elif event.kind == "trade_counter_offered" and event.payload.get("owner_player_id") == player_id:
+                current_attempt["had_counter"] = True
+            elif event.kind == "trade_accepted" and event.payload.get("offering_player_id") == player_id:
+                current_attempt["had_accepted"] = True
+            elif event.kind == "trade_confirmed" and event.payload.get("offering_player_id") == player_id:
+                current_attempt["had_confirmed"] = True
+        if current_attempt is not None and self._is_blocked_trade_attempt(current_attempt):
+            blocked.add(str(current_attempt["signature"]))
+        blocked.discard("")
+        return blocked
+
+    @staticmethod
+    def _is_blocked_trade_attempt(attempt: dict[str, bool | str]) -> bool:
+        return bool(
+            attempt.get("had_rejected")
+            and not attempt.get("had_counter")
+            and not attempt.get("had_accepted")
+            and not attempt.get("had_confirmed")
+        )
+
+    @staticmethod
+    def _trade_market_signature(payload: Mapping[str, JsonValue]) -> str | None:
+        offer = GameOrchestrator._canonical_trade_resource_map(payload.get("offer"))
+        request = GameOrchestrator._canonical_trade_resource_map(payload.get("request"))
+        if offer is None or request is None:
+            return None
+        return f"offer={offer}|request={request}"
+
+    @staticmethod
+    def _canonical_trade_resource_map(value: object) -> str | None:
+        if not isinstance(value, Mapping):
+            return None
+        normalized: dict[str, int] = {}
+        for resource, amount in value.items():
+            if not isinstance(resource, str):
+                return None
+            if not isinstance(amount, int) or amount <= 0:
+                return None
+            normalized[resource] = amount
+        if not normalized:
+            return None
+        return ",".join(
+            f"{resource}:{normalized[resource]}"
+            for resource in sorted(normalized)
+        )
 
     def _maybe_run_opening_strategy_phase(self, decision: DecisionPoint) -> None:
         if self._opening_strategy_done or decision.phase != "play_turn":

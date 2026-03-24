@@ -157,6 +157,58 @@ class CatanatronAdapterTests(unittest.TestCase):
             ),
             "Trade ['WOOD', 'WOOD', 'WOOD', 'WOOD'] to the bank for ORE.",
         )
+        self.assertEqual(
+            CatanatronEngineAdapter._description_for_action(
+                "DISCARD",
+                {"resources": {"WOOD": 1, "ORE": 2}},
+            ),
+            "Discard 1×WOOD, 2×ORE for the robber event.",
+        )
+
+    def test_discard_payload_round_trips_as_resource_counts(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        native_value = (2, 1, 0, 0, 0)
+
+        payload = adapter._native_value_to_payload("DISCARD", native_value)
+
+        self.assertEqual(payload, {"resources": {"WOOD": 2, "BRICK": 1}})
+        self.assertEqual(
+            adapter._payload_to_native_value("DISCARD", payload),
+            native_value,
+        )
+
+    def test_public_event_payload_redacts_exact_discard_resources(self) -> None:
+        adapter = object.__new__(CatanatronEngineAdapter)
+        red = SimpleNamespace(value="RED")
+        prompt = SimpleNamespace(value="discard")
+        state_before = SimpleNamespace(
+            colors=[red],
+            current_turn_index=0,
+            current_prompt=prompt,
+            is_resolving_trade=False,
+            acceptees=[],
+            current_trade=(),
+        )
+        state_after = SimpleNamespace(
+            colors=[red],
+            current_turn_index=0,
+            current_prompt=prompt,
+            is_resolving_trade=False,
+            acceptees=[],
+            current_trade=(),
+        )
+
+        payload = adapter._public_event_payload(
+            action=Action("DISCARD", payload={"resources": {"WOOD": 1, "ORE": 2}}),
+            action_result=None,
+            actor_player_id="RED",
+            state_before=state_before,
+            state_after=state_after,
+        )
+
+        self.assertEqual(payload["action"], {"action_type": "DISCARD", "payload": {}})
+        self.assertEqual(payload["discarded_count"], 3)
+        self.assertEqual(CatanatronEngineAdapter._event_kind("DISCARD"), "resources_discarded")
 
     def test_ordered_legal_actions_moves_end_turn_to_the_end(self) -> None:
         ordered = CatanatronEngineAdapter._ordered_legal_actions(

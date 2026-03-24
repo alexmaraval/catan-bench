@@ -5,6 +5,7 @@ import unittest
 
 from catan_bench.players import LLMPlayer
 from catan_bench.prompting import PromptRenderer
+from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.schemas import (
     Action,
     ActionObservation,
@@ -241,6 +242,59 @@ class LLMPlayerTests(unittest.TestCase):
         assert trace is not None
         self.assertEqual(trace.stage, "reactive_action")
         self.assertEqual(len(trace.attempts), 2)
+
+    def test_llm_player_reactive_discard_selection_preserves_chosen_payload(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "action_index": 1,
+                    "private_reasoning": "Keep ore for the city race.",
+                }
+            ),
+            model="fake-model",
+        )
+
+        response = player.respond_reactive(
+            ReactiveObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=9,
+                turn_index=4,
+                phase="discard",
+                decision_index=12,
+                public_state={"turn": {"turn_player_id": "BLUE"}, "players": {}, "board": {}, "bank": {}},
+                private_state={
+                    "resources": {"WOOD": 2, "BRICK": 1, "SHEEP": 1, "ORE": 2},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 4, "actual": 4},
+                    "discard_requirement": {"count": 2, "legal_options": 2},
+                },
+                public_history=(),
+                legal_actions=(
+                    Action(
+                        "DISCARD",
+                        payload={"resources": {"ORE": 2}},
+                        description="Discard 2×ORE for the robber event.",
+                    ),
+                    Action(
+                        "DISCARD",
+                        payload={"resources": {"BRICK": 1, "SHEEP": 1}},
+                        description="Discard 1×BRICK, 1×SHEEP for the robber event.",
+                    ),
+                ),
+                decision_prompt="Choose which 2 resource cards to discard for the robber event.",
+                game_rules="Rules",
+                memory=PlayerMemory(long_term={"goal": "Keep ore and wheat for a city."}),
+            )
+        )
+
+        self.assertEqual(response.action.action_type, "DISCARD")
+        self.assertEqual(
+            response.action.payload,
+            {"resources": {"BRICK": 1, "SHEEP": 1}},
+        )
+        self.assertEqual(response.reasoning, "Keep ore for the city race.")
 
     def test_llm_player_falls_back_when_choose_action_repair_is_still_invalid(self) -> None:
         player = LLMPlayer(
@@ -510,6 +564,93 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("requires full `action` object; do not use `action_index` alone", user_prompt)
         self.assertIn("[1] MOVE_ROBBER", user_prompt)
         self.assertIn('payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt)
+
+    def test_choose_action_system_prompt_warns_against_circular_trades(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"action_index": 0, "short_term": None}),
+            model="fake-model",
+        )
+        observation = ActionObservation(
+            game_id="game-1",
+            player_id="RED",
+            history_index=2,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=5,
+            public_state={"turn": {"turn_player_id": "RED"}, "board": {}, "players": {}, "bank": {}},
+            private_state={
+                "resources": {"WOOD": 1, "SHEEP": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(),
+            turn_public_events=(),
+            legal_actions=(
+                Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 1}, "request": {"SHEEP": 1}},
+                    description="Offer a domestic trade.",
+                ),
+                Action("END_TURN"),
+            ),
+            decision_prompt="Choose an action.",
+            game_rules=CATAN_RULES_SUMMARY,
+            memory=PlayerMemory(short_term={"plan": "Trade first."}),
+        )
+
+        messages = player._messages_for_action(observation)
+        system_prompt = messages[0]["content"]
+
+        self.assertIn("Avoid circular same-turn trades", system_prompt)
+        self.assertIn("unless you intentionally want that reversal", system_prompt)
+
+    def test_reactive_discard_prompt_surfaces_requirement_and_strategy_hint(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"action_index": 0}),
+            model="fake-model",
+        )
+        observation = ReactiveObservation(
+            game_id="game-1",
+            player_id="RED",
+            history_index=9,
+            turn_index=4,
+            phase="discard",
+            decision_index=12,
+            public_state={"turn": {"turn_player_id": "BLUE"}, "players": {}, "board": {}, "bank": {}},
+            private_state={
+                "resources": {"WOOD": 2, "BRICK": 1, "SHEEP": 1, "ORE": 2},
+                "development_cards": {},
+                "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                "victory_points": {"visible": 4, "actual": 4},
+                "discard_requirement": {"count": 2, "legal_options": 2},
+            },
+            public_history=(),
+            legal_actions=(
+                Action(
+                    "DISCARD",
+                    payload={"resources": {"ORE": 2}},
+                    description="Discard 2×ORE for the robber event.",
+                ),
+                Action(
+                    "DISCARD",
+                    payload={"resources": {"BRICK": 1, "SHEEP": 1}},
+                    description="Discard 1×BRICK, 1×SHEEP for the robber event.",
+                ),
+            ),
+            decision_prompt="Choose which 2 resource cards to discard for the robber event.",
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "Keep ore and wheat for a city."}),
+        )
+
+        messages = player._messages_for_reactive(observation)
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("If this is a discard decision, keep the hand", user_prompt)
+        self.assertIn("Must discard: 2 cards", user_prompt)
+        self.assertIn("Legal discard options: 2", user_prompt)
+        self.assertIn("[0] DISCARD", user_prompt)
+        self.assertIn('payload: `{"resources": {"ORE": 2}}`', user_prompt)
 
     def test_llm_player_accepts_common_trade_action_shape_without_payload_wrapper(self) -> None:
         player = LLMPlayer(

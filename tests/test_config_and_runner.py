@@ -10,7 +10,9 @@ from catan_bench.config import load_game_config, load_player_configs
 from catan_bench.reporter import DebugTerminalReporter
 from catan_bench.runner import (
     _find_dotenv,
+    _is_existing_run_directory,
     _load_resume_game_id,
+    _resolve_requested_run_dir,
     build_players,
     main,
     run_from_config_files,
@@ -142,6 +144,103 @@ class ConfigAndRunnerTests(unittest.TestCase):
             reporter = orchestrator_cls.call_args.kwargs["reporter"]
             self.assertIsInstance(reporter, DebugTerminalReporter)
 
+    def test_runner_existing_run_dir_argument_resumes_and_ignores_config_run_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            resume_run_dir = Path(tmpdir) / "existing-run"
+            resume_run_dir.mkdir(parents=True)
+            (resume_run_dir / "metadata.json").write_text(
+                '{"game_id": "saved-game-id"}\n',
+                encoding="utf-8",
+            )
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    "engine = \"catanatron\"\n"
+                    f"run_dir = \"{Path(tmpdir) / 'new-run-base'}\"\n"
+                ),
+                encoding="utf-8",
+            )
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    "id = \"RED\"\n"
+                    "type = \"random\"\n\n"
+                    "[[players]]\n"
+                    "id = \"BLUE\"\n"
+                    "type = \"random\"\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()) as build_engine_mock:
+                with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
+                    orchestrator_cls.return_value.run.return_value = GameResult(
+                        game_id="mock-game",
+                        winner_ids=("RED",),
+                        total_decisions=1,
+                        public_event_count=0,
+                        memory_writes=0,
+                        metadata={},
+                    )
+                    run_from_config_files(
+                        game_config_path=game_toml,
+                        players_config_path=players_toml,
+                        run_dir=resume_run_dir,
+                    )
+
+            self.assertEqual(build_engine_mock.call_args.kwargs["game_id"], "saved-game-id")
+            self.assertIsNone(orchestrator_cls.call_args.kwargs["run_dir"])
+            self.assertEqual(
+                orchestrator_cls.call_args.kwargs["resume_run_dir"],
+                resume_run_dir,
+            )
+
+    def test_runner_cli_run_dir_overrides_config_base_for_new_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            cli_run_dir = Path(tmpdir) / "cli-runs"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    "engine = \"catanatron\"\n"
+                    f"run_dir = \"{Path(tmpdir) / 'config-runs'}\"\n"
+                ),
+                encoding="utf-8",
+            )
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    "id = \"RED\"\n"
+                    "type = \"random\"\n\n"
+                    "[[players]]\n"
+                    "id = \"BLUE\"\n"
+                    "type = \"random\"\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
+                with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
+                    orchestrator_cls.return_value.run.return_value = GameResult(
+                        game_id="mock-game",
+                        winner_ids=("RED",),
+                        total_decisions=1,
+                        public_event_count=0,
+                        memory_writes=0,
+                        metadata={},
+                    )
+                    run_from_config_files(
+                        game_config_path=game_toml,
+                        players_config_path=players_toml,
+                        run_dir=cli_run_dir,
+                    )
+
+            self.assertEqual(orchestrator_cls.call_args.kwargs["run_dir"], cli_run_dir)
+            self.assertIsNone(orchestrator_cls.call_args.kwargs["resume_run_dir"])
+
     def test_main_parses_debug_flag(self) -> None:
         with patch("catan_bench.runner.run_from_config_files") as run_mock:
             run_mock.return_value = GameResult(
@@ -158,13 +257,44 @@ class ConfigAndRunnerTests(unittest.TestCase):
         run_mock.assert_called_once_with(
             game_config_path="game.toml",
             players_config_path="players.toml",
-            resume_run_dir=None,
+            run_dir=None,
             debug=True,
             debug_from_setup=False,
             debug_trade=False,
         )
 
-    def test_main_parses_resume_flag(self) -> None:
+    def test_main_parses_run_dir_flag(self) -> None:
+        with patch("catan_bench.runner.run_from_config_files") as run_mock:
+            run_mock.return_value = GameResult(
+                game_id="mock-game",
+                winner_ids=("RED",),
+                total_decisions=1,
+                public_event_count=0,
+                memory_writes=0,
+                metadata={},
+            )
+            exit_code = main(
+                [
+                    "--game",
+                    "game.toml",
+                    "--players",
+                    "players.toml",
+                    "--run-dir",
+                    "runs/existing",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            game_config_path="game.toml",
+            players_config_path="players.toml",
+            run_dir="runs/existing",
+            debug=False,
+            debug_from_setup=False,
+            debug_trade=False,
+        )
+
+    def test_main_backcompat_resume_run_alias_maps_to_run_dir(self) -> None:
         with patch("catan_bench.runner.run_from_config_files") as run_mock:
             run_mock.return_value = GameResult(
                 game_id="mock-game",
@@ -189,11 +319,42 @@ class ConfigAndRunnerTests(unittest.TestCase):
         run_mock.assert_called_once_with(
             game_config_path="game.toml",
             players_config_path="players.toml",
-            resume_run_dir="runs/existing",
+            run_dir="runs/existing",
             debug=False,
             debug_from_setup=False,
             debug_trade=False,
         )
+
+    def test_resolve_requested_run_dir_uses_config_when_cli_missing(self) -> None:
+        configured = Path("runs/default")
+
+        run_dir, resume_run_dir = _resolve_requested_run_dir(
+            requested_run_dir=None,
+            configured_run_dir=configured,
+        )
+
+        self.assertEqual(run_dir, configured)
+        self.assertIsNone(resume_run_dir)
+
+    def test_resolve_requested_run_dir_detects_existing_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_path = Path(tmpdir)
+            (run_path / "metadata.json").write_text('{"game_id":"saved"}\n', encoding="utf-8")
+
+            run_dir, resume_run_dir = _resolve_requested_run_dir(
+                requested_run_dir=run_path,
+                configured_run_dir=Path("runs/default"),
+            )
+
+        self.assertIsNone(run_dir)
+        self.assertEqual(resume_run_dir, run_path)
+
+    def test_is_existing_run_directory_checks_artifact_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            self.assertFalse(_is_existing_run_directory(path))
+            (path / "checkpoint.json").write_text("{}\n", encoding="utf-8")
+            self.assertTrue(_is_existing_run_directory(path))
 
     def test_load_resume_game_id_reads_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

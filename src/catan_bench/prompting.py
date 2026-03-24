@@ -88,6 +88,10 @@ def fmt_event(event: object) -> str:
         return f"{actor} upgraded to city at node {p.get('node_id', '?')}"
     if kind == "road_built":
         return f"{actor} built road on edge {p.get('edge', '?')}"
+    if kind == "resources_discarded":
+        count = p.get("discarded_count", "?")
+        noun = "resource" if count == 1 else "resources"
+        return f"{actor} discarded {count} {noun} for the robber"
     if kind == "robber_moved":
         coord = p.get("coordinate", "?")
         victim = p.get("victim")

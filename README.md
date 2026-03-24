@@ -104,6 +104,12 @@ An example file lives at [`.env.example`](.env.example). The CLI looks for `.env
 python -m catan_bench --game configs/game.toml --players configs/openai-players.toml
 ```
 
+You can also override the run path from the CLI with one flag:
+
+```bash
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/
+```
+
 3. The configured `run_dir` is treated as a base directory. Each execution creates a timestamped child directory such as:
 
 ```text
@@ -111,6 +117,12 @@ runs/0.3.0/dev/<game-id>-<timestamp>-<token>/
 ```
 
 The resolved run directory is written into both `metadata.json` and `result.json`.
+
+If `--run-dir` points to an existing run directory, the CLI resumes that run in place instead of creating a new child directory:
+
+```bash
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/<run-name>
+```
 
 4. Export a simple public replay page for a completed run:
 

@@ -5,6 +5,7 @@ import unittest
 
 from catan_bench.players import LLMPlayer
 from catan_bench.prompting import PromptRenderer
+from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.schemas import (
     Action,
     ActionObservation,
@@ -563,6 +564,46 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("requires full `action` object; do not use `action_index` alone", user_prompt)
         self.assertIn("[1] MOVE_ROBBER", user_prompt)
         self.assertIn('payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt)
+
+    def test_choose_action_system_prompt_warns_against_circular_trades(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"action_index": 0, "short_term": None}),
+            model="fake-model",
+        )
+        observation = ActionObservation(
+            game_id="game-1",
+            player_id="RED",
+            history_index=2,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=5,
+            public_state={"turn": {"turn_player_id": "RED"}, "board": {}, "players": {}, "bank": {}},
+            private_state={
+                "resources": {"WOOD": 1, "SHEEP": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(),
+            turn_public_events=(),
+            legal_actions=(
+                Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 1}, "request": {"SHEEP": 1}},
+                    description="Offer a domestic trade.",
+                ),
+                Action("END_TURN"),
+            ),
+            decision_prompt="Choose an action.",
+            game_rules=CATAN_RULES_SUMMARY,
+            memory=PlayerMemory(short_term={"plan": "Trade first."}),
+        )
+
+        messages = player._messages_for_action(observation)
+        system_prompt = messages[0]["content"]
+
+        self.assertIn("Avoid circular same-turn trades", system_prompt)
+        self.assertIn("unless you intentionally want that reversal", system_prompt)
 
     def test_reactive_discard_prompt_surfaces_requirement_and_strategy_hint(self) -> None:
         player = LLMPlayer(

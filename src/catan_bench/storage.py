@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable, TextIO
 
 from .schemas import (
+    ActionTraceEntry,
     Event,
     JsonValue,
     MemorySnapshot,
@@ -19,6 +20,12 @@ def write_json(path: Path, payload: dict[str, JsonValue]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def read_json(path: Path) -> dict[str, JsonValue] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _open_jsonl_handle(path: Path, *, truncate: bool) -> TextIO:
     path.parent.mkdir(parents=True, exist_ok=True)
     return path.open("w" if truncate else "a", encoding="utf-8")
@@ -27,6 +34,16 @@ def _open_jsonl_handle(path: Path, *, truncate: bool) -> TextIO:
 def _write_jsonl(handle: TextIO, payload: dict[str, JsonValue]) -> None:
     handle.write(json.dumps(payload, sort_keys=True) + "\n")
     handle.flush()
+
+
+def read_jsonl(path: Path) -> list[dict[str, JsonValue]]:
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 class EventLog:
@@ -47,6 +64,18 @@ class EventLog:
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             self._handle = _open_jsonl_handle(self.run_dir / "public_history.jsonl", truncate=True)
+
+    def hydrate(self) -> None:
+        self.close()
+        self.public_events = []
+        if self.run_dir is None:
+            return
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.public_events = [
+            Event.from_dict(entry)
+            for entry in read_jsonl(self.run_dir / "public_history.jsonl")
+        ]
+        self._handle = _open_jsonl_handle(self.run_dir / "public_history.jsonl", truncate=False)
 
     def append(self, events: Iterable[Event]) -> tuple[Event, ...]:
         stored_events: list[Event] = []
@@ -112,6 +141,21 @@ class PublicStateStore:
             )
             _write_jsonl(self._handle, initial_snapshot.to_dict())
 
+    def hydrate(self) -> None:
+        self.close()
+        self.snapshots = []
+        if self.run_dir is None:
+            return
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.snapshots = [
+            PublicStateSnapshot.from_dict(entry)
+            for entry in read_jsonl(self.run_dir / "public_state_trace.jsonl")
+        ]
+        self._handle = _open_jsonl_handle(
+            self.run_dir / "public_state_trace.jsonl",
+            truncate=False,
+        )
+
     def append(self, snapshot: PublicStateSnapshot) -> None:
         self.snapshots.append(snapshot)
         if self.run_dir is not None:
@@ -157,6 +201,38 @@ class MemoryStore:
                     player_dir / "memory_trace.jsonl",
                     truncate=True,
                 )
+
+    def hydrate(self, player_ids: Iterable[str]) -> None:
+        player_ids = tuple(player_ids)
+        self.close()
+        self._current_by_player = {}
+        self._history_by_player = {}
+        if self.run_dir is None:
+            for player_id in player_ids:
+                self._current_by_player[player_id] = PlayerMemory()
+                self._history_by_player[player_id] = []
+            return
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        for player_id in player_ids:
+            player_dir = self.run_dir / "players" / player_id
+            player_dir.mkdir(parents=True, exist_ok=True)
+            history = [
+                MemorySnapshot.from_dict(entry)
+                for entry in read_jsonl(player_dir / "memory_trace.jsonl")
+            ]
+            self._history_by_player[player_id] = history
+            if history:
+                current = history[-1].memory
+            else:
+                payload = read_json(player_dir / "memory.json") or {}
+                raw_memory = payload.get("memory")
+                current = PlayerMemory.from_dict(raw_memory if isinstance(raw_memory, dict) else None)
+            self._current_by_player[player_id] = current
+            self._trace_handles_by_player[player_id] = _open_jsonl_handle(
+                player_dir / "memory_trace.jsonl",
+                truncate=False,
+            )
 
     def get(self, player_id: str) -> PlayerMemory:
         return self._current_by_player.get(player_id, PlayerMemory())
@@ -295,6 +371,28 @@ class PromptTraceStore:
                     truncate=True,
                 )
 
+    def hydrate(self, player_ids: Iterable[str]) -> None:
+        player_ids = tuple(player_ids)
+        self.close()
+        self._traces_by_player = {}
+        if self.run_dir is None:
+            for player_id in player_ids:
+                self._traces_by_player[player_id] = []
+            return
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        for player_id in player_ids:
+            player_dir = self.run_dir / "players" / player_id
+            player_dir.mkdir(parents=True, exist_ok=True)
+            self._traces_by_player[player_id] = [
+                PromptTrace.from_dict(entry)
+                for entry in read_jsonl(player_dir / "prompt_trace.jsonl")
+            ]
+            self._handles_by_player[player_id] = _open_jsonl_handle(
+                player_dir / "prompt_trace.jsonl",
+                truncate=False,
+            )
+
     def append(self, trace: PromptTrace) -> None:
         self._traces_by_player.setdefault(trace.player_id, []).append(trace)
         if self.run_dir is not None:
@@ -314,6 +412,51 @@ class PromptTraceStore:
         for handle in self._handles_by_player.values():
             handle.close()
         self._handles_by_player = {}
+
+    def __del__(self) -> None:  # pragma: no cover - best effort only.
+        self.close()
+
+
+class ActionTraceStore:
+    """Append-only canonical action trace for deterministic replay/resume."""
+
+    def __init__(self, run_dir: str | Path | None = None) -> None:
+        self.run_dir = Path(run_dir) if run_dir is not None else None
+        self.entries: list[ActionTraceEntry] = []
+        self._handle: TextIO | None = None
+
+    def reset(self) -> None:
+        self.close()
+        self.entries = []
+        if self.run_dir is not None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self._handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=True)
+
+    def hydrate(self) -> None:
+        self.close()
+        self.entries = []
+        if self.run_dir is None:
+            return
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.entries = [
+            ActionTraceEntry.from_dict(entry)
+            for entry in read_jsonl(self.run_dir / "action_trace.jsonl")
+        ]
+        self._handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=False)
+
+    def append(self, entry: ActionTraceEntry) -> None:
+        self.entries.append(entry)
+        if self.run_dir is not None:
+            handle = self._handle
+            if handle is None:
+                handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=False)
+                self._handle = handle
+            _write_jsonl(handle, entry.to_dict())
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
 
     def __del__(self) -> None:  # pragma: no cover - best effort only.
         self.close()

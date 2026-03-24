@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from catan_bench import (
     DecisionPoint,
     Event,
     GameOrchestrator,
+    OpeningStrategyResponse,
     ScriptedPlayer,
     TradeChatOpenResponse,
     TradeChatReplyResponse,
@@ -351,7 +353,196 @@ class MockMultiEventEngine:
         return {"winner_ids": ["RED"], "num_turns": 1}
 
 
+class MockCounterOfferEngine:
+    def __init__(self) -> None:
+        self._game_id = "counter-offer-game"
+        self._player_ids = ("WHITE", "BLUE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    @property
+    def turn_owner_id(self) -> str:
+        return "WHITE"
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        if self._step == 0:
+            return DecisionPoint(
+                acting_player_id="BLUE",
+                turn_index=1,
+                phase="decide_trade",
+                decision_index=0,
+                prompt="Respond to WHITE's trade offer.",
+                legal_actions=(
+                    Action(
+                        "REJECT_TRADE",
+                        payload={
+                            "offer": {"SHEEP": 1},
+                            "request": {"BRICK": 1},
+                            "offering_player_id": "WHITE",
+                        },
+                    ),
+                    Action(
+                        "COUNTER_OFFER",
+                        payload={"offer": {}, "request": {}},
+                        description="Counter the trade with different terms.",
+                    ),
+                ),
+            )
+        raise RuntimeError("No more decisions.")
+
+    def public_state(self):
+        return {
+            "turn": {"turn_player_id": "WHITE", "current_player_id": "BLUE"},
+            "players": {"WHITE": {"vp": 2}, "BLUE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {
+                "is_resolving_trade": True,
+                "offering_player_id": "WHITE",
+                "offer": {"SHEEP": 1},
+                "request": {"BRICK": 1},
+                "acceptees": [],
+            },
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        return {"player_id": player_id, "resources": {"BRICK": 1 if player_id == "BLUE" else 0}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        if self._step != 0:
+            raise RuntimeError("Unexpected action.")
+        if action.action_type != "REJECT_TRADE":
+            raise RuntimeError(f"Expected REJECT_TRADE, got {action.action_type}")
+        self._step = 1
+        self._terminal = True
+        return TransitionResult(
+            public_events=(
+                Event(
+                    kind="trade_rejected",
+                    payload={"offering_player_id": "WHITE"},
+                    turn_index=1,
+                    phase="decide_trade",
+                    decision_index=0,
+                    actor_player_id="BLUE",
+                ),
+            ),
+            terminal=True,
+            result_metadata={"winner_ids": ["WHITE"], "num_turns": 1},
+        )
+
+    def result(self):
+        return {"winner_ids": ["WHITE"], "num_turns": 1}
+
+
 class GameOrchestratorTests(unittest.TestCase):
+    def test_opening_strategy_phase_runs_for_all_players_before_first_turn_start(self) -> None:
+        red = ScriptedPlayer(
+            opening_strategy_responses=[
+                OpeningStrategyResponse(long_term="Open on wood-brick expansion first.")
+            ],
+            action_responses=[
+                Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                )
+            ],
+        )
+        blue = ScriptedPlayer(
+            opening_strategy_responses=[
+                OpeningStrategyResponse(long_term="Keep ore for an early development card.")
+            ],
+            reactive_responses=[Action("REJECT_TRADE")],
+        )
+
+        orchestrator = GameOrchestrator(
+            MockTurnEngine(),
+            {"RED": red, "BLUE": blue},
+        )
+
+        orchestrator.step()
+
+        self.assertEqual(len(red.opening_strategy_observations), 1)
+        self.assertEqual(len(blue.opening_strategy_observations), 1)
+        self.assertEqual(len(red.start_turn_observations), 0)
+        self.assertEqual(
+            [snapshot.stage for snapshot in orchestrator.memory_store.history("RED")],
+            ["opening_strategy"],
+        )
+        self.assertEqual(
+            [snapshot.stage for snapshot in orchestrator.memory_store.history("BLUE")],
+            ["opening_strategy"],
+        )
+        self.assertEqual(orchestrator.memory_store.history("RED")[0].history_index, 0)
+        self.assertEqual(orchestrator.memory_store.history("BLUE")[0].history_index, 0)
+
+        orchestrator.step()
+
+        self.assertEqual(len(red.start_turn_observations), 1)
+        self.assertEqual(
+            [snapshot.stage for snapshot in orchestrator.memory_store.history("RED")],
+            ["opening_strategy", "turn_start", "choose_action"],
+        )
+
+    def test_can_resume_mid_turn_from_saved_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            initial = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(
+                        action_responses=[
+                            Action(
+                                "OFFER_TRADE",
+                                payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                            )
+                        ]
+                    ),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                run_dir=tmpdir,
+            )
+
+            initial.step()
+            initial.step()
+
+            run_dir = Path(initial.run_dir)
+            checkpoint_path = run_dir / "checkpoint.json"
+            action_trace_path = run_dir / "action_trace.jsonl"
+
+            self.assertTrue(checkpoint_path.exists())
+            self.assertTrue(action_trace_path.exists())
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint["total_decisions"], 2)
+
+            resumed_red = ScriptedPlayer(action_responses=[Action("END_TURN")])
+            resumed = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": resumed_red,
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                resume_run_dir=run_dir,
+            )
+
+            result = resumed.run()
+
+            self.assertEqual(result.total_decisions, 4)
+            self.assertEqual(result.winner_ids, ("RED",))
+            self.assertEqual(len(resumed.action_trace_store.entries), 4)
+            self.assertEqual(len(resumed_red.start_turn_observations), 0)
+            self.assertEqual(len(resumed_red.action_observations), 1)
+            self.assertEqual(len(resumed_red.end_turn_observations), 1)
+
     def test_orchestrator_persists_two_slot_memory_without_private_history(self) -> None:
         red = ScriptedPlayer(
             start_turn_responses=[TurnStartResponse(short_term={"plan": "Offer trade first."})],
@@ -386,7 +577,14 @@ class GameOrchestratorTests(unittest.TestCase):
             red_history = orchestrator.memory_store.history("RED")
             self.assertEqual(
                 [snapshot.stage for snapshot in red_history],
-                ["turn_start", "choose_action", "choose_action", "turn_end", "turn_cleanup"],
+                [
+                    "opening_strategy",
+                    "turn_start",
+                    "choose_action",
+                    "choose_action",
+                    "turn_end",
+                    "turn_cleanup",
+                ],
             )
             self.assertEqual(red_history[-1].memory.short_term, None)
             self.assertEqual(red_history[-2].memory.long_term, {"goal": "Try a different trade next time."})
@@ -458,6 +656,34 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual([snapshot.history_index for snapshot in snapshots], [0, 2])
             self.assertEqual(snapshots[0].public_state["board"]["roads_built"], 0)
             self.assertEqual(snapshots[1].public_state["board"]["roads_built"], 1)
+
+    def test_counter_offer_records_public_event_and_rejects_underlying_trade(self) -> None:
+        blue = ScriptedPlayer(
+            reactive_responses=[
+                Action(
+                    "COUNTER_OFFER",
+                    payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                MockCounterOfferEngine(),
+                {"WHITE": ScriptedPlayer(), "BLUE": blue},
+                run_dir=tmpdir,
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.winner_ids, ("WHITE",))
+            event_kinds = [event.kind for event in orchestrator.event_log.public_events]
+            self.assertEqual(event_kinds, ["trade_counter_offered", "trade_rejected"])
+            counter_event = orchestrator.event_log.public_events[0]
+            self.assertEqual(counter_event.payload["owner_player_id"], "WHITE")
+            self.assertEqual(counter_event.payload["offer"], {"BRICK": 1})
+            self.assertEqual(counter_event.payload["request"], {"WOOD": 1})
+            self.assertEqual(orchestrator.action_trace_store.entries[0].action.action_type, "COUNTER_OFFER")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ from .schemas import (
     ActionObservation,
     Event,
     JsonValue,
+    OpeningStrategyObservation,
+    OpeningStrategyResponse,
     PlayerMemory,
     PromptTrace,
     PromptTraceAttempt,
@@ -30,6 +32,11 @@ from .schemas import (
 
 
 class Player(Protocol):
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        ...
+
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         ...
 
@@ -43,8 +50,8 @@ class Player(Protocol):
         ...
 
 
-def _is_trade_template(action: Action) -> bool:
-    return action.action_type == "OFFER_TRADE" and action.payload == {
+def _is_resource_swap_template(action: Action) -> bool:
+    return action.action_type in {"OFFER_TRADE", "COUNTER_OFFER"} and action.payload == {
         "offer": {},
         "request": {},
     }
@@ -58,7 +65,7 @@ def _materialize_default_trade_offer() -> Action:
 
 
 def _normalize_offer_trade_payload(payload: dict) -> dict:
-    """Accept LLM field-name variants for OFFER_TRADE and canonicalize to offer/request."""
+    """Accept LLM field-name variants for trade-like actions and canonicalize to offer/request."""
     result = dict(payload)
     if "offer" not in result and "give" in result:
         result["offer"] = result.pop("give")
@@ -76,6 +83,7 @@ class ScriptedPlayer:
     def __init__(
         self,
         *,
+        opening_strategy_responses: Iterable[OpeningStrategyResponse | JsonValue | None] = (),
         start_turn_responses: Iterable[TurnStartResponse | JsonValue | None] = (),
         action_responses: Iterable[ActionDecision | Action] = (),
         end_turn_responses: Iterable[TurnEndResponse | JsonValue | None] = (),
@@ -84,6 +92,7 @@ class ScriptedPlayer:
         trade_chat_reply_responses: Iterable[TradeChatReplyResponse] = (),
         trade_chat_selection_responses: Iterable[TradeChatSelectionResponse] = (),
     ) -> None:
+        self._opening_strategy_responses = deque(opening_strategy_responses)
         self._start_turn_responses = deque(start_turn_responses)
         self._action_responses = deque(action_responses)
         self._end_turn_responses = deque(end_turn_responses)
@@ -91,11 +100,23 @@ class ScriptedPlayer:
         self._trade_chat_open_responses = deque(trade_chat_open_responses)
         self._trade_chat_reply_responses = deque(trade_chat_reply_responses)
         self._trade_chat_selection_responses = deque(trade_chat_selection_responses)
+        self.opening_strategy_observations: list[OpeningStrategyObservation] = []
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
         self.trade_chat_observations: list[TradeChatObservation] = []
+
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        self.opening_strategy_observations.append(observation)
+        if not self._opening_strategy_responses:
+            return OpeningStrategyResponse(long_term=observation.memory.long_term)
+        response = self._opening_strategy_responses.popleft()
+        if isinstance(response, OpeningStrategyResponse):
+            return response
+        return OpeningStrategyResponse(long_term=response)
 
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         self.start_turn_observations.append(observation)
@@ -159,10 +180,18 @@ class FirstLegalPlayer:
 
     def __init__(self, *, record_observations: bool = False) -> None:
         self.record_observations = record_observations
+        self.opening_strategy_observations: list[OpeningStrategyObservation] = []
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
+
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        if self.record_observations:
+            self.opening_strategy_observations.append(observation)
+        return OpeningStrategyResponse(long_term=observation.memory.long_term)
 
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         if self.record_observations:
@@ -193,7 +222,7 @@ class FirstLegalPlayer:
     @staticmethod
     def _first_legal_action(legal_actions: tuple[Action, ...]) -> Action:
         for action in legal_actions:
-            if not _is_trade_template(action):
+            if not _is_resource_swap_template(action):
                 return action
         return _materialize_default_trade_offer()
 
@@ -209,10 +238,18 @@ class RandomLegalPlayer:
     ) -> None:
         self._rng = random.Random(seed)
         self.record_observations = record_observations
+        self.opening_strategy_observations: list[OpeningStrategyObservation] = []
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
+
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        if self.record_observations:
+            self.opening_strategy_observations.append(observation)
+        return OpeningStrategyResponse(long_term=observation.memory.long_term)
 
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         if self.record_observations:
@@ -242,7 +279,7 @@ class RandomLegalPlayer:
 
     def _sample_action(self, legal_actions: tuple[Action, ...]) -> Action:
         concrete_actions = [
-            action for action in legal_actions if not _is_trade_template(action)
+            action for action in legal_actions if not _is_resource_swap_template(action)
         ]
         if concrete_actions:
             return self._rng.choice(concrete_actions)
@@ -273,6 +310,66 @@ class LLMPlayer:
         self.invalid_response_retries = max(0, invalid_response_retries)
         self.renderer = renderer or PromptRenderer()
         self._prompt_traces: deque[PromptTrace] = deque()
+
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        trace_attempts: list[PromptTraceAttempt] = []
+        messages = self._messages_for_opening_strategy(observation)
+        response_payload: dict[str, object] = {}
+        try:
+            response_payload = self._complete_and_trace(
+                messages=messages,
+                trace_attempts=trace_attempts,
+            )
+        except LLMRequestTooLargeError as exc:
+            self._record_failed_attempt(
+                messages=messages,
+                trace_attempts=trace_attempts,
+                error_type="request_too_large",
+                error_message=str(exc),
+            )
+            messages = self._messages_for_opening_strategy(observation, compact=True)
+            try:
+                response_payload = self._complete_and_trace(
+                    messages=messages,
+                    trace_attempts=trace_attempts,
+                )
+            except RuntimeError:
+                self._append_prompt_trace_entry(
+                    player_id=observation.player_id,
+                    history_index=observation.history_index,
+                    turn_index=observation.turn_index,
+                    phase=observation.phase,
+                    decision_index=observation.decision_index,
+                    stage="opening_strategy",
+                    attempts=trace_attempts,
+                )
+                raise
+        except RuntimeError:
+            self._append_prompt_trace_entry(
+                player_id=observation.player_id,
+                history_index=observation.history_index,
+                turn_index=observation.turn_index,
+                phase=observation.phase,
+                decision_index=observation.decision_index,
+                stage="opening_strategy",
+                attempts=trace_attempts,
+            )
+            raise
+        response = OpeningStrategyResponse(
+            long_term=self._coerce_memory_field(response_payload, "long_term")
+        )
+        self._append_prompt_trace_entry(
+            player_id=observation.player_id,
+            history_index=observation.history_index,
+            turn_index=observation.turn_index,
+            phase=observation.phase,
+            decision_index=observation.decision_index,
+            stage="opening_strategy",
+            attempts=trace_attempts,
+        )
+        return response
 
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         trace_attempts: list[PromptTraceAttempt] = []
@@ -631,6 +728,37 @@ class LLMPlayer:
             game_rules=observation.game_rules,
         )
 
+    def _messages_for_opening_strategy(
+        self,
+        observation: OpeningStrategyObservation,
+        *,
+        compact: bool = False,
+    ) -> list[dict[str, object]]:
+        payload = {
+            "history_index": observation.history_index,
+            "player_id": observation.player_id,
+            "turn_index": observation.turn_index,
+            "phase": observation.phase,
+            "decision_index": observation.decision_index,
+            "public_state": observation.public_state,
+            "private_state": observation.private_state,
+            "public_history": [
+                event.to_dict()
+                for event in self._tail_events(observation.public_history, compact=compact)
+            ],
+            "memory": observation.memory.to_dict(),
+            "context_window": {
+                "compact_retry": compact,
+                "history_limit": self._effective_history_limit(compact=compact),
+            },
+        }
+        return self.renderer.render_messages(
+            system_template="opening_strategy_system.jinja",
+            user_template="opening_strategy_user.jinja",
+            payload=payload,
+            game_rules=observation.game_rules,
+        )
+
     def _messages_for_action(
         self,
         observation: ActionObservation,
@@ -893,7 +1021,7 @@ class LLMPlayer:
             # When action_index selects a trade template, the LLM may have also
             # provided a concrete payload in the `action` field — fall through so
             # that payload is picked up instead of the empty template.
-            if not _is_trade_template(indexed_action):
+            if not _is_resource_swap_template(indexed_action):
                 return indexed_action
 
         action_payload = response_payload.get("action")
@@ -928,16 +1056,26 @@ class LLMPlayer:
                 "LLM response must include an `action_index` or an `action` object."
             )
 
-        action_type = action_payload.get("action_type") or action_payload.get("type")
+        action_type = (
+            action_payload.get("action_type")
+            or action_payload.get("type")
+            or action_payload.get("action")
+        )
         if not isinstance(action_type, str):
             raise RuntimeError("LLM action must include string field `action_type`.")
 
-        payload = action_payload.get("payload", {})
+        payload = action_payload.get("payload")
+        if payload is None:
+            payload = {
+                key: value
+                for key, value in action_payload.items()
+                if key not in {"action_type", "type", "action", "description"}
+            }
         if not isinstance(payload, dict):
             raise RuntimeError("LLM action payload must be a JSON object.")
 
-        # Normalize common OFFER_TRADE field name variants the LLM may produce.
-        if action_type == "OFFER_TRADE":
+        # Normalize common trade field-name variants the LLM may produce.
+        if action_type in {"OFFER_TRADE", "COUNTER_OFFER"}:
             payload = _normalize_offer_trade_payload(payload)
 
         return Action(action_type=action_type, payload=payload)
@@ -1033,7 +1171,7 @@ class LLMPlayer:
 
     @staticmethod
     def _is_legal_response_action(action: Action, legal_actions: tuple[Action, ...]) -> bool:
-        if _is_trade_template(action):
+        if _is_resource_swap_template(action):
             return False
         if any(legal_action.matches(action) for legal_action in legal_actions):
             return True
@@ -1051,9 +1189,9 @@ class LLMPlayer:
                 legal_action.payload.get("accepting_player_id") == accepting_player_id
                 for legal_action in matching_types
             )
-        if action.action_type == "OFFER_TRADE":
-            # Any OFFER_TRADE with a non-empty offer and request is accepted here;
-            # the engine adapter performs the deeper validation when it resolves it.
+        if action.action_type in {"OFFER_TRADE", "COUNTER_OFFER"}:
+            # Any trade-like action with a non-empty offer and request is accepted
+            # here; the orchestrator / engine adapter performs the deeper handling.
             return (
                 len(matching_types) > 0
                 and bool(action.payload.get("offer"))
@@ -1064,9 +1202,9 @@ class LLMPlayer:
     @staticmethod
     def _fallback_legal_action(legal_actions: tuple[Action, ...]) -> Action:
         for action in legal_actions:
-            if not _is_trade_template(action):
+            if not _is_resource_swap_template(action):
                 return action
-        if any(_is_trade_template(action) for action in legal_actions):
+        if any(_is_resource_swap_template(action) for action in legal_actions):
             return _materialize_default_trade_offer()
         raise RuntimeError("No fallback legal action was available.")
 
@@ -1459,9 +1597,11 @@ class LLMPlayer:
             "index": index,
             "action_type": action.action_type,
         }
-        if action.payload or _is_trade_template(action):
+        if action.description is not None:
+            payload["description"] = action.description
+        if action.payload or _is_resource_swap_template(action):
             payload["payload"] = action.payload
-        if _is_trade_template(action):
+        if _is_resource_swap_template(action):
             payload["selectable_by_index"] = False
             payload["requires_concrete_payload"] = True
         return payload

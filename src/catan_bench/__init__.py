@@ -11,10 +11,13 @@ from .schemas import (
     Action,
     ActionDecision,
     ActionObservation,
+    ActionTraceEntry,
     DecisionPoint,
     Event,
     GameResult,
     MemorySnapshot,
+    OpeningStrategyObservation,
+    OpeningStrategyResponse,
     PlayerMemory,
     PromptTrace,
     PromptTraceAttempt,
@@ -31,7 +34,7 @@ from .schemas import (
     TurnStartObservation,
     TurnStartResponse,
 )
-from .storage import EventLog, MemoryStore, PromptTraceStore, PublicStateStore
+from .storage import ActionTraceStore, EventLog, MemoryStore, PromptTraceStore, PublicStateStore
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -42,6 +45,8 @@ __all__ = [
     "Action",
     "ActionDecision",
     "ActionObservation",
+    "ActionTraceEntry",
+    "ActionTraceStore",
     "CATAN_RULES_SUMMARY",
     "CatanatronEngineAdapter",
     "DecisionPoint",
@@ -60,6 +65,8 @@ __all__ = [
     "MemoryStore",
     "MissingPlayerError",
     "ObservationBuilder",
+    "OpeningStrategyObservation",
+    "OpeningStrategyResponse",
     "OpenAICompatibleChatClient",
     "Player",
     "PlayerConfig",

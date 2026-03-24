@@ -1,3 +1,9 @@
+Stage: Choose action.
+Select exactly one legal action for the current decision.
+Use the current public state, private state, public history, and both memory slots.
+Revise the short-term plan if the turn strategy should change after this action.
+The legal action list is authoritative. If the current plan is not directly legal, revise it toward the best legal next step instead of forcing the old plan.
+
 {% include "partials/game_context.jinja" %}
 
 ### This turn so far
@@ -25,10 +31,13 @@
 
 ### Legal actions
 {% for action in payload.legal_actions %}
-[{{ loop.index0 }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+[{{ action.index }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+{% if action.payload %}  payload: `{{ fmt_payload(action.payload) }}`{% endif %}{% if action.requires_concrete_payload %}  requires full `action` object; do not use `action_index` alone{% endif %}
 
 {% endfor %}
 {% elif payload.candidate_source %}
 
 **Select action_index from `{{ payload.candidate_source }}` listed in the Board section above.**
 {% endif %}
+
+{% include "partials/action_contract.jinja" %}

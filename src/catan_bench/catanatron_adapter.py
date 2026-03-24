@@ -57,6 +57,7 @@ class CatanatronEngineAdapter:
         *,
         game: Game | None = None,
         player_ids: Sequence[str] = ("RED", "BLUE", "ORANGE", "WHITE"),
+        game_id: str | None = None,
         seed: int | None = None,
         discard_limit: int = 7,
         vps_to_win: int = 10,
@@ -77,6 +78,12 @@ class CatanatronEngineAdapter:
                 vps_to_win=vps_to_win,
                 catan_map=catan_map,
             )
+
+        if game_id is not None:
+            try:
+                game.id = game_id
+            except Exception:  # pragma: no cover - depends on catanatron internals.
+                logger.debug("Unable to override catanatron game id during resume.", exc_info=True)
 
         self.game = game
         logger.debug("CatanatronEngineAdapter initialized with %d players", len(self.player_ids))
@@ -108,6 +115,9 @@ class CatanatronEngineAdapter:
         )
         if self._can_offer_trade():
             legal_actions = legal_actions + (self._offer_trade_template(),)
+        if self._can_counter_offer(legal_actions):
+            legal_actions = legal_actions + (self._counter_offer_template(),)
+        legal_actions = self._ordered_legal_actions(legal_actions)
 
         return DecisionPoint(
             acting_player_id=state.current_color().value,
@@ -117,6 +127,18 @@ class CatanatronEngineAdapter:
             decision_index=len(state.action_records),
             prompt=self._decision_prompt(state.current_prompt),
         )
+
+    @staticmethod
+    def _ordered_legal_actions(legal_actions: tuple[Action, ...]) -> tuple[Action, ...]:
+        """Keep engine order stable, but avoid presenting END_TURN as the easiest default."""
+        indexed = list(enumerate(legal_actions))
+        indexed.sort(
+            key=lambda item: (
+                item[1].action_type == "END_TURN",
+                item[0],
+            )
+        )
+        return tuple(action for _, action in indexed)
 
     def public_state(self) -> Mapping[str, JsonValue]:
         state = self.game.state
@@ -706,12 +728,30 @@ class CatanatronEngineAdapter:
             ),
         )
 
+    def _counter_offer_template(self) -> Action:
+        return Action(
+            action_type="COUNTER_OFFER",
+            payload={"offer": {}, "request": {}},
+            description=(
+                "Reject the current trade and propose a different exchange by "
+                "specifying what you would give in `offer` and what you want from "
+                "the active player in `request`, for example "
+                "`{\"offer\": {\"BRICK\": 1}, \"request\": {\"WOOD\": 1}}`."
+            ),
+        )
+
     def _can_offer_trade(self) -> bool:
         state = self.game.state
         return (
             state.current_prompt == ActionPrompt.PLAY_TURN
             and player_has_rolled(state, state.current_color())
         )
+
+    def _can_counter_offer(self, legal_actions: Sequence[Action]) -> bool:
+        state = self.game.state
+        if state.current_prompt != ActionPrompt.DECIDE_TRADE:
+            return False
+        return any(action.action_type == "REJECT_TRADE" for action in legal_actions)
 
     def _native_action_to_action(self, native_action: NativeAction) -> Action:
         action_type = native_action.action_type.value
@@ -1019,6 +1059,29 @@ class CatanatronEngineAdapter:
             return f"Build a road on edge {payload['edge']}."
         if action_type == "ROLL":
             return "Roll the dice."
+        if action_type == "BUY_DEVELOPMENT_CARD":
+            return "Buy a development card."
+        if action_type == "PLAY_KNIGHT_CARD":
+            return "Play a knight card; you will then move the robber."
+        if action_type == "PLAY_ROAD_BUILDING":
+            return "Play Road Building; you will then place two roads."
+        if action_type == "DISCARD":
+            return "Discard the required cards for the robber event."
+        if action_type == "MOVE_ROBBER":
+            coordinate = payload.get("coordinate")
+            victim = payload.get("victim")
+            if victim is not None:
+                return f"Move the robber to {coordinate} and steal from {victim}."
+            return f"Move the robber to {coordinate}."
+        if action_type == "PLAY_YEAR_OF_PLENTY":
+            return f"Take {payload.get('resources', [])} from the bank."
+        if action_type == "PLAY_MONOPOLY":
+            return f"Claim all {payload.get('resource')} from opponents."
+        if action_type == "MARITIME_TRADE":
+            return (
+                f"Trade {payload.get('give', [])} to the bank for "
+                f"{payload.get('receive')}."
+            )
         if action_type == "END_TURN":
             return "End the current turn."
         if action_type == "OFFER_TRADE":

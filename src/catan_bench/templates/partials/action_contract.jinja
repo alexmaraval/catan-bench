@@ -2,8 +2,12 @@ Return strict JSON.
 
 Required keys:
 - `action_index`: preferred integer index from the provided legal actions or board candidates.
-- `short_term`: revised short-term plan for the rest of the current turn. Reuse the previous value if no revision is needed.
+- `short_term`: revised short plain-text plan for the rest of the current turn. Reuse the previous text if no revision is needed.
 
 Optional keys:
-- `action`: full action object when a legal action requires a concrete payload.
+- `action`: full action object when the selected legal action says it requires a concrete payload.
 - `private_reasoning`: concise private note under 30 words.
+
+Examples:
+- Normal indexed action: `{"action_index": 0, "short_term": "End turn; no strong legal follow-up."}`
+- Payload action: `{"action_index": 2, "action": {"action_type": "OFFER_TRADE", "payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}}, "short_term": "Offer sheep for brick to enable a road."}`

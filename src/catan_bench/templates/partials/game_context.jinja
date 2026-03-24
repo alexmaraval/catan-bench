@@ -15,7 +15,7 @@ VP: {{ fmt_vp(payload.private_state) }}
 Ports: {{ payload.private_state.ports | join(", ") }}
 {% endif %}
 {% if payload.memory.short_term %}
-Current plan: {{ payload.memory.short_term }}
+Current plan: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
 {% if payload.public_state.players %}
 
@@ -75,5 +75,5 @@ Bank: {{ fmt_resources(payload.public_state.bank.resources) }}
 {% if payload.memory.long_term %}
 
 ### Long-term memory
-{{ payload.memory.long_term }}
+{{ fmt_memory(payload.memory.long_term) }}
 {% endif %}

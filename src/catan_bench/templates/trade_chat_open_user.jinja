@@ -1,3 +1,7 @@
+Stage: Trade chat open.
+You are the active player and may choose whether to open a public bilateral trade room.
+Keep public messages short and concrete.
+
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
 ### Your hand
@@ -8,7 +12,7 @@ Dev cards: {{ dc }}
 {% endif %}
 VP: {{ fmt_vp(payload.private_state) }}
 {% if payload.memory.short_term %}
-Current plan: {{ payload.memory.short_term }}
+Current plan: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
 
 {% if payload.public_state.players %}
@@ -25,5 +29,7 @@ Message character limit: {{ payload.message_char_limit }}
 {% if payload.memory.long_term %}
 
 ### Long-term memory
-{{ payload.memory.long_term }}
+{{ fmt_memory(payload.memory.long_term) }}
 {% endif %}
+
+{% include "partials/trade_chat_open_contract.jinja" %}

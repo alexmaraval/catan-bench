@@ -54,6 +54,22 @@ def fmt_vp(private_state: object) -> str:
     return f"{actual} ({visible} visible)"
 
 
+def fmt_payload(payload: object) -> str:
+    """Stable JSON rendering for action payload snippets."""
+    if payload in ({}, None):
+        return "{}"
+    return json.dumps(payload, sort_keys=True)
+
+
+def fmt_memory(value: object) -> str:
+    """Render memory naturally when it is text, otherwise as stable JSON."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True)
+
+
 def fmt_event(event: object) -> str:
     """Single-line prose description of a public event dict."""
     if not isinstance(event, dict):
@@ -93,6 +109,11 @@ def fmt_event(event: object) -> str:
         return f"{actor} accepted trade"
     if kind == "trade_rejected":
         return f"{actor} rejected trade"
+    if kind == "trade_counter_offered":
+        offer = fmt_resources(p.get("offer", {}))
+        req = fmt_resources(p.get("request", {}))
+        owner = p.get("owner_player_id", "?")
+        return f"{actor} counteroffered to {owner}: gave {offer}, wanted {req}"
     if kind == "trade_confirmed":
         offer = fmt_resources(p.get("offer", {}))
         req = fmt_resources(p.get("request", {}))
@@ -130,6 +151,8 @@ class PromptRenderer:
             env.globals["fmt_dev_cards"] = fmt_dev_cards
             env.globals["fmt_pieces"] = fmt_pieces
             env.globals["fmt_vp"] = fmt_vp
+            env.globals["fmt_payload"] = fmt_payload
+            env.globals["fmt_memory"] = fmt_memory
             env.globals["fmt_event"] = fmt_event
             self._env = env
 

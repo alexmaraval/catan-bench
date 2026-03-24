@@ -1,10 +1,13 @@
+Stage: Trade chat selection.
+Review the quotes and choose exactly one player to trade with, or no deal.
+
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
 ### Your hand
 Resources: {{ fmt_resources(payload.private_state.resources) }}
 VP: {{ fmt_vp(payload.private_state) }}
 {% if payload.memory.short_term %}
-Current plan: {{ payload.memory.short_term }}
+Current plan: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}
 
 {% if payload.public_state.players %}
@@ -35,5 +38,7 @@ Current plan: {{ payload.memory.short_term }}
 {% if payload.memory.long_term %}
 
 ### Long-term memory
-{{ payload.memory.long_term }}
+{{ fmt_memory(payload.memory.long_term) }}
 {% endif %}
+
+{% include "partials/trade_chat_select_contract.jinja" %}

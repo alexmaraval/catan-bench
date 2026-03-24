@@ -14,6 +14,7 @@ from .players import Player
 from .schemas import (
     Action,
     ActionDecision,
+    ActionTraceEntry,
     DecisionPoint,
     Event,
     GameResult,
@@ -25,7 +26,15 @@ from .schemas import (
     TradeChatSelectionResponse,
     TransitionResult,
 )
-from .storage import EventLog, MemoryStore, PromptTraceStore, PublicStateStore, write_json
+from .storage import (
+    ActionTraceStore,
+    EventLog,
+    MemoryStore,
+    PromptTraceStore,
+    PublicStateStore,
+    read_json,
+    write_json,
+)
 
 if TYPE_CHECKING:
     from .reporter import TerminalReporter
@@ -93,7 +102,9 @@ class GameOrchestrator:
         public_state_store: PublicStateStore | None = None,
         memory_store: MemoryStore | None = None,
         prompt_trace_store: PromptTraceStore | None = None,
+        action_trace_store: ActionTraceStore | None = None,
         run_dir: str | Path | None = None,
+        resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
         trading_chat_enabled: bool = False,
         trading_chat_max_failed_attempts_per_turn: int = 4,
@@ -101,7 +112,14 @@ class GameOrchestrator:
         trading_chat_history_limit: int | None = 16,
         reporter: TerminalReporter | None = None,
     ) -> None:
-        resolved_run_dir = _resolve_run_dir(run_dir, game_id=engine.game_id)
+        if run_dir is not None and resume_run_dir is not None:
+            raise ValueError("Specify either run_dir or resume_run_dir, not both.")
+
+        resolved_run_dir = (
+            Path(resume_run_dir)
+            if resume_run_dir is not None
+            else _resolve_run_dir(run_dir, game_id=engine.game_id)
+        )
         self.engine = engine
         self.players = dict(players)
         self.observation_builder = observation_builder or ObservationBuilder()
@@ -109,6 +127,7 @@ class GameOrchestrator:
         self.public_state_store = public_state_store or PublicStateStore(resolved_run_dir)
         self.memory_store = memory_store or MemoryStore(resolved_run_dir)
         self.prompt_trace_store = prompt_trace_store or PromptTraceStore(resolved_run_dir)
+        self.action_trace_store = action_trace_store or ActionTraceStore(resolved_run_dir)
         self.run_dir = resolved_run_dir
         self.max_decisions = max_decisions
         self.trading_chat_enabled = trading_chat_enabled
@@ -123,40 +142,46 @@ class GameOrchestrator:
         self._last_turn_history_index_by_player: dict[str, int] = {}
         self._trade_chat_turn_state: _TradeChatTurnState | None = None
         self._pending_trade_chat_selection: _PendingTradeChatSelection | None = None
+        self._opening_strategy_done = False
+        self._completed_decisions = 0
+        self._resume_run_dir = Path(resume_run_dir) if resume_run_dir is not None else None
+        self._prepared = False
 
     def run(self) -> GameResult:
-        self._prepare_run()
+        self._ensure_ready_for_play()
         logger.info("Starting game %s with players %s", self.engine.game_id, list(self.players))
         if self.reporter is not None:
             self.reporter.on_game_start(self.engine.game_id, list(self.engine.player_ids))
 
-        total_decisions = 0
         while not self.engine.is_terminal():
-            if total_decisions >= self.max_decisions:
+            if self._completed_decisions >= self.max_decisions:
                 raise RuntimeError(
                     f"Stopped after {self.max_decisions} decisions without a terminal state."
                 )
             self.step()
-            total_decisions += 1
 
         self._finalize_active_turn_if_needed()
         metadata = dict(self.engine.result())
-        metadata["benchmark"] = self._benchmark_metadata(total_decisions=total_decisions)
+        metadata["benchmark"] = self._benchmark_metadata(
+            total_decisions=self._completed_decisions
+        )
         result = GameResult(
             game_id=self.engine.game_id,
             winner_ids=self._winner_ids_from_metadata(metadata),
-            total_decisions=total_decisions,
+            total_decisions=self._completed_decisions,
             public_event_count=len(self.event_log.public_events),
             memory_writes=self.memory_store.count(),
             metadata=metadata,
         )
         if self.run_dir is not None:
             write_json(self.run_dir / "result.json", result.to_dict())
+            self._write_checkpoint(terminal=True)
         if self.reporter is not None:
             self.reporter.on_game_end(result)
         return result
 
     def step(self) -> TransitionResult:
+        self._ensure_ready_for_play()
         if self.engine.is_terminal():
             raise RuntimeError("Cannot step a terminal game.")
 
@@ -166,6 +191,7 @@ class GameOrchestrator:
         self._decision_phase_counts[decision.phase] = (
             self._decision_phase_counts.get(decision.phase, 0) + 1
         )
+        self._maybe_run_opening_strategy_phase(decision)
 
         player = self.players.get(decision.acting_player_id)
         if player is None:
@@ -175,11 +201,13 @@ class GameOrchestrator:
 
         if self._should_auto_roll(decision):
             response = ActionDecision(action=Action("ROLL"))
-            return self._apply_decision(
+            transition = self._apply_decision(
                 decision=decision,
                 proposed_action=response.action,
                 response=response,
             )
+            self._completed_step(transition)
+            return transition
 
         if self._is_turn_owner_choice(decision, turn_owner_id):
             self._ensure_turn_started(player=player, decision=decision)
@@ -187,12 +215,28 @@ class GameOrchestrator:
         else:
             response = self._reactive_response(player=player, decision=decision)
 
-        return self._apply_decision(
+        transition = self._apply_decision(
             decision=decision,
             proposed_action=response.action,
             response=response,
             update_short_term=self._is_turn_owner_choice(decision, turn_owner_id),
         )
+        self._completed_step(transition)
+        return transition
+
+    def _ensure_ready_for_play(self) -> None:
+        if self._prepared:
+            return
+        if self._resume_run_dir is not None:
+            self._prepare_resume()
+        else:
+            self._prepare_run()
+        self._prepared = True
+
+    def _completed_step(self, transition: TransitionResult) -> None:
+        self._completed_decisions += 1
+        if self.run_dir is not None:
+            self._write_checkpoint(terminal=transition.terminal)
 
     def _prepare_run(self) -> None:
         missing_player_ids = [
@@ -206,6 +250,7 @@ class GameOrchestrator:
         self.event_log.reset()
         self.memory_store.reset(self.engine.player_ids)
         self.prompt_trace_store.reset(self.engine.player_ids)
+        self.action_trace_store.reset()
         self.public_state_store.reset(
             PublicStateSnapshot(
                 history_index=0,
@@ -222,13 +267,15 @@ class GameOrchestrator:
         }
         self._trade_chat_turn_state = None
         self._pending_trade_chat_selection = None
+        self._opening_strategy_done = False
+        self._completed_decisions = 0
 
         if self.run_dir is not None:
             write_json(
                 self.run_dir / "metadata.json",
                 {
                     "game_id": self.engine.game_id,
-                    "artifact_version": 2,
+                    "artifact_version": 3,
                     "run_directory": str(self.run_dir),
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
@@ -243,13 +290,271 @@ class GameOrchestrator:
                         "message_chars": self.trading_chat_message_chars,
                         "history_limit": self.trading_chat_history_limit,
                     },
+                    "resume": {
+                        "checkpoint_file": "checkpoint.json",
+                        "action_trace_file": "action_trace.jsonl",
+                    },
                 },
             )
+            self._write_checkpoint(terminal=False)
+
+    def _prepare_resume(self) -> None:
+        missing_player_ids = [
+            player_id for player_id in self.engine.player_ids if player_id not in self.players
+        ]
+        if missing_player_ids:
+            raise MissingPlayerError(
+                "Missing player adapters for: " + ", ".join(sorted(missing_player_ids))
+            )
+        if self.run_dir is None:
+            raise RuntimeError("Resume mode requires a concrete run directory.")
+
+        self.event_log.hydrate()
+        self.public_state_store.hydrate()
+        self.memory_store.hydrate(self.engine.player_ids)
+        self.prompt_trace_store.hydrate(self.engine.player_ids)
+        self.action_trace_store.hydrate()
+        self._replay_saved_actions()
+        checkpoint = read_json(self.run_dir / "checkpoint.json") or {}
+        self._restore_checkpoint_state(checkpoint)
+        self._validate_resumed_artifacts()
+
+    def _replay_saved_actions(self) -> None:
+        for index, entry in enumerate(self.action_trace_store.entries, start=1):
+            if self.engine.is_terminal():
+                raise RuntimeError(
+                    "Resume trace contains more actions than the rebuilt engine can accept."
+                )
+            decision = self.engine.current_decision()
+            self._validate_trace_entry(entry=entry, decision=decision, index=index)
+            replay_action = entry.action
+            if replay_action.action_type == "COUNTER_OFFER":
+                replay_action = Action("REJECT_TRADE")
+            self.engine.apply_action(
+                self._resolved_action_for_decision(
+                    decision=decision,
+                    proposed_action=replay_action,
+                )
+            )
+
+    def _validate_trace_entry(
+        self,
+        *,
+        entry: ActionTraceEntry,
+        decision: DecisionPoint,
+        index: int,
+    ) -> None:
+        mismatches: list[str] = []
+        if decision.acting_player_id != entry.acting_player_id:
+            mismatches.append(
+                f"acting_player_id expected {entry.acting_player_id} got {decision.acting_player_id}"
+            )
+        if decision.turn_index != entry.turn_index:
+            mismatches.append(f"turn_index expected {entry.turn_index} got {decision.turn_index}")
+        if decision.phase != entry.phase:
+            mismatches.append(f"phase expected {entry.phase} got {decision.phase}")
+        if decision.decision_index != entry.decision_index:
+            mismatches.append(
+                f"decision_index expected {entry.decision_index} got {decision.decision_index}"
+            )
+        if mismatches:
+            raise RuntimeError(
+                "Cannot resume run because the recorded action trace no longer matches the "
+                f"rebuilt engine at step {index}: " + "; ".join(mismatches)
+            )
+
+    def _restore_checkpoint_state(self, checkpoint: dict[str, JsonValue]) -> None:
+        self._decision_phase_counts = {
+            str(phase): int(count)
+            for phase, count in dict(checkpoint.get("decision_phase_counts") or {}).items()
+            if isinstance(phase, str)
+        }
+        self._last_turn_history_index_by_player = {
+            str(player_id): int(history_index)
+            for player_id, history_index in dict(
+                checkpoint.get("last_turn_history_index_by_player") or {}
+            ).items()
+            if isinstance(player_id, str)
+        }
+        active_turn = checkpoint.get("active_turn")
+        if isinstance(active_turn, dict):
+            self._active_turn = _ActiveTurnSession(
+                owner_player_id=str(active_turn["owner_player_id"]),
+                turn_index=int(active_turn["turn_index"]),
+                start_history_index=int(active_turn["start_history_index"]),
+                start_phase=str(active_turn["start_phase"]),
+                start_decision_index=int(active_turn["start_decision_index"]),
+            )
+        else:
+            self._active_turn = None
+
+        trade_chat_turn_state = checkpoint.get("trade_chat_turn_state")
+        if isinstance(trade_chat_turn_state, dict):
+            self._trade_chat_turn_state = _TradeChatTurnState(
+                owner_player_id=str(trade_chat_turn_state["owner_player_id"]),
+                turn_index=int(trade_chat_turn_state["turn_index"]),
+                failed_attempts=int(trade_chat_turn_state.get("failed_attempts", 0)),
+            )
+        else:
+            self._trade_chat_turn_state = None
+
+        pending_trade_chat_selection = checkpoint.get("pending_trade_chat_selection")
+        if isinstance(pending_trade_chat_selection, dict):
+            self._pending_trade_chat_selection = _PendingTradeChatSelection(
+                owner_player_id=str(pending_trade_chat_selection["owner_player_id"]),
+                counterparty_player_id=str(
+                    pending_trade_chat_selection["counterparty_player_id"]
+                ),
+                owner_gives=dict(pending_trade_chat_selection.get("owner_gives") or {}),
+                owner_gets=dict(pending_trade_chat_selection.get("owner_gets") or {}),
+                turn_index=int(pending_trade_chat_selection["turn_index"]),
+            )
+        else:
+            self._pending_trade_chat_selection = None
+
+        self._completed_decisions = int(
+            checkpoint.get("total_decisions", len(self.action_trace_store.entries))
+        )
+        opening_strategy_done = checkpoint.get("opening_strategy_done")
+        if isinstance(opening_strategy_done, bool):
+            self._opening_strategy_done = opening_strategy_done
+        else:
+            self._opening_strategy_done = self._infer_opening_strategy_done()
+        if not self._last_turn_history_index_by_player:
+            self._last_turn_history_index_by_player = {
+                player_id: 0 for player_id in self.engine.player_ids
+            }
+
+    def _validate_resumed_artifacts(self) -> None:
+        if self._completed_decisions != len(self.action_trace_store.entries):
+            raise RuntimeError(
+                "Resume checkpoint does not match action trace length: "
+                f"{self._completed_decisions} decisions recorded in checkpoint versus "
+                f"{len(self.action_trace_store.entries)} actions in trace."
+            )
+        if self.event_log.current_history_index:
+            if not self.public_state_store.snapshots:
+                raise RuntimeError(
+                    "Resume run is missing public state snapshots for its recorded history."
+                )
+            if (
+                self.public_state_store.snapshots[-1].history_index
+                != self.event_log.current_history_index
+            ):
+                raise RuntimeError(
+                    "Resume run has inconsistent public history and public state traces."
+                )
+
+    def _write_checkpoint(self, *, terminal: bool) -> None:
+        if self.run_dir is None:
+            return
+
+        active_turn: dict[str, JsonValue] | None = None
+        if self._active_turn is not None:
+            active_turn = {
+                "owner_player_id": self._active_turn.owner_player_id,
+                "turn_index": self._active_turn.turn_index,
+                "start_history_index": self._active_turn.start_history_index,
+                "start_phase": self._active_turn.start_phase,
+                "start_decision_index": self._active_turn.start_decision_index,
+            }
+
+        trade_chat_turn_state: dict[str, JsonValue] | None = None
+        if self._trade_chat_turn_state is not None:
+            trade_chat_turn_state = {
+                "owner_player_id": self._trade_chat_turn_state.owner_player_id,
+                "turn_index": self._trade_chat_turn_state.turn_index,
+                "failed_attempts": self._trade_chat_turn_state.failed_attempts,
+            }
+
+        pending_trade_chat_selection: dict[str, JsonValue] | None = None
+        if self._pending_trade_chat_selection is not None:
+            pending_trade_chat_selection = {
+                "owner_player_id": self._pending_trade_chat_selection.owner_player_id,
+                "counterparty_player_id": (
+                    self._pending_trade_chat_selection.counterparty_player_id
+                ),
+                "owner_gives": dict(self._pending_trade_chat_selection.owner_gives),
+                "owner_gets": dict(self._pending_trade_chat_selection.owner_gets),
+                "turn_index": self._pending_trade_chat_selection.turn_index,
+            }
+
+        write_json(
+            self.run_dir / "checkpoint.json",
+            {
+                "artifact_version": 1,
+                "total_decisions": self._completed_decisions,
+                "current_history_index": self.event_log.current_history_index,
+                "terminal": terminal,
+                "decision_phase_counts": dict(self._decision_phase_counts),
+                "last_turn_history_index_by_player": dict(
+                    self._last_turn_history_index_by_player
+                ),
+                "active_turn": active_turn,
+                "opening_strategy_done": self._opening_strategy_done,
+                "trade_chat_turn_state": trade_chat_turn_state,
+                "pending_trade_chat_selection": pending_trade_chat_selection,
+            },
+        )
+
+    def _resolved_action_for_decision(
+        self,
+        *,
+        decision: DecisionPoint,
+        proposed_action: Action,
+    ) -> Action:
+        engine_resolve_action = getattr(self.engine, "resolve_action", None)
+        if callable(engine_resolve_action):
+            return engine_resolve_action(
+                proposed_action=proposed_action,
+                legal_actions=decision.legal_actions,
+            )
+        return self._resolve_action(
+            proposed_action=proposed_action,
+            legal_actions=decision.legal_actions,
+        )
 
     def _should_auto_roll(self, decision: DecisionPoint) -> bool:
         if decision.phase != "play_turn":
             return False
         return any(action.action_type == "ROLL" for action in decision.legal_actions)
+
+    def _maybe_run_opening_strategy_phase(self, decision: DecisionPoint) -> None:
+        if self._opening_strategy_done or decision.phase != "play_turn":
+            return
+        for player_id in self.engine.player_ids:
+            player = self.players[player_id]
+            observation = self.observation_builder.build_opening_strategy(
+                engine=self.engine,
+                player_id=player_id,
+                turn_index=decision.turn_index,
+                decision_index=decision.decision_index,
+                event_log=self.event_log,
+                memory_store=self.memory_store,
+            )
+            response = player.plan_opening_strategy(observation)
+            self._append_player_prompt_traces(player)
+            self.memory_store.set_long_term(
+                player_id=player_id,
+                long_term=response.long_term,
+                history_index=observation.history_index,
+                turn_index=observation.turn_index,
+                phase=observation.phase,
+                decision_index=observation.decision_index,
+                stage="opening_strategy",
+            )
+        self._opening_strategy_done = True
+
+    def _infer_opening_strategy_done(self) -> bool:
+        for player_id in self.engine.player_ids:
+            if any(
+                snapshot.stage == "opening_strategy"
+                for snapshot in self.memory_store.history(player_id)
+            ):
+                return True
+        if any(entry.phase == "play_turn" for entry in self.action_trace_store.entries):
+            return True
+        return any(event.phase == "play_turn" for event in self.event_log.public_events)
 
     def _is_turn_owner_choice(self, decision: DecisionPoint, turn_owner_id: str) -> bool:
         return (
@@ -337,19 +642,27 @@ class GameOrchestrator:
         response: ActionDecision,
         update_short_term: bool = False,
     ) -> TransitionResult:
-        engine_resolve_action = getattr(self.engine, "resolve_action", None)
-        if callable(engine_resolve_action):
-            action = engine_resolve_action(
+        if proposed_action.action_type == "COUNTER_OFFER":
+            return self._apply_counter_offer_decision(
+                decision=decision,
                 proposed_action=proposed_action,
-                legal_actions=decision.legal_actions,
+                response=response,
             )
-        else:
-            action = self._resolve_action(
-                proposed_action=proposed_action,
-                legal_actions=decision.legal_actions,
-            )
+        action = self._resolved_action_for_decision(
+            decision=decision,
+            proposed_action=proposed_action,
+        )
         engine_transition = self.engine.apply_action(action)
         transition = self._record_transition(decision=decision, transition=engine_transition)
+        self.action_trace_store.append(
+            ActionTraceEntry(
+                acting_player_id=decision.acting_player_id,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                action=action,
+            )
+        )
         self._update_trade_chat_after_action(
             decision=decision,
             action=action,
@@ -377,6 +690,66 @@ class GameOrchestrator:
                 transition=transition,
             )
 
+        return transition
+
+    def _apply_counter_offer_decision(
+        self,
+        *,
+        decision: DecisionPoint,
+        proposed_action: Action,
+        response: ActionDecision,
+    ) -> TransitionResult:
+        action = self._resolved_counter_offer_for_decision(
+            decision=decision,
+            proposed_action=proposed_action,
+        )
+        counter_event = Event(
+            kind="trade_counter_offered",
+            payload={
+                "owner_player_id": self._trade_owner_for_decision(decision),
+                "offer": dict(action.payload.get("offer", {})),
+                "request": dict(action.payload.get("request", {})),
+            },
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            actor_player_id=decision.acting_player_id,
+        )
+        reject_action = self._resolved_action_for_decision(
+            decision=decision,
+            proposed_action=Action("REJECT_TRADE"),
+        )
+        engine_transition = self.engine.apply_action(reject_action)
+        transition = self._record_transition(
+            decision=decision,
+            transition=TransitionResult(
+                public_events=(counter_event, *engine_transition.public_events),
+                terminal=engine_transition.terminal,
+                result_metadata=engine_transition.result_metadata,
+            ),
+        )
+        self.action_trace_store.append(
+            ActionTraceEntry(
+                acting_player_id=decision.acting_player_id,
+                turn_index=decision.turn_index,
+                phase=decision.phase,
+                decision_index=decision.decision_index,
+                action=action,
+            )
+        )
+        self._update_trade_chat_after_action(
+            decision=decision,
+            action=reject_action,
+            transition_terminal=transition.terminal,
+        )
+        self._maybe_end_turn_session(decision=decision, transition=transition)
+        if self.reporter is not None:
+            self.reporter.on_step(
+                decision=decision,
+                action=action,
+                response=response,
+                transition=transition,
+            )
         return transition
 
     def _store_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
@@ -411,6 +784,59 @@ class GameOrchestrator:
             terminal=transition.terminal,
             result_metadata=transition.result_metadata,
         )
+
+    @staticmethod
+    def _resolved_counter_offer_for_decision(
+        *,
+        decision: DecisionPoint,
+        proposed_action: Action,
+    ) -> Action:
+        matching_actions = [
+            action for action in decision.legal_actions if action.action_type == "COUNTER_OFFER"
+        ]
+        if not matching_actions:
+            raise InvalidActionError("COUNTER_OFFER is not legal for the current decision.")
+        offer = proposed_action.payload.get("offer")
+        request = proposed_action.payload.get("request")
+        if not isinstance(offer, dict) or not offer or not isinstance(request, dict) or not request:
+            raise InvalidActionError(
+                "COUNTER_OFFER requires non-empty `offer` and `request` resource maps."
+            )
+        normalized_offer = GameOrchestrator._normalize_counter_offer_map(offer)
+        normalized_request = GameOrchestrator._normalize_counter_offer_map(request)
+        return Action(
+            "COUNTER_OFFER",
+            payload={
+                "offer": normalized_offer,
+                "request": normalized_request,
+            },
+        )
+
+    @staticmethod
+    def _normalize_counter_offer_map(resource_map: dict) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for resource, amount in resource_map.items():
+            if not isinstance(resource, str):
+                raise InvalidActionError("COUNTER_OFFER resource names must be strings.")
+            if not isinstance(amount, int) or amount <= 0:
+                raise InvalidActionError(
+                    "COUNTER_OFFER resource amounts must be positive integers."
+                )
+            normalized[resource] = amount
+        if not normalized:
+            raise InvalidActionError(
+                "COUNTER_OFFER resource maps must contain at least one positive quantity."
+            )
+        return normalized
+
+    def _trade_owner_for_decision(self, decision: DecisionPoint) -> str:
+        public_state = dict(self.engine.public_state())
+        trade_state = public_state.get("trade_state")
+        if isinstance(trade_state, dict):
+            owner_player_id = trade_state.get("offering_player_id")
+            if isinstance(owner_player_id, str):
+                return owner_player_id
+        return self._turn_owner_id(decision)
 
     def _maybe_end_turn_session(
         self, *, decision: DecisionPoint, transition: TransitionResult

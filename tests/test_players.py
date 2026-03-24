@@ -4,9 +4,11 @@ import json
 import unittest
 
 from catan_bench.players import LLMPlayer
+from catan_bench.prompting import PromptRenderer
 from catan_bench.schemas import (
     Action,
     ActionObservation,
+    OpeningStrategyObservation,
     PlayerMemory,
     ReactiveObservation,
     TradeChatObservation,
@@ -55,6 +57,40 @@ class CapturingRenderer:
 
 
 class LLMPlayerTests(unittest.TestCase):
+    def test_llm_player_plan_opening_strategy_records_trace(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {"long_term": "Prioritize expansion from the brick-wheat side, then look for a city line."}
+            ),
+            model="fake-model",
+        )
+
+        response = player.plan_opening_strategy(
+            OpeningStrategyObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=0,
+                turn_index=6,
+                phase="opening_strategy",
+                decision_index=17,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1, "BRICK": 1, "WHEAT": 1}},
+                public_history=(),
+                game_rules="Rules",
+                memory=PlayerMemory(),
+            )
+        )
+
+        self.assertEqual(
+            response.long_term,
+            "Prioritize expansion from the brick-wheat side, then look for a city line.",
+        )
+        trace = player.take_last_prompt_trace()
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace.stage, "opening_strategy")
+        self.assertEqual(trace.history_index, 0)
+
     def test_llm_player_turn_lifecycle_returns_memory_and_traces(self) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
@@ -323,6 +359,197 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIsNotNone(renderer.last_payload)
         assert renderer.last_payload is not None
         self.assertEqual(renderer.last_payload["requested_resources"], {"BRICK": 1})
+
+    def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"action_index": 1, "short_term": None}),
+            model="fake-model",
+        )
+        observation = ActionObservation(
+            game_id="game-1",
+            player_id="RED",
+            history_index=2,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=5,
+            public_state={"turn": {"turn_player_id": "RED"}, "board": {}, "players": {}, "bank": {}},
+            private_state={
+                "resources": {"WOOD": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(),
+            turn_public_events=(),
+            legal_actions=(
+                Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {}, "request": {}},
+                    description="Offer a domestic trade.",
+                ),
+                Action(
+                    "MOVE_ROBBER",
+                    payload={"coordinate": [1, -1, 0], "victim": "BLUE"},
+                    description="Move the robber to [1, -1, 0] and steal from BLUE.",
+                ),
+            ),
+            decision_prompt="Choose an action.",
+            game_rules="Rules",
+            memory=PlayerMemory(short_term={"plan": "Pressure BLUE."}),
+        )
+
+        messages = player._messages_for_action(observation)
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("[0] OFFER_TRADE", user_prompt)
+        self.assertIn('payload: `{"offer": {}, "request": {}}`', user_prompt)
+        self.assertIn("requires full `action` object; do not use `action_index` alone", user_prompt)
+        self.assertIn("[1] MOVE_ROBBER", user_prompt)
+        self.assertIn('payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt)
+
+    def test_llm_player_accepts_common_trade_action_shape_without_payload_wrapper(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "action_index": 2,
+                    "short_term": "Offer sheep for brick to enable a road.",
+                    "action": {
+                        "action": "OFFER_TRADE",
+                        "offer": {"SHEEP": 1},
+                        "request": {"BRICK": 1},
+                    },
+                }
+            ),
+            model="fake-model",
+        )
+
+        response = player.choose_action(
+            ActionObservation(
+                game_id="game-1",
+                player_id="BLUE",
+                history_index=2,
+                turn_index=7,
+                phase="play_turn",
+                decision_index=20,
+                public_state={"turn": {"turn_player_id": "BLUE"}},
+                private_state={"resources": {"WOOD": 1, "SHEEP": 1, "WHEAT": 1, "ORE": 2}},
+                public_history=(),
+                turn_public_events=(),
+                legal_actions=(
+                    Action("END_TURN"),
+                    Action("BUY_DEVELOPMENT_CARD"),
+                    Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {}, "request": {}},
+                        description="Offer a domestic trade.",
+                    ),
+                ),
+                decision_prompt="Choose an action.",
+                game_rules="Rules",
+                memory=PlayerMemory(short_term="Trade for brick if possible."),
+            )
+        )
+
+        self.assertEqual(response.action.action_type, "OFFER_TRADE")
+        self.assertEqual(response.action.payload, {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}})
+        trace = player.take_last_prompt_trace()
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(len(trace.attempts), 1)
+
+    def test_llm_player_accepts_counter_offer_payload_action(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "action_index": 1,
+                    "action": {
+                        "action_type": "COUNTER_OFFER",
+                        "payload": {"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    },
+                    "private_reasoning": "Counter instead of rejecting outright.",
+                }
+            ),
+            model="fake-model",
+        )
+
+        response = player.respond_reactive(
+            ReactiveObservation(
+                game_id="game-1",
+                player_id="BLUE",
+                history_index=4,
+                turn_index=3,
+                phase="decide_trade",
+                decision_index=7,
+                public_state={"turn": {"turn_player_id": "WHITE"}},
+                private_state={"resources": {"BRICK": 1}},
+                public_history=(),
+                legal_actions=(
+                    Action("REJECT_TRADE"),
+                    Action(
+                        "COUNTER_OFFER",
+                        payload={"offer": {}, "request": {}},
+                        description="Counter the current trade.",
+                    ),
+                ),
+                decision_prompt="Respond to the trade.",
+                game_rules="Rules",
+                memory=PlayerMemory(long_term={"belief": "WHITE may still want a deal"}),
+            )
+        )
+
+        self.assertEqual(response.action.action_type, "COUNTER_OFFER")
+        self.assertEqual(
+            response.action.payload,
+            {"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+        )
+
+    def test_game_context_renders_structured_memory_as_json_text(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/game_context.jinja",
+            payload={
+                "turn_index": 6,
+                "player_id": "WHITE",
+                "private_state": {
+                    "resources": {"WOOD": 2},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {"players": {}, "board": {}, "bank": {}},
+                "memory": {
+                    "short_term": {"action": "build road", "target_edge": "[17, 18]"},
+                    "long_term": {"goal": "contest longest road"},
+                },
+            },
+        )
+
+        self.assertIn(
+            'Current plan: {"action": "build road", "target_edge": "[17, 18]"}',
+            rendered,
+        )
+        self.assertIn('{"goal": "contest longest road"}', rendered)
+
+    def test_turn_start_contract_asks_for_plain_text_memory(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render("partials/turn_start_contract.jinja")
+        self.assertIn("brief plain-text note", rendered)
+
+    def test_opening_strategy_contract_asks_for_plain_text_memory(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render("partials/opening_strategy_contract.jinja")
+        self.assertIn("brief plain-text opening strategy note", rendered)
+
+    def test_turn_end_contract_asks_for_plain_text_memory(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render("partials/turn_end_contract.jinja")
+        self.assertIn("brief plain-text memory note", rendered)
+
+    def test_action_contract_includes_payload_example(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render("partials/action_contract.jinja")
+        self.assertIn('"action_type": "OFFER_TRADE"', rendered)
+        self.assertIn('"payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}', rendered)
 
     def test_start_turn_raises_runtime_error_and_records_failed_attempt(self) -> None:
         player = LLMPlayer(

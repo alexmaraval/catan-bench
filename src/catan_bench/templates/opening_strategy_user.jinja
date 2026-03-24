@@ -1,0 +1,18 @@
+Stage: Opening strategy.
+Set-up is complete, and your initial resources from the second settlement have already been added to your hand.
+Write a useful long-term game plan for the opening based only on the provided public state, private state, public history, and existing memory.
+Make it plain text, not structured JSON.
+Focus on early priorities such as expansion, trading posture, or development-card plans.
+
+{% include "partials/game_context.jinja" %}
+
+### Set-up history
+{% if payload.public_history %}
+{% for event in payload.public_history %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
+{% include "partials/opening_strategy_contract.jinja" %}

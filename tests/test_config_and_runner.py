@@ -8,7 +8,13 @@ from unittest.mock import patch
 from catan_bench import GameResult
 from catan_bench.config import load_game_config, load_player_configs
 from catan_bench.reporter import DebugTerminalReporter
-from catan_bench.runner import _find_dotenv, build_players, main, run_from_config_files
+from catan_bench.runner import (
+    _find_dotenv,
+    _load_resume_game_id,
+    build_players,
+    main,
+    run_from_config_files,
+)
 
 
 class _StubEngine:
@@ -151,10 +157,52 @@ class ConfigAndRunnerTests(unittest.TestCase):
         run_mock.assert_called_once_with(
             game_config_path="game.toml",
             players_config_path="players.toml",
+            resume_run_dir=None,
             debug=True,
             debug_from_setup=False,
             debug_trade=False,
         )
+
+    def test_main_parses_resume_flag(self) -> None:
+        with patch("catan_bench.runner.run_from_config_files") as run_mock:
+            run_mock.return_value = GameResult(
+                game_id="mock-game",
+                winner_ids=("RED",),
+                total_decisions=1,
+                public_event_count=0,
+                memory_writes=0,
+                metadata={},
+            )
+            exit_code = main(
+                [
+                    "--game",
+                    "game.toml",
+                    "--players",
+                    "players.toml",
+                    "--resume-run",
+                    "runs/existing",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            game_config_path="game.toml",
+            players_config_path="players.toml",
+            resume_run_dir="runs/existing",
+            debug=False,
+            debug_from_setup=False,
+            debug_trade=False,
+        )
+
+    def test_load_resume_game_id_reads_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            (run_dir / "metadata.json").write_text(
+                '{"game_id": "saved-game-id"}\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(_load_resume_game_id(run_dir), "saved-game-id")
 
     def test_find_dotenv_walks_up_parent_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

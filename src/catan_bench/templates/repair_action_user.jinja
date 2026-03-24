@@ -1,12 +1,20 @@
+Repair the previous invalid move by selecting one legal action.
+
 **Error:** {{ payload.error }}
 
 **Your previous response:** {{ payload.previous_response }}
 {% if payload.legal_actions %}
 **Legal actions:**
 {% for action in payload.legal_actions %}
-[{{ loop.index0 }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+[{{ action.index }}] {{ action.action_type }}{% if action.description %} — {{ action.description }}{% endif %}
+{% if action.payload %}  payload: `{{ fmt_payload(action.payload) }}`{% endif %}{% if action.requires_concrete_payload %}  requires full `action` object; do not use `action_index` alone{% endif %}
 
 {% endfor %}
 {% elif payload.candidate_source %}
 **Select action_index from `{{ payload.candidate_source }}`.**
 {% endif %}
+
+For payload-requiring actions, return:
+`{"action_index": 2, "action": {"action_type": "OFFER_TRADE", "payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}}}`
+
+Return strict JSON only.

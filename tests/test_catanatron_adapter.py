@@ -117,6 +117,36 @@ class CatanatronAdapterTests(unittest.TestCase):
 
         self.assertEqual(resolved, legal_actions[1])
 
+    def test_description_for_payload_heavy_actions_is_informative(self) -> None:
+        self.assertEqual(
+            CatanatronEngineAdapter._description_for_action(
+                "MOVE_ROBBER",
+                {"coordinate": [1, -1, 0], "victim": "BLUE"},
+            ),
+            "Move the robber to [1, -1, 0] and steal from BLUE.",
+        )
+        self.assertEqual(
+            CatanatronEngineAdapter._description_for_action(
+                "MARITIME_TRADE",
+                {"give": ["WOOD", "WOOD", "WOOD", "WOOD"], "receive": "ORE"},
+            ),
+            "Trade ['WOOD', 'WOOD', 'WOOD', 'WOOD'] to the bank for ORE.",
+        )
+
+    def test_ordered_legal_actions_moves_end_turn_to_the_end(self) -> None:
+        ordered = CatanatronEngineAdapter._ordered_legal_actions(
+            (
+                Action("END_TURN"),
+                Action("OFFER_TRADE", payload={"offer": {}, "request": {}}),
+                Action("BUY_DEVELOPMENT_CARD"),
+            )
+        )
+
+        self.assertEqual(
+            [action.action_type for action in ordered],
+            ["OFFER_TRADE", "BUY_DEVELOPMENT_CARD", "END_TURN"],
+        )
+
     def test_initial_decision_exposes_player_scoped_state(self) -> None:
         adapter = CatanatronEngineAdapter(seed=7)
 
@@ -284,9 +314,36 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.current_decision().phase, "decide_trade")
         self.assertTrue(
             all(
-                action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE"}
+                action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE", "COUNTER_OFFER"}
                 for action in adapter.current_decision().legal_actions
             )
+        )
+
+    def test_decide_trade_exposes_counter_offer_template(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=1)
+
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+        adapter.apply_action(Action("ROLL"))
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        decision = adapter.current_decision()
+        adapter.apply_action(
+            adapter.resolve_action(
+                proposed_action=Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                ),
+                legal_actions=decision.legal_actions,
+            )
+        )
+
+        decide_trade = adapter.current_decision()
+        self.assertEqual(decide_trade.phase, "decide_trade")
+        self.assertIn(
+            "COUNTER_OFFER",
+            [action.action_type for action in decide_trade.legal_actions],
         )
 
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from .prompts import CATAN_RULES_SUMMARY
 from .schemas import (
     ActionObservation,
+    OpeningStrategyObservation,
     ReactiveObservation,
     TradeChatObservation,
     TradeChatQuote,
@@ -60,6 +61,31 @@ class ObservationBuilder:
             public_history_since_last_turn=self._tail_events(
                 event_log.since(last_turn_history_index),
             ),
+            game_rules=self.game_rules,
+            memory=memory_store.get(player_id),
+        )
+
+    def build_opening_strategy(
+        self,
+        *,
+        engine: EngineAdapter,
+        player_id: str,
+        turn_index: int,
+        decision_index: int,
+        event_log: EventLog,
+        memory_store: MemoryStore,
+    ) -> OpeningStrategyObservation:
+        phase = "opening_strategy"
+        return OpeningStrategyObservation(
+            game_id=engine.game_id,
+            player_id=player_id,
+            history_index=event_log.current_history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            public_state=self._compact_public_state(engine=engine, player_id=player_id, phase=phase),
+            private_state=self._compact_private_state(engine=engine, player_id=player_id, phase=phase),
+            public_history=self._tail_events(event_log.recent()),
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
         )

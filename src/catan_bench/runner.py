@@ -33,6 +33,7 @@ from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
 from .reporter import DebugTerminalReporter, TerminalReporter
+from .storage import read_json
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -43,7 +44,12 @@ else:
     _catanatron_import_error = None
 
 
-def build_engine(game_config: GameConfig, players: Sequence[PlayerConfig]):
+def build_engine(
+    game_config: GameConfig,
+    players: Sequence[PlayerConfig],
+    *,
+    game_id: str | None = None,
+):
     if game_config.engine != "catanatron":
         raise ValueError(f"Unsupported engine {game_config.engine!r}.")
     if CatanatronEngineAdapter is None:
@@ -51,6 +57,7 @@ def build_engine(game_config: GameConfig, players: Sequence[PlayerConfig]):
 
     return CatanatronEngineAdapter(
         player_ids=[player.id for player in players],
+        game_id=game_id,
         seed=game_config.seed,
         discard_limit=game_config.discard_limit,
         vps_to_win=game_config.vps_to_win,
@@ -89,6 +96,7 @@ def run_from_config_files(
     *,
     game_config_path: str | Path,
     players_config_path: str | Path,
+    resume_run_dir: str | Path | None = None,
     debug: bool = False,
     debug_from_setup: bool = False,
     debug_trade: bool = False,
@@ -96,7 +104,8 @@ def run_from_config_files(
     _load_local_env(Path(players_config_path).resolve().parent)
     game_config = load_game_config(game_config_path)
     player_configs = load_player_configs(players_config_path)
-    engine = build_engine(game_config, player_configs)
+    resume_game_id = _load_resume_game_id(resume_run_dir)
+    engine = build_engine(game_config, player_configs, game_id=resume_game_id)
     players = build_players(player_configs, game_config)
     orchestrator = GameOrchestrator(
         engine,
@@ -105,6 +114,7 @@ def run_from_config_files(
             recent_event_window=game_config.history_window,
         ),
         run_dir=game_config.run_dir,
+        resume_run_dir=resume_run_dir,
         trading_chat_enabled=game_config.trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=(
             game_config.trading_chat_max_failed_attempts_per_turn
@@ -129,6 +139,14 @@ def _load_local_env(start_dir: Path) -> None:
     load_dotenv(env_path, override=False)
 
 
+def _load_resume_game_id(resume_run_dir: str | Path | None) -> str | None:
+    if resume_run_dir is None:
+        return None
+    metadata = read_json(Path(resume_run_dir) / "metadata.json") or {}
+    game_id = metadata.get("game_id")
+    return str(game_id) if isinstance(game_id, str) else None
+
+
 def _find_dotenv(start_dir: Path, *, max_depth: int = 4) -> Path | None:
     current = start_dir
     for _ in range(max_depth + 1):
@@ -147,6 +165,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--game", required=True, help="Path to game TOML config.")
     parser.add_argument("--players", required=True, help="Path to player TOML config.")
+    parser.add_argument(
+        "--resume-run",
+        help="Resume an existing run directory by replaying its saved action trace and appending new output in place.",
+    )
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -167,6 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = run_from_config_files(
         game_config_path=args.game,
         players_config_path=args.players,
+        resume_run_dir=args.resume_run,
         debug=args.debug,
         debug_from_setup=args.debug_from_setup,
         debug_trade=args.debug_trade,

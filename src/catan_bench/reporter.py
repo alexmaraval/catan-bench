@@ -192,7 +192,10 @@ class DebugTerminalReporter(TerminalReporter):
             role = str(message.get("role", "unknown"))
             content = message.get("content")
             rendered.append(f"[{role}]")
-            rendered.extend(DebugTerminalReporter._render_debug_content(content))
+            if role == "system":
+                rendered.append(DebugTerminalReporter._collapsed_system_prompt_summary(content))
+            else:
+                rendered.extend(DebugTerminalReporter._render_debug_content(content))
             rendered.append("")
         if rendered and rendered[-1] == "":
             rendered.pop()
@@ -214,6 +217,15 @@ class DebugTerminalReporter(TerminalReporter):
                 return DebugTerminalReporter._render_structured_json(parsed)
             return content.splitlines() or [""]
         return DebugTerminalReporter._render_structured_json(content)
+
+    @staticmethod
+    def _collapsed_system_prompt_summary(content: object) -> str:
+        lines = DebugTerminalReporter._render_debug_content(content)
+        non_empty_lines = [line for line in lines if line.strip()]
+        line_count = len(non_empty_lines)
+        if line_count <= 0:
+            return "(collapsed static system prompt)"
+        return f"(collapsed static system prompt: {line_count} lines)"
 
     @staticmethod
     def _maybe_parse_json_text(content: str) -> object | None:
@@ -324,6 +336,9 @@ def _describe(event: object) -> str | None:
         return f"accepted {p.get('offering_player_id') or '?'}'s offer"
     if kind == "trade_rejected":
         return f"rejected {p.get('offering_player_id') or '?'}'s offer"
+    if kind == "trade_counter_offered":
+        owner = p.get("owner_player_id") or "?"
+        return f"countered {owner}: {_res(p.get('offer'))} for {_res(p.get('request'))}"
     if kind == "trade_confirmed":
         a = p.get("offering_player_id") or "?"
         b = p.get("accepting_player_id") or "?"

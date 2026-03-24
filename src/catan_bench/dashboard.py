@@ -55,16 +55,17 @@ TURN_EMOJI = "🌀"
 # Explicit lifecycle order so traces sort correctly when history_index and
 # decision_index tie (e.g. turn_start and choose_action can share both).
 STAGE_ORDER: dict[str, int] = {
-    "turn_start": 0,
-    "choose_action": 1,
-    "trade_chat_open": 2,
-    "trade_chat_reply": 3,
-    "trade_chat_select": 4,
-    "trade_chat_no_deal": 5,
-    "reactive_action": 6,
-    "repair_action": 7,
-    "turn_end": 8,
-    "turn_cleanup": 9,
+    "opening_strategy": 0,
+    "turn_start": 1,
+    "choose_action": 2,
+    "trade_chat_open": 3,
+    "trade_chat_reply": 4,
+    "trade_chat_select": 5,
+    "trade_chat_no_deal": 6,
+    "reactive_action": 7,
+    "repair_action": 8,
+    "turn_end": 9,
+    "turn_cleanup": 10,
 }
 TRADE_EMOJI = "🤝"
 RESOURCE_TILE_COLORS = {
@@ -585,6 +586,37 @@ def _render_json_or_text(st, value: object, *, expanded: bool) -> None:
         st.json(value, expanded=expanded)
 
 
+def _system_prompt_message_summary(content: object) -> str:
+    if isinstance(content, str):
+        lines = [line for line in content.splitlines() if line.strip()]
+        if not lines:
+            return "Static system prompt"
+        return f"Static system prompt ({len(lines)} lines)"
+    return "Static system prompt"
+
+
+def _render_prompt_message(st, role: str, content: object) -> None:
+    role_bg = {"user": "#dbeafe", "assistant": "#dcfce7", "system": "#fef3c7"}.get(role, "#f3f4f6")
+    st.markdown(
+        f"<div style='background:{role_bg};border-radius:0.4rem;"
+        f"padding:0.3rem 0.6rem;margin-bottom:0.25rem;"
+        f"font-size:0.72rem;font-weight:700;text-transform:uppercase;color:#374151'>"
+        f"{_escape_html(role)}</div>",
+        unsafe_allow_html=True,
+    )
+    if role == "system":
+        with st.expander(_system_prompt_message_summary(content), expanded=False):
+            if isinstance(content, str):
+                st.code(content, language=None)
+            else:
+                st.json(content, expanded=False)
+        return
+    if isinstance(content, str):
+        st.code(content, language=None)
+    else:
+        st.json(content, expanded=False)
+
+
 def _render_llm_interaction_card(
     st,
     trace: PromptTrace,
@@ -613,18 +645,7 @@ def _render_llm_interaction_card(
             for message in attempt.messages:
                 role = str(message.get("role", "unknown"))
                 content = message.get("content")
-                role_bg = {"user": "#dbeafe", "assistant": "#dcfce7", "system": "#fef3c7"}.get(role, "#f3f4f6")
-                st.markdown(
-                    f"<div style='background:{role_bg};border-radius:0.4rem;"
-                    f"padding:0.3rem 0.6rem;margin-bottom:0.25rem;"
-                    f"font-size:0.72rem;font-weight:700;text-transform:uppercase;color:#374151'>"
-                    f"{_escape_html(role)}</div>",
-                    unsafe_allow_html=True,
-                )
-                if isinstance(content, str):
-                    st.code(content, language=None)
-                else:
-                    st.json(content, expanded=False)
+                _render_prompt_message(st, role, content)
 
     for attempt_idx, attempt in enumerate(trace.attempts, start=1):
         answer_label = "Answer" if len(trace.attempts) == 1 else f"Answer (attempt {attempt_idx})"
@@ -966,11 +987,7 @@ def _render_prompt_trace_card(st, trace: PromptTrace, *, player_id: str) -> None
                 for message in attempt.messages:
                     role = str(message.get("role", "unknown"))
                     content = message.get("content")
-                    st.caption(role)
-                    if isinstance(content, str):
-                        st.code(content)
-                    else:
-                        st.json(content, expanded=False)
+                    _render_prompt_message(st, role, content)
 
 
 def _turn_artifact_label(artifact: TurnArtifact) -> str:

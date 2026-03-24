@@ -230,6 +230,36 @@ class TurnStartObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningStrategyObservation:
+    game_id: str
+    player_id: str
+    history_index: int
+    turn_index: int
+    phase: str
+    decision_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    public_history: tuple[Event, ...] = ()
+    game_rules: str | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "history_index": self.history_index,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
+            "public_history": [event.to_dict() for event in self.public_history],
+            "game_rules": self.game_rules,
+            "memory": self.memory.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ActionObservation:
     game_id: str
     player_id: str
@@ -400,6 +430,14 @@ class TurnStartResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningStrategyResponse:
+    long_term: JsonValue | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {"long_term": self.long_term}
+
+
+@dataclass(frozen=True, slots=True)
 class ActionDecision:
     action: Action
     short_term: JsonValue | None = None
@@ -412,6 +450,34 @@ class ActionDecision:
         if self.reasoning is not None:
             payload["reasoning"] = self.reasoning
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class ActionTraceEntry:
+    acting_player_id: str
+    turn_index: int
+    phase: str
+    decision_index: int
+    action: Action
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "acting_player_id": self.acting_player_id,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "action": self.action.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, JsonValue]) -> "ActionTraceEntry":
+        return cls(
+            acting_player_id=str(data["acting_player_id"]),
+            turn_index=int(data.get("turn_index", 0)),
+            phase=str(data.get("phase", "unknown")),
+            decision_index=int(data.get("decision_index", 0)),
+            action=Action.from_dict(dict(data.get("action") or {})),
+        )
 
 
 @dataclass(frozen=True, slots=True)

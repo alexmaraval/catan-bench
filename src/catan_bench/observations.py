@@ -8,7 +8,7 @@ from .schemas import (
     OpeningStrategyObservation,
     ReactiveObservation,
     TradeChatObservation,
-    TradeChatQuote,
+    TradeChatProposal,
     TurnEndObservation,
     TurnStartObservation,
 )
@@ -98,6 +98,8 @@ class ObservationBuilder:
         event_log: EventLog,
         memory_store: MemoryStore,
         turn_start_history_index: int,
+        trade_chat_enabled: bool = False,
+        trade_chat_attempts_remaining: int | None = None,
     ) -> ActionObservation:
         player_id = decision.acting_player_id
         return ActionObservation(
@@ -121,6 +123,8 @@ class ObservationBuilder:
             turn_public_events=event_log.since(turn_start_history_index),
             legal_actions=tuple(decision.legal_actions),
             decision_prompt=decision.prompt,
+            trade_chat_enabled=trade_chat_enabled,
+            trade_chat_attempts_remaining=trade_chat_attempts_remaining,
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
         )
@@ -193,8 +197,9 @@ class ObservationBuilder:
         decision: DecisionPoint,
         stage: str,
         attempt_index: int,
+        round_index: int,
         requested_resources: dict,
-        quotes: tuple[TradeChatQuote, ...],
+        proposals: tuple[TradeChatProposal, ...],
         event_log: EventLog,
         memory_store: MemoryStore,
         message_char_limit: int,
@@ -215,6 +220,7 @@ class ObservationBuilder:
             decision_index=decision.decision_index,
             stage=stage,
             attempt_index=attempt_index,
+            round_index=round_index,
             public_state=self._public_state_for_decision(
                 engine=engine,
                 decision=decision,
@@ -232,7 +238,7 @@ class ObservationBuilder:
                 for other_player_id in engine.player_ids
                 if other_player_id != player_id
             ),
-            quotes=quotes,
+            proposals=proposals,
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
             message_char_limit=message_char_limit,

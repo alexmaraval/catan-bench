@@ -273,6 +273,8 @@ class ActionObservation:
     turn_public_events: tuple[Event, ...] = ()
     legal_actions: tuple[Action, ...] = ()
     decision_prompt: str | None = None
+    trade_chat_enabled: bool = False
+    trade_chat_attempts_remaining: int | None = None
     game_rules: str | None = None
     memory: PlayerMemory = field(default_factory=PlayerMemory)
 
@@ -290,6 +292,8 @@ class ActionObservation:
             "turn_public_events": [event.to_dict() for event in self.turn_public_events],
             "legal_actions": [action.to_dict() for action in self.legal_actions],
             "decision_prompt": self.decision_prompt,
+            "trade_chat_enabled": self.trade_chat_enabled,
+            "trade_chat_attempts_remaining": self.trade_chat_attempts_remaining,
             "game_rules": self.game_rules,
             "memory": self.memory.to_dict(),
         }
@@ -360,21 +364,29 @@ class ReactiveObservation:
 
 
 @dataclass(frozen=True, slots=True)
-class TradeChatQuote:
+class TradeChatProposal:
+    proposal_id: str
     player_id: str
+    round_index: int
     message: str | None = None
     owner_gives: dict[str, JsonValue] = field(default_factory=dict)
     owner_gets: dict[str, JsonValue] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, JsonValue]:
         payload: dict[str, JsonValue] = {
+            "proposal_id": self.proposal_id,
             "player_id": self.player_id,
+            "round_index": self.round_index,
             "owner_gives": self.owner_gives,
             "owner_gets": self.owner_gets,
         }
         if self.message is not None:
             payload["message"] = self.message
         return payload
+
+
+# Backward-compatible alias for older callers that still use the quote name.
+TradeChatQuote = TradeChatProposal
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,12 +400,13 @@ class TradeChatObservation:
     decision_index: int
     stage: str
     attempt_index: int
+    round_index: int
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
     transcript: tuple[Event, ...] = ()
     requested_resources: dict[str, JsonValue] = field(default_factory=dict)
     other_player_ids: tuple[str, ...] = ()
-    quotes: tuple[TradeChatQuote, ...] = ()
+    proposals: tuple[TradeChatProposal, ...] = ()
     game_rules: str | None = None
     memory: PlayerMemory = field(default_factory=PlayerMemory)
     message_char_limit: int = 160
@@ -409,12 +422,13 @@ class TradeChatObservation:
             "decision_index": self.decision_index,
             "stage": self.stage,
             "attempt_index": self.attempt_index,
+            "round_index": self.round_index,
             "public_state": self.public_state,
             "private_state": self.private_state,
             "transcript": [event.to_dict() for event in self.transcript],
             "requested_resources": self.requested_resources,
             "other_player_ids": list(self.other_player_ids),
-            "quotes": [quote.to_dict() for quote in self.quotes],
+            "proposals": [proposal.to_dict() for proposal in self.proposals],
             "game_rules": self.game_rules,
             "memory": self.memory.to_dict(),
             "message_char_limit": self.message_char_limit,
@@ -527,15 +541,16 @@ class TradeChatReplyResponse:
 
 
 @dataclass(frozen=True, slots=True)
-class TradeChatSelectionResponse:
-    selected_player_id: str | None = None
+class TradeChatOwnerDecisionResponse:
+    decision: str = "close"
+    selected_proposal_id: str | None = None
     message: str | None = None
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        payload: dict[str, JsonValue] = {}
-        if self.selected_player_id is not None:
-            payload["selected_player_id"] = self.selected_player_id
+        payload: dict[str, JsonValue] = {"decision": self.decision}
+        if self.selected_proposal_id is not None:
+            payload["selected_proposal_id"] = self.selected_proposal_id
         if self.message is not None:
             payload["message"] = self.message
         if self.reasoning is not None:

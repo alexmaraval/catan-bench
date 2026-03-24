@@ -68,6 +68,9 @@ class TerminalReporter:
             bar = _c("─" * 4 + label + "─" * max(0, 42 - len(label)), _DIM, on=self._colour)
             self._put(f"\n{bar}")
 
+        if transition.result_metadata.get("hidden_internal_step"):
+            return
+
         # Collect descriptions from public events; fall back to action description
         descs = [d for e in transition.public_events if (d := _describe(e)) is not None]
         summary = "  ·  ".join(descs) if descs else (action.description or action.action_type)
@@ -358,7 +361,7 @@ def _describe(event: object) -> str | None:
             return f"quoted {_res(offer)} for {_res(request)}"
         return "spoke in trade chat"
     if kind == "trade_chat_quote_selected":
-        return f"selected {p.get('selected_player_id')}'s quote"
+        return f"selected {p.get('selected_player_id')}'s proposal"
     if kind == "trade_chat_no_deal":
         return "ended trade chat with no deal"
     if kind == "trade_chat_closed":

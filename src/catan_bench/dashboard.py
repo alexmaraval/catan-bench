@@ -29,6 +29,22 @@ TRADE_EVENT_KINDS = {
     "trade_chat_closed",
 }
 TRADE_CLOSE_KINDS = {"trade_confirmed", "trade_cancelled"}
+TURN_DIGEST_EVENT_KINDS = frozenset(
+    {
+        "dice_rolled",
+        "settlement_built",
+        "city_built",
+        "road_built",
+        "robber_moved",
+        "trade_chat_opened",
+        "trade_confirmed",
+        "trade_chat_no_deal",
+        "trade_cancelled",
+        "development_card_played",
+        "action_taken",
+        "turn_ended",
+    }
+)
 EVENT_EMOJIS = {
     "dice_rolled": "🎲",
     "settlement_built": "🏠",
@@ -60,6 +76,7 @@ STAGE_ORDER: dict[str, int] = {
     "choose_action": 2,
     "trade_chat_open": 3,
     "trade_chat_reply": 4,
+    "trade_chat_owner_decision": 5,
     "trade_chat_select": 5,
     "trade_chat_no_deal": 6,
     "reactive_action": 7,
@@ -406,20 +423,21 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
     )
 
     st.subheader("Board")
-    top_col, side_col = st.columns((2, 1))
+    top_col, side_col = st.columns((2.2, 1))
     with top_col:
         st.markdown("**Board visualization**")
         st.markdown(
             build_board_svg(board, height=520),
             unsafe_allow_html=True,
         )
-        turn_col, trade_col = st.columns(2)
-        with turn_col:
-            st.markdown("**Turn state**")
-            st.json(turn_state, expanded=False)
-        with trade_col:
-            st.markdown("**Trade state**")
-            st.json(trade_state, expanded=False)
+        with st.expander("State details", expanded=False):
+            turn_col, trade_col = st.columns(2)
+            with turn_col:
+                st.markdown("**Turn state**")
+                st.json(turn_state, expanded=False)
+            with trade_col:
+                st.markdown("**Trade state**")
+                st.json(trade_state, expanded=False)
         with st.expander("Board details", expanded=False):
             st.json(board, expanded=False)
     with side_col:
@@ -428,6 +446,7 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
             _render_player_summary_table(st, players)
         else:
             st.caption("No public player summary yet.")
+        _render_turn_event_digest(st, snapshot, cursor=cursor)
 
 
 def _render_player_summary_table(st, players: dict) -> None:
@@ -468,8 +487,172 @@ def _render_player_summary_table(st, players: dict) -> None:
         st.markdown(table_html, unsafe_allow_html=True)
 
 
+def _render_turn_event_digest(
+    st,
+    snapshot: DashboardSnapshot,
+    *,
+    cursor: int,
+    max_turns: int = 12,
+) -> None:
+    st.markdown("**Turn events**")
+    sections = _recent_turn_event_sections(snapshot, cursor, max_turns=max_turns)
+    if not sections:
+        st.caption("No public turn events yet.")
+        return
+
+    current_turn = _turn_index_for_cursor(cursor, _turn_markers(snapshot))
+    html_parts = ["<div class='turn-events-panel'>"]
+    for turn_index, label, rows in sections:
+        group_class = "turn-events-group turn-events-group-current" if turn_index == current_turn else "turn-events-group"
+        html_parts.append(f"<section class='{group_class}'>")
+        html_parts.append(
+            "<div class='turn-events-divider'>"
+            f"<span>{_escape_html(label)}</span>"
+            "</div>"
+        )
+        for speaker, body in rows:
+            accent, _, _ = _palette_for_player(None if speaker == "SYSTEM" else speaker)
+            html_parts.append(
+                "<div class='turn-event-row'>"
+                f"<div class='turn-event-player' style='color:{accent}'>{_escape_html(speaker)}</div>"
+                f"<div class='turn-event-text'>{_escape_html(body)}</div>"
+                "</div>"
+            )
+        html_parts.append("</section>")
+    html_parts.append("</div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def _recent_turn_event_sections(
+    snapshot: DashboardSnapshot,
+    cursor: int,
+    *,
+    max_turns: int = 12,
+) -> tuple[tuple[int, str, tuple[tuple[str, str], ...]], ...]:
+    grouped: dict[int, list[tuple[Event, str]]] = {}
+    for event in snapshot.public_events:
+        if event.history_index > cursor:
+            break
+        summary = _turn_event_digest_body(event)
+        if summary is None:
+            continue
+        grouped.setdefault(event.turn_index, []).append((event, summary))
+
+    grouped_items = list(grouped.items())
+    if max_turns > 0:
+        grouped_items = grouped_items[-max_turns:]
+
+    sections: list[tuple[int, str, tuple[tuple[str, str], ...]]] = []
+    for turn_index, rows in grouped_items:
+        turn_events = tuple(event for event, _summary in rows)
+        sections.append(
+            (
+                turn_index,
+                _turn_event_section_label(turn_index, turn_events),
+                tuple((str(event.actor_player_id or "SYSTEM"), summary) for event, summary in rows),
+            )
+        )
+    return tuple(sections)
+
+
+def _turn_event_section_label(turn_index: int, events: tuple[Event, ...]) -> str:
+    first_phase = next((event.phase for event in events if event.phase), "")
+    if first_phase.startswith("build_initial"):
+        return f"Setup {turn_index}"
+    return f"Turn {turn_index}"
+
+
+def _turn_event_digest_body(event: Event) -> str | None:
+    if event.kind not in TURN_DIGEST_EVENT_KINDS:
+        return None
+
+    payload = event.payload
+    if event.kind == "dice_rolled":
+        return _turn_event_dice_summary(payload.get("result"))
+    if event.kind == "settlement_built":
+        return f"settlement on node {payload.get('node_id')}"
+    if event.kind == "city_built":
+        return f"city on node {payload.get('node_id')}"
+    if event.kind == "road_built":
+        return f"road on {payload.get('edge')}"
+    if event.kind == "robber_moved":
+        coordinate = payload.get("coordinate")
+        victim = payload.get("victim")
+        if victim:
+            return f"robber → {coordinate}, stole from {victim}"
+        return f"robber → {coordinate}"
+    if event.kind == "trade_chat_opened":
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            return f"opened trade chat: {message.strip()}"
+        requested_resources = payload.get("requested_resources")
+        requested = _resource_map(requested_resources)
+        if requested != "nothing":
+            return f"opened trade chat for {requested}"
+        return "opened trade chat"
+    if event.kind == "trade_confirmed":
+        counterparty = payload.get("accepting_player_id") or "?"
+        return f"↔ {counterparty}: {_resource_map(payload.get('offer'))} for {_resource_map(payload.get('request'))}"
+    if event.kind == "trade_chat_no_deal":
+        return "trade chat ended with no deal"
+    if event.kind == "trade_cancelled":
+        return "trade cancelled"
+    if event.kind == "development_card_played":
+        description = _turn_event_action_description(payload)
+        if description is not None:
+            return description
+        card_type = payload.get("card_type") or payload.get("dev_card_type")
+        if isinstance(card_type, str) and card_type:
+            return f"played {card_type.lower().replace('_', ' ')}"
+        return "played dev card"
+    if event.kind == "action_taken":
+        description = _turn_event_action_description(payload)
+        return description or "took an action"
+    if event.kind == "turn_ended":
+        return "End the current turn."
+    return None
+
+
+def _turn_event_action_description(payload: dict[str, JsonValue]) -> str | None:
+    action = payload.get("action")
+    if not isinstance(action, dict):
+        return None
+    description = action.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    action_type = action.get("action_type")
+    if isinstance(action_type, str) and action_type:
+        return action_type.lower().replace("_", " ")
+    return None
+
+
+def _turn_event_dice_summary(result: object) -> str:
+    if isinstance(result, list) and result:
+        try:
+            values = [int(value) for value in result]
+        except (TypeError, ValueError):
+            return f"rolled {result}"
+        return f"rolled {sum(values)} ({'+'.join(str(value) for value in values)})"
+    if isinstance(result, dict):
+        total = result.get("total")
+        values = result.get("values") or result.get("dice") or result.get("rolls")
+        if isinstance(total, int) and isinstance(values, list) and values:
+            return f"rolled {total} ({'+'.join(str(value) for value in values)})"
+        if isinstance(total, int):
+            return f"rolled {total}"
+    if result is not None:
+        return f"rolled {result}"
+    return "rolled dice"
+
+
 _TRADE_TRACE_STAGES = frozenset(
-    {"trade_chat_open", "trade_chat_reply", "trade_chat_select", "trade_chat_no_deal"}
+    {
+        "trade_chat_open",
+        "trade_chat_reply",
+        "trade_chat_owner_decision",
+        "trade_chat_select",
+        "trade_chat_no_deal",
+    }
 )
 
 
@@ -675,64 +858,120 @@ def _render_trade_chat_box(
     memories_for_turn: dict[tuple[str, int, str], MemorySnapshot],
 ) -> None:
     """Render a trade session as an expandable chat room."""
+    _render_trade_transcript(
+        st,
+        artifact,
+        traces=traces,
+        memories_for_turn=memories_for_turn,
+        expanded=True,
+    )
+
+
+def _render_trade_transcript(
+    st,
+    artifact: TradeArtifact,
+    *,
+    traces: list[PromptTrace],
+    memories_for_turn: dict[tuple[str, int, str], MemorySnapshot],
+    expanded: bool,
+) -> None:
     counterparties = sorted(
         {cp for e in artifact.events for cp in _trade_counterparties(e, artifact.owner_player_id)}
     )
     participants = [artifact.owner_player_id] + counterparties
-    title = f"{TRADE_EMOJI} Trade Session — {' · '.join(participants)}"
+    title = f"{TRADE_EMOJI} Trade Room"
+    if participants:
+        title += " — " + " · ".join(participants)
 
-    with st.expander(title, expanded=True):
+    with st.expander(title, expanded=expanded):
         st.caption(
             f"history {artifact.start_history_index}–{artifact.end_history_index} "
             f"· turn {artifact.turn_index} · owner {artifact.owner_player_id}"
         )
 
-        # Interleave events and traces chronologically
         feed: list[tuple[int, str, object]] = []
         for event in artifact.events:
             feed.append((event.history_index, "event", event))
         for trace in traces:
             feed.append((trace.history_index, "trace", trace))
-        feed.sort(key=lambda x: x[0])
+        feed.sort(key=lambda item: (item[0], 0 if item[1] == "event" else 1))
 
         for _, item_type, data in feed:
             if item_type == "event":
                 _render_trade_chat_bubble(st, data)  # type: ignore[arg-type]
-            else:
-                trace = data  # type: ignore[assignment]
-                mem_key = (trace.player_id, trace.decision_index, trace.stage)
-                _render_llm_interaction_card(st, trace, memory=memories_for_turn.get(mem_key))
+                continue
+            trace = data  # type: ignore[assignment]
+            mem_key = (trace.player_id, trace.decision_index, trace.stage)
+            _render_llm_interaction_card(st, trace, memory=memories_for_turn.get(mem_key))
 
 
 def _render_trade_chat_bubble(st, event: Event) -> None:
-    """Render a single trade event as a chat bubble."""
+    """Render a single trade event as a player-colored trade bubble."""
     speaker = event.payload.get("speaker_player_id") or event.actor_player_id or "SYSTEM"
     speaker_str = str(speaker)
-    accent, background, _ = _palette_for_player(speaker_str if speaker_str != "SYSTEM" else None)
+    alignment = _trade_bubble_alignment(event, speaker_player_id=speaker_str)
+    accent, background, _ = _palette_for_player(
+        speaker_str if alignment != "center" and speaker_str != "SYSTEM" else None
+    )
     emoji = _emoji_for_event(event.kind)
-    kind_label = {
-        "trade_chat_opened": "opened trade chat",
-        "trade_chat_message": "sent a message",
-        "trade_chat_quote_selected": "selected a quote",
-        "trade_chat_no_deal": "ended with no deal",
-        "trade_chat_closed": "chat closed",
-        "trade_offered": "offered a trade",
-        "trade_accepted": "accepted",
-        "trade_rejected": "rejected",
-        "trade_confirmed": "trade confirmed",
-        "trade_cancelled": "trade cancelled",
-    }.get(event.kind, event.kind.replace("_", " "))
+    kind_label = _trade_bubble_kind_label(event.kind)
     body = _event_body(event)
+    metadata_bits = [f"h{event.history_index}"]
+    attempt_index = event.payload.get("attempt_index")
+    round_index = event.payload.get("round_index")
+    proposal_id = event.payload.get("proposal_id") or event.payload.get("selected_proposal_id")
+    if isinstance(attempt_index, int):
+        metadata_bits.insert(0, f"attempt {attempt_index}")
+    if isinstance(round_index, int) and round_index > 0:
+        metadata_bits.insert(1 if isinstance(attempt_index, int) else 0, f"round {round_index}")
+    if isinstance(proposal_id, str):
+        metadata_bits.append(proposal_id)
+    justify_content = {
+        "left": "flex-start",
+        "right": "flex-end",
+        "center": "center",
+    }[alignment]
     st.markdown(
-        "<div class='chat-bubble' "
-        f"style='border-left:4px solid {accent}; background:{background};'>"
-        f"<div class='chat-speaker' style='color:{accent}'>"
-        f"{emoji} <strong>{_escape_html(speaker_str)}</strong> {_escape_html(kind_label)}"
-        f"<span style='font-size:0.7rem;color:#9ca3af;margin-left:0.5rem'>h{event.history_index}</span></div>"
-        f"<div class='chat-body'>{_escape_html(body)}</div>"
-        "</div>",
+        "<div class='trade-chat-row' "
+        f"style='justify-content:{justify_content};'>"
+        "<div class='trade-chat-bubble' "
+        f"style='border-color:{accent}; background:{background};'>"
+        "<div class='trade-chat-header'>"
+        f"<span class='trade-chat-speaker' style='color:{accent}'>{emoji} "
+        f"<strong>{_escape_html(speaker_str)}</strong></span>"
+        f"<span class='trade-chat-kind'>{_escape_html(kind_label)}</span>"
+        "</div>"
+        f"<div class='trade-chat-body'>{_escape_html(body)}</div>"
+        f"<div class='trade-chat-meta'>{_escape_html(' · '.join(metadata_bits))}</div>"
+        "</div></div>",
         unsafe_allow_html=True,
     )
+
+
+def _trade_bubble_alignment(event: Event, *, speaker_player_id: str) -> str:
+    if event.kind in {"trade_chat_opened", "trade_chat_closed", "trade_chat_no_deal"}:
+        return "center"
+    owner_player_id = _trade_owner_player_id(event)
+    if owner_player_id is not None and speaker_player_id == owner_player_id:
+        return "right"
+    if speaker_player_id == "SYSTEM":
+        return "center"
+    return "left"
+
+
+def _trade_bubble_kind_label(kind: str) -> str:
+    return {
+        "trade_chat_opened": "opened the room",
+        "trade_chat_message": "said",
+        "trade_chat_quote_selected": "picked a proposal",
+        "trade_chat_no_deal": "called no deal",
+        "trade_chat_closed": "closed the room",
+        "trade_offered": "posted a direct offer",
+        "trade_accepted": "accepted",
+        "trade_rejected": "passed",
+        "trade_confirmed": "confirmed the trade",
+        "trade_cancelled": "cancelled the trade",
+    }.get(kind, kind.replace("_", " "))
 
 
 def _render_player_columns(
@@ -894,23 +1133,13 @@ def _render_turn_artifact(
 
 
 def _render_trade_artifact(st, artifact: TradeArtifact) -> None:
-    counterparties = sorted(
-        {
-            counterpart
-            for event in artifact.events
-            for counterpart in _trade_counterparties(event, artifact.owner_player_id)
-        }
+    _render_trade_transcript(
+        st,
+        artifact,
+        traces=[],
+        memories_for_turn={},
+        expanded=False,
     )
-    title = f"{TRADE_EMOJI} Trade"
-    if counterparties:
-        title += " · " + ", ".join(counterparties)
-    with st.expander(title, expanded=False):
-        st.caption(
-            f"history {artifact.start_history_index} to {artifact.end_history_index} · "
-            f"owner {artifact.owner_player_id} · turn {artifact.turn_index}"
-        )
-        for event in artifact.events:
-            _render_event_card(st, event)
 
 
 def _render_event_card(st, event: Event) -> None:
@@ -1105,7 +1334,7 @@ def _event_title(event: Event) -> str:
         "trade_cancelled": "Trade cancelled",
         "trade_chat_opened": "Trade chat opened",
         "trade_chat_message": "Trade chat message",
-        "trade_chat_quote_selected": "Trade quote selected",
+        "trade_chat_quote_selected": "Trade proposal selected",
         "trade_chat_no_deal": "Trade chat ended with no deal",
         "trade_chat_closed": "Trade chat closed",
         "turn_ended": "Turn ended",
@@ -1718,21 +1947,96 @@ def _inject_styles(st) -> None:
           color: #64748b;
           background: #f8fafc;
         }
-        .chat-bubble {
-          border-radius: 0.6rem;
-          border: 1px solid #e5e7eb;
-          padding: 0.55rem 0.8rem;
-          margin-bottom: 0.5rem;
+        .trade-chat-row {
+          display: flex;
+          width: 100%;
+          margin-bottom: 0.55rem;
         }
-        .chat-speaker {
-          font-size: 0.82rem;
-          font-weight: 600;
+        .trade-chat-bubble {
+          width: min(100%, 48rem);
+          max-width: 86%;
+          border-radius: 1rem;
+          border: 1px solid #e5e7eb;
+          padding: 0.65rem 0.85rem;
+          box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+        }
+        .trade-chat-header {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          gap: 0.45rem;
           margin-bottom: 0.2rem;
         }
-        .chat-body {
+        .trade-chat-speaker {
+          font-size: 0.84rem;
+          font-weight: 700;
+        }
+        .trade-chat-kind {
+          font-size: 0.72rem;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: #64748b;
+        }
+        .trade-chat-body {
+          font-size: 0.93rem;
+          line-height: 1.4;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+        .trade-chat-meta {
+          margin-top: 0.35rem;
+          font-size: 0.72rem;
+          color: #94a3b8;
+        }
+        .turn-events-panel {
+          margin-top: 0.75rem;
+          max-height: 36rem;
+          overflow-y: auto;
+          padding-right: 0.2rem;
+        }
+        .turn-events-group {
+          margin-bottom: 0.85rem;
+        }
+        .turn-events-group-current {
+          background: rgba(148, 163, 184, 0.08);
+          border-radius: 0.9rem;
+          padding: 0.5rem 0.55rem 0.35rem;
+        }
+        .turn-events-divider {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+          margin: 0.05rem 0 0.55rem;
+          color: #64748b;
+          font-size: 0.74rem;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+        .turn-events-divider::before,
+        .turn-events-divider::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: rgba(148, 163, 184, 0.65);
+        }
+        .turn-event-row {
+          display: grid;
+          grid-template-columns: max-content 1fr;
+          gap: 0.7rem;
+          align-items: baseline;
+          margin-bottom: 0.35rem;
+          font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
           font-size: 0.9rem;
           line-height: 1.35;
-          white-space: pre-wrap;
+        }
+        .turn-event-player {
+          font-weight: 700;
+          min-width: 4.6rem;
+        }
+        .turn-event-text {
+          color: #0f172a;
           word-break: break-word;
         }
         </style>

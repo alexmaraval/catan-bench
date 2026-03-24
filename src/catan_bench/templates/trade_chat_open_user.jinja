@@ -1,6 +1,8 @@
 Stage: Trade chat open.
-You are the active player and may choose whether to open a public bilateral trade room.
+You are the active player and may choose whether to open a public trade chatroom.
+Any eventual trade must be between you and one other player.
 Keep public messages short and concrete.
+If a domestic deal could beat your bank or port rate, open the room first. Maritime trade should usually be the fallback after the table passes or if your port is already clearly better.
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
@@ -11,6 +13,9 @@ Resources: {{ fmt_resources(payload.private_state.resources) }}
 Dev cards: {{ dc }}
 {% endif %}
 VP: {{ fmt_vp(payload.private_state) }}
+{% if payload.private_state.ports %}
+Ports: {{ payload.private_state.ports | join(", ") }}
+{% endif %}
 {% if payload.memory.short_term %}
 Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endif %}

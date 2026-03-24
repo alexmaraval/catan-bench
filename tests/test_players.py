@@ -12,7 +12,7 @@ from catan_bench.schemas import (
     PlayerMemory,
     ReactiveObservation,
     TradeChatObservation,
-    TradeChatQuote,
+    TradeChatProposal,
     TurnEndObservation,
     TurnStartObservation,
 )
@@ -296,7 +296,8 @@ class LLMPlayerTests(unittest.TestCase):
                     "owner_gets": {"BRICK": 1},
                 },
                 {
-                    "selected_player_id": "BLUE",
+                    "decision": "select",
+                    "selected_proposal_id": "attempt-1-round-1-proposal-1",
                     "message": "Deal.",
                 },
             ),
@@ -312,12 +313,21 @@ class LLMPlayerTests(unittest.TestCase):
             decision_index=8,
             stage="open",
             attempt_index=1,
+            round_index=1,
             public_state={"turn": {"turn_player_id": "RED"}},
             private_state={"resources": {"WOOD": 1}},
             transcript=(),
             requested_resources={"BRICK": 1},
             other_player_ids=("BLUE",),
-            quotes=(TradeChatQuote(player_id="BLUE", owner_gives={"WOOD": 1}, owner_gets={"BRICK": 1}),),
+            proposals=(
+                TradeChatProposal(
+                    proposal_id="attempt-1-round-1-proposal-1",
+                    player_id="BLUE",
+                    round_index=1,
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                ),
+            ),
             game_rules="Rules",
             memory=PlayerMemory(long_term={"goal": "trade"}),
             message_char_limit=120,
@@ -325,13 +335,52 @@ class LLMPlayerTests(unittest.TestCase):
 
         open_response = player.open_trade_chat(observation)
         reply_response = player.respond_trade_chat(observation)
-        select_response = player.select_trade_chat_offer(observation)
+        select_response = player.decide_trade_chat(observation)
 
         self.assertTrue(open_response.open_chat)
         self.assertEqual(open_response.requested_resources, {"BRICK": 1})
         self.assertEqual(reply_response.owner_gives, {"WOOD": 1})
         self.assertEqual(reply_response.owner_gets, {"BRICK": 1})
-        self.assertEqual(select_response.selected_player_id, "BLUE")
+        self.assertEqual(select_response.decision, "select")
+        self.assertEqual(select_response.selected_proposal_id, "attempt-1-round-1-proposal-1")
+
+    def test_trade_chat_reply_falls_back_to_responder_relative_offer_request_when_needed(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "message": "I can offer 1 wheat for 1 brick.",
+                    "offer": {"WHEAT": 1},
+                    "request": {"BRICK": 1},
+                }
+            ),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="BLUE",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="reply",
+            attempt_index=1,
+            round_index=1,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"WHEAT": 1}},
+            transcript=(),
+            requested_resources={"BRICK": 1},
+            other_player_ids=("RED", "ORANGE"),
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        reply_response = player.respond_trade_chat(observation)
+
+        self.assertEqual(reply_response.owner_gives, {"BRICK": 1})
+        self.assertEqual(reply_response.owner_gets, {"WHEAT": 1})
 
     def test_trade_chat_open_prompt_includes_requested_resources_context(self) -> None:
         renderer = CapturingRenderer()
@@ -350,12 +399,13 @@ class LLMPlayerTests(unittest.TestCase):
             decision_index=8,
             stage="open",
             attempt_index=1,
+            round_index=0,
             public_state={"turn": {"turn_player_id": "RED"}},
             private_state={"resources": {"WOOD": 1}},
             transcript=(),
             requested_resources={"BRICK": 1},
             other_player_ids=("BLUE",),
-            quotes=(),
+            proposals=(),
             game_rules="Rules",
             memory=PlayerMemory(long_term={"goal": "trade"}),
             message_char_limit=120,

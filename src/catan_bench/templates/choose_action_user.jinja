@@ -28,6 +28,14 @@ Short-term memory is a within-turn drawing board for local strategy, not a narra
 
 **Decision:** {{ payload.decision_prompt }}
 {% endif %}
+{% if payload.trade_chat_enabled %}
+
+### Public Trade Room
+- If you choose `OFFER_TRADE` here, that opens the public trade room for this turn instead of sending a one-shot direct offer.
+{% if payload.trade_chat_attempts_remaining is not none %}
+- Trade room attempts remaining this turn: {{ payload.trade_chat_attempts_remaining }}.
+{% endif %}
+{% endif %}
 {% if payload.legal_actions %}
 
 ### Legal actions
@@ -40,5 +48,9 @@ Short-term memory is a within-turn drawing board for local strategy, not a narra
 
 **Select action_index from `{{ payload.candidate_source }}` listed in the Board section above.**
 {% endif %}
+
+### Trade heuristic
+- If a player trade is legal and you are missing one or two resources for a useful line, prefer trying the table before `MARITIME_TRADE`.
+- Use maritime trade as the fallback when your port rate is already just as good, or after the relevant domestic market has already failed this turn.
 
 {% include "partials/action_contract.jinja" %}

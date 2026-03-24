@@ -29,7 +29,8 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(game_config.engine, "catanatron")
         self.assertEqual(game_config.seed, 12)
-        self.assertFalse(game_config.trading_chat_enabled)
+        self.assertTrue(game_config.trading_chat_enabled)
+        self.assertEqual(game_config.trading_chat_max_rooms_per_turn, 5)
         self.assertEqual(len(player_configs), 4)
         self.assertEqual(player_configs[0].id, "RED")
 

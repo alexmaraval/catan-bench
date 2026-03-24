@@ -323,6 +323,13 @@ class CatanatronEngineAdapter:
             return canonical_trade_action
 
         if proposed_action.action_type == "OFFER_TRADE" and self._can_offer_trade():
+            offer = proposed_action.payload.get("offer", {})
+            if isinstance(offer, Mapping) and not self._current_player_has_resources(offer):
+                raise ValueError(
+                    "Action "
+                    f"{proposed_action.to_dict()} is not currently valid in catanatron: "
+                    "offering player lacks the offered resources."
+                )
             native_action = self._action_to_native(proposed_action)
             if catanatron_is_valid_action(
                 self.game.playable_actions, self.game.state, native_action
@@ -496,6 +503,20 @@ class CatanatronEngineAdapter:
             resource: int(self.game.state.player_state[f"{key}_{resource}_IN_HAND"])
             for resource in RESOURCE_ORDER
         }
+
+    def _current_player_has_resources(self, resource_map: Mapping[str, JsonValue]) -> bool:
+        color = self.game.state.current_color()
+        key = player_key(self.game.state, color)
+        for resource, amount in resource_map.items():
+            if not isinstance(resource, str) or resource not in RESOURCE_ORDER:
+                if isinstance(amount, int) and amount > 0:
+                    return False
+                continue
+            if not isinstance(amount, int) or amount < 0:
+                return False
+            if int(self.game.state.player_state[f"{key}_{resource}_IN_HAND"]) < amount:
+                return False
+        return True
 
     def _development_card_counts(self, key: str) -> dict[str, int]:
         return {

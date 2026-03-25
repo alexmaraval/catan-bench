@@ -517,6 +517,21 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(len(adapter.game.state.action_records), 1)
         self.assertEqual(adapter.game.state.action_records[0].action_type, ActionType.REJECT_TRADE)
 
+    def test_result_exposes_victory_point_audit_fields(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=7)
+
+        result = adapter.result()
+
+        players = result["players"]
+        self.assertTrue(players)
+        first_player = next(iter(players.values()))
+        self.assertIn("visible_victory_points", first_player)
+        self.assertIn("actual_victory_points", first_player)
+        self.assertIn("dev_victory_points", first_player)
+        self.assertIn("played_knights", first_player)
+        self.assertIn("has_longest_road", first_player)
+        self.assertIn("has_largest_army", first_player)
+
 
 if __name__ == "__main__":
     unittest.main()

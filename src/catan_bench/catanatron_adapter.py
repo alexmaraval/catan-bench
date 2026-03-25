@@ -448,16 +448,8 @@ class CatanatronEngineAdapter:
             "vps_to_win": self.game.vps_to_win,
             "players": {
                 color.value: {
-                    "visible_victory_points": self._public_player_summary(color)[
-                        "visible_victory_points"
-                    ],
+                    **self._public_player_summary(color),
                     "actual_victory_points": self._actual_victory_points(color),
-                    "resource_card_count": self._public_player_summary(color)[
-                        "resource_card_count"
-                    ],
-                    "development_card_count": self._public_player_summary(color)[
-                        "development_card_count"
-                    ],
                 }
                 for color in state.colors
             },

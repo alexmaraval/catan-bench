@@ -476,6 +476,10 @@ class CatanatronEngineAdapter:
             "development_card_count": sum(
                 state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
             ),
+            "dev_victory_points": (
+                state.player_state[f"{key}_VICTORY_POINT_IN_HAND"]
+                + state.player_state[f"{key}_PLAYED_VICTORY_POINT"]
+            ),
             "longest_road_length": state.player_state[f"{key}_LONGEST_ROAD_LENGTH"],
             "played_knights": state.player_state[f"{key}_PLAYED_KNIGHT"],
             "has_longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),

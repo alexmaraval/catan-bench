@@ -43,7 +43,7 @@ class DashboardTests(unittest.TestCase):
                 "RED": {
                     "visible_victory_points": 3,
                     "resource_card_count": 4,
-                    "development_card_count": 1,
+                    "dev_victory_points": 2,
                     "longest_road_length": 5,
                     "played_knights": 3,
                     "has_longest_road": True,
@@ -55,11 +55,16 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(st.markdown_calls), 1)
         html, unsafe = st.markdown_calls[0]
         self.assertTrue(unsafe)
+        self.assertIn("<th>Dev VP</th>", html)
         self.assertIn("<th>Army</th>", html)
+        self.assertIn("<td style='text-align:center'>2</td>", html)
         self.assertIn("<td style='text-align:center'>3🏆</td>", html)
         self.assertEqual(
             st.caption_calls,
-            ["VP includes public bonuses such as Longest Road and Largest Army."],
+            [
+                "VP includes public bonuses such as Longest Road and Largest Army.",
+                "Dev VP counts victory-point development cards, including hidden ones.",
+            ],
         )
 
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:

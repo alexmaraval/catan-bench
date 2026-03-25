@@ -462,7 +462,9 @@ def _render_player_summary_table(st, players: dict) -> None:
         accent, _, _ = _palette_for_player(player_id)
         vp = summary.get("visible_victory_points") or summary.get("vp", 0)
         res = summary.get("resource_card_count") or summary.get("res_cards", 0)
-        dev = summary.get("development_card_count") or summary.get("dev_cards", 0)
+        dev_vp = summary.get("dev_victory_points", 0)
+        if not isinstance(dev_vp, int):
+            dev_vp = 0
         roads = summary.get("longest_road_length", "-")
         army_count = summary.get("played_knights", 0)
         if not isinstance(army_count, int):
@@ -478,7 +480,7 @@ def _render_player_summary_table(st, players: dict) -> None:
             f"<td><span style='color:{accent};font-weight:600'>{player_id}</span></td>"
             f"<td style='text-align:center'>{vp}</td>"
             f"<td style='text-align:center'>{res}</td>"
-            f"<td style='text-align:center'>{dev}</td>"
+            f"<td style='text-align:center'>{dev_vp}</td>"
             f"<td style='text-align:center'>{roads}</td>"
             f"<td style='text-align:center'>{army}</td>"
             f"<td>{' '.join(flags)}</td>"
@@ -489,13 +491,14 @@ def _render_player_summary_table(st, players: dict) -> None:
             "<table style='width:100%;border-collapse:collapse;font-size:0.82rem'>"
             "<thead><tr style='border-bottom:1px solid #e5e7eb'>"
             "<th style='text-align:left'>Player</th>"
-            "<th>VP</th><th>Res</th><th>Dev</th><th>Road</th><th>Army</th><th></th>"
+            "<th>VP</th><th>Res</th><th>Dev VP</th><th>Road</th><th>Army</th><th></th>"
             "</tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table>"
         )
         st.markdown(table_html, unsafe_allow_html=True)
         st.caption("VP includes public bonuses such as Longest Road and Largest Army.")
+        st.caption("Dev VP counts victory-point development cards, including hidden ones.")
 
 
 def _render_turn_event_digest(

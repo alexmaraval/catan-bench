@@ -2,8 +2,8 @@
 id = "RED"
 type = "llm"
 api_key_env = "OPENAI_API_KEY"
-#model = "gpt-4o-mini"
-model = "gpt-4.1-nano"
+model = "gpt-4o-mini"
+#model = "gpt-4.1-nano"
 timeout_seconds = 300
 temperature = 0.6
 top_p = 0.95
@@ -11,8 +11,8 @@ top_p = 0.95
 [[players]]
 id = "BLUE"
 type = "llm"
-#model = "gpt-4o-mini"
-model = "gpt-4.1-nano"
+model = "gpt-4o-mini"
+#model = "gpt-4.1-nano"
 api_key_env = "OPENAI_API_KEY"
 timeout_seconds = 300
 temperature = 0.6

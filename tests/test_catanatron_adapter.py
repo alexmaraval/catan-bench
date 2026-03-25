@@ -625,6 +625,64 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(state.player_state["P0_LONGEST_ROAD_LENGTH"], 5)
         self.assertEqual(state.player_state["P1_LONGEST_ROAD_LENGTH"], 5)
 
+    def test_recompute_largest_army_uses_played_knights_and_awards_vp(self) -> None:
+        from catan_bench.catanatron_adapter import Color
+
+        blue = Color.BLUE
+        orange = Color.ORANGE
+        state = SimpleNamespace(
+            colors=(blue, orange),
+            color_to_index={blue: 0, orange: 1},
+            player_state={
+                "P0_HAS_ARMY": False,
+                "P0_PLAYED_KNIGHT": 2,
+                "P0_VICTORY_POINTS": 2,
+                "P0_ACTUAL_VICTORY_POINTS": 2,
+                "P1_HAS_ARMY": False,
+                "P1_PLAYED_KNIGHT": 3,
+                "P1_VICTORY_POINTS": 3,
+                "P1_ACTUAL_VICTORY_POINTS": 3,
+            },
+        )
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter.game = SimpleNamespace(state=state)
+
+        adapter._recompute_largest_army_state()
+
+        self.assertFalse(state.player_state["P0_HAS_ARMY"])
+        self.assertTrue(state.player_state["P1_HAS_ARMY"])
+        self.assertEqual(state.player_state["P1_VICTORY_POINTS"], 5)
+        self.assertEqual(state.player_state["P1_ACTUAL_VICTORY_POINTS"], 5)
+
+    def test_recompute_largest_army_keeps_current_holder_on_tie(self) -> None:
+        from catan_bench.catanatron_adapter import Color
+
+        blue = Color.BLUE
+        orange = Color.ORANGE
+        state = SimpleNamespace(
+            colors=(blue, orange),
+            color_to_index={blue: 0, orange: 1},
+            player_state={
+                "P0_HAS_ARMY": True,
+                "P0_PLAYED_KNIGHT": 3,
+                "P0_VICTORY_POINTS": 5,
+                "P0_ACTUAL_VICTORY_POINTS": 5,
+                "P1_HAS_ARMY": False,
+                "P1_PLAYED_KNIGHT": 3,
+                "P1_VICTORY_POINTS": 3,
+                "P1_ACTUAL_VICTORY_POINTS": 3,
+            },
+        )
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter.game = SimpleNamespace(state=state)
+
+        adapter._recompute_largest_army_state()
+
+        self.assertTrue(state.player_state["P0_HAS_ARMY"])
+        self.assertFalse(state.player_state["P1_HAS_ARMY"])
+        self.assertEqual(state.player_state["P0_VICTORY_POINTS"], 5)
+        self.assertEqual(state.player_state["P1_VICTORY_POINTS"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

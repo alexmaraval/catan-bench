@@ -1,0 +1,48 @@
+# OpenRouter (OpenAI-compatible API)
+# Official OpenAI-compatible base URL:
+# https://openrouter.ai/api/v1
+
+[[players]]
+id = "RED"
+type = "llm"
+#model = "nvidia/nemotron-3-super-120b-a12b:free"
+#model = "nvidia/nemotron-`3-super-120b-a12b"
+model = "mistralai/mistral-small-2603"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+
+[[players]]
+id = "BLUE"
+type = "llm"
+#model = "qwen/qwen3-next-80b-a3b-instruct:free"
+model = "qwen/qwen3-235b-a22b-2507"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+#model = "z-ai/glm-4.5-air:free"
+#model = "nousresearch/hermes-3-llama-3.1-405b:free"
+model = "nousresearch/hermes-4-70b"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "arcee-ai/trinity-large-preview:free"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0

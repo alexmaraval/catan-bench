@@ -419,6 +419,7 @@ class CatanatronEngineAdapter:
         native_action = self._action_to_native(action)
         action_record = self.game.execute(native_action, validate_action=True)
         self._recompute_longest_road_state()
+        self._recompute_largest_army_state()
 
         state_after = self.game.state
 
@@ -467,6 +468,10 @@ class CatanatronEngineAdapter:
                 state.player_state[f"{key}_{resource}_IN_HAND"]
                 for resource in RESOURCE_ORDER
             ),
+            "resource_hand": {
+                resource: int(state.player_state[f"{key}_{resource}_IN_HAND"])
+                for resource in RESOURCE_ORDER
+            },
             "development_card_count": sum(
                 state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
             ),
@@ -592,6 +597,47 @@ class CatanatronEngineAdapter:
     def _is_enemy_building_node(self, *, node: int, color: Color) -> bool:
         building = self.game.state.board.buildings.get(node)
         return building is not None and building[0] != color
+
+    def _recompute_largest_army_state(self) -> None:
+        state = self.game.state
+        previous_holder = next(
+            (
+                color
+                for color in state.colors
+                if state.player_state.get(f"{player_key(state, color)}_HAS_ARMY")
+            ),
+            None,
+        )
+        counts = {
+            color: int(state.player_state[f"{player_key(state, color)}_PLAYED_KNIGHT"])
+            for color in state.colors
+        }
+        candidates = [color for color, count in counts.items() if count >= 3]
+        if candidates:
+            max_count = max(counts[color] for color in candidates)
+            leaders = [color for color in candidates if counts[color] == max_count]
+        else:
+            leaders = []
+
+        if len(leaders) == 1:
+            winner = leaders[0]
+        elif previous_holder in leaders:
+            winner = previous_holder
+        else:
+            winner = None
+
+        for color in state.colors:
+            key = player_key(state, color)
+            if state.player_state[f"{key}_HAS_ARMY"]:
+                state.player_state[f"{key}_HAS_ARMY"] = False
+                state.player_state[f"{key}_VICTORY_POINTS"] -= 2
+                state.player_state[f"{key}_ACTUAL_VICTORY_POINTS"] -= 2
+
+        if winner is not None:
+            winner_key = player_key(state, winner)
+            state.player_state[f"{winner_key}_HAS_ARMY"] = True
+            state.player_state[f"{winner_key}_VICTORY_POINTS"] += 2
+            state.player_state[f"{winner_key}_ACTUAL_VICTORY_POINTS"] += 2
 
     def _public_player_prompt_summary(self, color: Color) -> dict[str, JsonValue]:
         key = player_key(self.game.state, color)

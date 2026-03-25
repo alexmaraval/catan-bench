@@ -438,7 +438,7 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
     with top_col:
         st.markdown("**Board visualization**")
         st.markdown(
-            build_board_svg(board, height=520),
+            build_board_svg(board, height=520, players=players),
             unsafe_allow_html=True,
         )
         with st.expander("State details", expanded=False):
@@ -1535,7 +1535,177 @@ def _card_html(
     )
 
 
-def build_board_svg(board: Mapping[str, JsonValue], *, height: int = 520) -> str:
+def _player_panel_svg(
+    player_id: str,
+    summary: dict,
+    roads_built: int,
+    settlements_built: int,
+    cities_built: int,
+    px: float,
+    py: float,
+) -> str:
+    """Render a player hand/piece panel as an SVG <g> element at (px, py)."""
+    # Resource colors matching the tile palette
+    _RES_COLORS: dict[str, tuple[str, str]] = {
+        "WOOD":  ("#7fb069", "#4a7a40"),
+        "BRICK": ("#d97757", "#a0472e"),
+        "SHEEP": ("#a7d676", "#6a9e40"),
+        "WHEAT": ("#f1d36b", "#c4a020"),
+        "ORE":   ("#9ca3af", "#5a6270"),
+    }
+    _RES_ORDER = ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
+
+    W, H = 140, 96
+    accent, _, _ = _palette_for_player(player_id)
+    resource_hand: dict[str, int] = summary.get("resource_hand") or {}  # type: ignore[assignment]
+    res        = int(summary.get("resource_card_count") or sum(resource_hand.values()))
+    dev        = int(summary.get("development_card_count") or 0)
+    vp         = int(summary.get("visible_victory_points") or 0)
+    roads_left = max(0, 15 - roads_built)
+    sets_left  = max(0, 5  - settlements_built)
+    cits_left  = max(0, 4  - cities_built)
+    has_road   = bool(summary.get("has_longest_road"))
+    has_army   = bool(summary.get("has_largest_army"))
+
+    # Grid constants — label sits on the LEFT, cards start after it
+    CW, CH, CG  = 8, 11, 2        # card width / height / gap
+    LBL_W       = 28               # pixels reserved for "RES" / "DEV" text
+    CARD_X0     = px + 8 + LBL_W  # first card x
+    MAX_CARDS   = int((W - 8 - LBL_W - 8) // (CW + CG))  # ≈ 9
+
+    # Row y: top of card rects (label baseline = card bottom)
+    RES_TOP = py + 24
+    DEV_TOP = py + 42
+
+    def _resource_cards(card_top: float) -> str:
+        """Draw one colored rect per resource card, grouped by type."""
+        frags: list[str] = []
+        idx = 0
+        for res_name in _RES_ORDER:
+            count = resource_hand.get(res_name, 0)
+            fill, stroke = _RES_COLORS[res_name]
+            for _ in range(count):
+                if idx >= MAX_CARDS:
+                    break
+                x = CARD_X0 + idx * (CW + CG)
+                frags.append(
+                    f"<rect x='{x:.1f}' y='{card_top:.1f}' "
+                    f"width='{CW}' height='{CH}' rx='1.5' "
+                    f"fill='{fill}' stroke='{stroke}' stroke-width='0.7'/>"
+                )
+                idx += 1
+            if idx >= MAX_CARDS:
+                break
+        overflow = res - idx
+        if overflow > 0:
+            ox = CARD_X0 + MAX_CARDS * (CW + CG) + 2
+            frags.append(
+                f"<text x='{ox:.1f}' y='{card_top + CH:.1f}' font-size='8' "
+                f"fill='#e5e7eb' font-family='monospace'>+{overflow}</text>"
+            )
+        if res == 0:
+            frags.append(
+                f"<text x='{CARD_X0:.1f}' y='{card_top + CH:.1f}' font-size='8' "
+                f"fill='#475569' font-family='monospace'>—</text>"
+            )
+        return "".join(frags)
+
+    def _dev_cards(n: int, card_top: float) -> str:
+        shown = min(n, MAX_CARDS)
+        frags = []
+        for i in range(shown):
+            frags.append(
+                f"<rect x='{CARD_X0 + i * (CW + CG):.1f}' y='{card_top:.1f}' "
+                f"width='{CW}' height='{CH}' rx='1.5' "
+                f"fill='#1e3a5f' stroke='#60a5fa' stroke-width='0.7'/>"
+            )
+        if n > MAX_CARDS:
+            ox = CARD_X0 + MAX_CARDS * (CW + CG) + 2
+            frags.append(
+                f"<text x='{ox:.1f}' y='{card_top + CH:.1f}' font-size='8' "
+                f"fill='#60a5fa' font-family='monospace'>+{n - MAX_CARDS}</text>"
+            )
+        if n == 0:
+            frags.append(
+                f"<text x='{CARD_X0:.1f}' y='{card_top + CH:.1f}' font-size='8' "
+                f"fill='#475569' font-family='monospace'>—</text>"
+            )
+        return "".join(frags)
+
+    # Badges inline after VP (no separate rects that collide)
+    badge_suffix = (" ★R" if has_road else "") + (" ⚔A" if has_army else "")
+
+    # ── Piece row ────────────────────────────────────────────────────────────
+    PIECE_Y = py + H - 12
+    road_icon = (
+        f"<rect x='{px + 8:.1f}' y='{PIECE_Y - 4:.1f}' width='13' height='4.5' "
+        f"rx='2' fill='{accent}'/>"
+    )
+    stx = px + 53
+    set_icon = (
+        f"<polygon points='{stx:.1f},{PIECE_Y:.1f} {stx - 6:.1f},{PIECE_Y:.1f} "
+        f"{stx - 3:.1f},{PIECE_Y - 9:.1f}' fill='{accent}'/>"
+    )
+    ctx = px + 98
+    cit_icon = (
+        f"<polygon points='"
+        f"{ctx - 6:.1f},{PIECE_Y:.1f} "
+        f"{ctx - 6:.1f},{PIECE_Y - 5:.1f} "
+        f"{ctx:.1f},{PIECE_Y - 10:.1f} "
+        f"{ctx + 6:.1f},{PIECE_Y - 5:.1f} "
+        f"{ctx + 6:.1f},{PIECE_Y:.1f}' fill='{accent}'/>"
+    )
+
+    return (
+        f"<rect x='{px:.1f}' y='{py:.1f}' width='{W}' height='{H}' rx='6' "
+        f"fill='rgba(5,10,20,0.90)' stroke='{accent}' stroke-width='1.8'/>"
+        # Row 1: name + VP
+        + f"<text x='{px + 8:.1f}' y='{py + 15:.1f}' font-size='12' font-weight='bold' "
+        f"fill='{accent}' font-family='monospace'>{player_id}</text>"
+        + f"<text x='{px + W - 8:.1f}' y='{py + 15:.1f}' font-size='11' fill='{accent}' "
+        f"font-family='monospace' text-anchor='end'>{vp} VP{badge_suffix}</text>"
+        # Divider 1
+        + f"<line x1='{px + 5:.1f}' y1='{py + 20:.1f}' x2='{px + W - 5:.1f}' y2='{py + 20:.1f}' "
+        f"stroke='{accent}' stroke-opacity='0.35' stroke-width='0.7'/>"
+        # Row 2: RES label (left) + per-resource colored cards (right)
+        + f"<text x='{px + 8:.1f}' y='{RES_TOP + CH:.1f}' font-size='8' "
+        f"fill='#64748b' font-family='monospace'>RES</text>"
+        + _resource_cards(RES_TOP)
+        # Row 3: DEV label (left) + dev cards (right)
+        + f"<text x='{px + 8:.1f}' y='{DEV_TOP + CH:.1f}' font-size='8' "
+        f"fill='#64748b' font-family='monospace'>DEV</text>"
+        + _dev_cards(dev, DEV_TOP)
+        # Divider 2
+        + f"<line x1='{px + 5:.1f}' y1='{py + H - 20:.1f}' x2='{px + W - 5:.1f}' y2='{py + H - 20:.1f}' "
+        f"stroke='{accent}' stroke-opacity='0.25' stroke-width='0.7'/>"
+        # Row 4: remaining pieces
+        + road_icon
+        + f"<text x='{px + 23:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
+        f"fill='#94a3b8' font-family='monospace'>{roads_left}</text>"
+        + set_icon
+        + f"<text x='{stx + 4:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
+        f"fill='#94a3b8' font-family='monospace'>{sets_left}</text>"
+        + cit_icon
+        + f"<text x='{ctx + 8:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
+        f"fill='#94a3b8' font-family='monospace'>{cits_left}</text>"
+    )
+
+
+# seat_index → (corner_h, corner_v): "left"/"right", "top"/"bottom"
+_SEAT_CORNER: dict[int, tuple[str, str]] = {
+    0: ("left",  "top"),
+    1: ("right", "top"),
+    2: ("right", "bottom"),
+    3: ("left",  "bottom"),
+}
+
+
+def build_board_svg(
+    board: Mapping[str, JsonValue],
+    *,
+    height: int = 520,
+    players: dict | None = None,
+) -> str:
     tiles = board.get("tiles")
     nodes = board.get("nodes")
     edges = board.get("edges")
@@ -1590,6 +1760,45 @@ def build_board_svg(board: Mapping[str, JsonValue], *, height: int = 520) -> str
     ]
 
     bg_rect = f"<rect x='{min_x:.1f}' y='{min_y:.1f}' width='{width:.1f}' height='{(max_y - min_y):.1f}' fill='#000000'/>"
+
+    # ── Corner player panels ────────────────────────────────────────────────
+    panel_fragments: list[str] = []
+    if players:
+        # Count built pieces per player from board data
+        roads_by_player: dict[str, int] = {}
+        sets_by_player:  dict[str, int] = {}
+        cits_by_player:  dict[str, int] = {}
+        for edge in (edges or []):
+            if isinstance(edge, dict):
+                ec = edge.get("color")
+                if isinstance(ec, str):
+                    roads_by_player[ec] = roads_by_player.get(ec, 0) + 1
+        for node in (nodes.values() if isinstance(nodes, dict) else []):
+            if isinstance(node, dict):
+                nc   = node.get("color")
+                bldg = node.get("building")
+                if isinstance(nc, str) and isinstance(bldg, str):
+                    if bldg == "SETTLEMENT":
+                        sets_by_player[nc] = sets_by_player.get(nc, 0) + 1
+                    elif bldg == "CITY":
+                        cits_by_player[nc] = cits_by_player.get(nc, 0) + 1
+
+        PW, PH, MARGIN = 140, 96, 6
+        for pid, summary in players.items():
+            if not isinstance(summary, dict):
+                continue
+            seat = int(summary.get("seat_index", 0)) % 4
+            h_side, v_side = _SEAT_CORNER.get(seat, ("left", "top"))
+            px = (min_x + MARGIN) if h_side == "left" else (max_x - MARGIN - PW)
+            py = (min_y + MARGIN) if v_side == "top"  else (max_y - MARGIN - PH)
+            panel_fragments.append(_player_panel_svg(
+                pid, summary,
+                roads_by_player.get(pid, 0),
+                sets_by_player.get(pid, 0),
+                cits_by_player.get(pid, 0),
+                px, py,
+            ))
+
     return (
         "<div class='board-shell'>"
         f"<svg class='board-svg' viewBox='{view_box}' style='height:{height}px'>"
@@ -1597,6 +1806,7 @@ def build_board_svg(board: Mapping[str, JsonValue], *, height: int = 520) -> str
         + "".join(tile_fragments)
         + "".join(edge_fragments)
         + "".join(node_fragments)
+        + "".join(panel_fragments)
         + "</svg></div>"
     )
 

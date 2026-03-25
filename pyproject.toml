@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "jinja2>=3.1.6",
+    "plotly>=6.6.0",
     "python-dotenv>=1.0.1",
     "streamlit>=1.55.0",
 ]

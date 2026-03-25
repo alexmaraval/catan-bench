@@ -497,6 +497,7 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
     rooms_selected = 0
     total_rounds_as_owner = 0
     counterparty_freq: dict[str, int] = {}
+    counterparty_resource_flow: dict[str, dict[str, int]] = {}  # {partner: {resource: units exchanged}}
     resources_gained: dict[str, int] = {}
     resources_given: dict[str, int] = {}
     rooms_opened_by_turn: dict[int, int] = {}
@@ -528,6 +529,12 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     _add_resources(resources_given, offer)
                 if isinstance(request, dict):
                     _add_resources(resources_gained, request)
+                if isinstance(counterparty, str):
+                    flow = counterparty_resource_flow.setdefault(counterparty, {})
+                    for res, cnt in (offer if isinstance(offer, dict) else {}).items():
+                        flow[res] = flow.get(res, 0) + cnt
+                    for res, cnt in (request if isinstance(request, dict) else {}).items():
+                        flow[res] = flow.get(res, 0) + cnt
 
         if participated and not is_owner:
             rooms_participated_in += 1
@@ -559,6 +566,11 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     if isinstance(request, dict):
                         _add_resources(resources_given, request)
                     counterparty_freq[owner] = counterparty_freq.get(owner, 0) + 1
+                    flow = counterparty_resource_flow.setdefault(owner, {})
+                    for res, cnt in (offer if isinstance(offer, dict) else {}).items():
+                        flow[res] = flow.get(res, 0) + cnt
+                    for res, cnt in (request if isinstance(request, dict) else {}).items():
+                        flow[res] = flow.get(res, 0) + cnt
 
     return {
         "rooms_opened": rooms_opened,
@@ -580,6 +592,7 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
             if rooms_opened else 0.0
         ),
         "counterparty_frequency": counterparty_freq,
+        "counterparty_resource_flow": counterparty_resource_flow,
         "resources_gained_via_chat": resources_gained,
         "resources_given_via_chat": resources_given,
         "rooms_opened_by_turn": rooms_opened_by_turn,

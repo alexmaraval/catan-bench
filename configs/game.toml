@@ -2,7 +2,7 @@
 engine = "catanatron"
 seed = 24
 discard_limit = 7
-vps_to_win = 5
+vps_to_win = 10
 history_window = 100
 trading_chat_enabled = true
 trading_chat_max_failed_attempts_per_turn = 5

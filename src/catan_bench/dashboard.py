@@ -10,6 +10,7 @@ from pathlib import Path
 
 import altair as alt
 import pandas as pd
+import plotly.graph_objects as go
 
 from .schemas import Event, JsonValue, MemorySnapshot, PromptTrace, PublicStateSnapshot
 
@@ -2030,20 +2031,48 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             )
             .properties(height=250)
         )
-        st.altair_chart(vp_chart, use_container_width=True)
+        st.altair_chart(vp_chart, width="stretch")
 
     # ── Resource Production ──
     st.subheader("Estimated Resource Production")
+    _RES_ORDER = ["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"]
+    _RES_COLOR = {"WOOD": "#16a34a", "BRICK": "#c2410c", "SHEEP": "#86efac", "WHEAT": "#fbbf24", "ORE": "#94a3b8"}
     res_rows = []
     for pid, pdata in players.items():
         production = pdata.get("resource_production", {}).get("total", {})
-        row: dict[str, Any] = {"Player": pid}
-        for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"):
-            row[r] = production.get(r, 0)
-        row["Total"] = sum(row[r] for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"))
-        res_rows.append(row)
+        for r in _RES_ORDER:
+            res_rows.append({"Player": pid, "Resource": r, "Count": production.get(r, 0)})
     if res_rows:
-        st.bar_chart(res_rows, x="Player", y=["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"])
+        df_res = pd.DataFrame(res_rows)
+        pids = list(players.keys())
+        res_color_list = [_RES_COLOR[r] for r in _RES_ORDER]
+        _emoji_expr = "{'WOOD':'🪵','BRICK':'🧱','SHEEP':'🐑','WHEAT':'🌾','ORE':'🪨'}[datum.value]"
+        player_charts = []
+        for pid in pids:
+            accent, _, _ = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            c = (
+                alt.Chart(df_res[df_res["Player"] == pid])
+                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=32)
+                .encode(
+                    x=alt.X("Resource:N", sort=_RES_ORDER, axis=alt.Axis(
+                        title=None, labelExpr=_emoji_expr,
+                        labelFontSize=18, ticks=False, domain=False, labelAngle=0,
+                    )),
+                    y=alt.Y("Count:Q", axis=alt.Axis(title=None, labelFontSize=9, tickCount=4)),
+                    color=alt.Color("Resource:N",
+                        scale=alt.Scale(domain=_RES_ORDER, range=res_color_list), legend=None),
+                    tooltip=["Resource:N", "Count:Q"],
+                )
+                .properties(
+                    title=alt.TitleParams(pid, color=accent, fontSize=13, fontWeight="bold", anchor="middle"),
+                    height=160, width=180,
+                )
+            )
+            player_charts.append(c)
+        st.altair_chart(
+            alt.hconcat(*player_charts, spacing=40).configure_view(strokeWidth=0),
+            width="stretch",
+        )
 
     # ── Trade Activity ──
     st.subheader("Trade Activity")
@@ -2116,18 +2145,83 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── Building Timeline ──
     st.subheader("Building Timeline")
-    building_rows = []
+    _build_events: list[dict] = []
     for pid, pdata in players.items():
         buildings = pdata.get("buildings", {})
         for s in buildings.get("settlements", []):
-            building_rows.append({"Player": pid, "Turn": s.get("turn_index"), "Type": "Settlement", "Location": str(s.get("node_id"))})
+            if s.get("turn_index") is not None:
+                _build_events.append({"player": pid, "turn": s["turn_index"], "type": "Settlement"})
         for c in buildings.get("cities", []):
-            building_rows.append({"Player": pid, "Turn": c.get("turn_index"), "Type": "City", "Location": str(c.get("node_id"))})
+            if c.get("turn_index") is not None:
+                _build_events.append({"player": pid, "turn": c["turn_index"], "type": "City"})
         for r in buildings.get("roads", []):
-            building_rows.append({"Player": pid, "Turn": r.get("turn_index"), "Type": "Road", "Location": str(r.get("edge"))})
-    if building_rows:
-        building_rows.sort(key=lambda r: (r["Turn"], r["Player"]))
-        st.dataframe(building_rows, width="stretch")
+            if r.get("turn_index") is not None:
+                _build_events.append({"player": pid, "turn": r["turn_index"], "type": "Road"})
+
+    if _build_events:
+        _max_turn = max(e["turn"] for e in _build_events)
+        _turns = list(range(0, _max_turn + 2))
+        _dash = {"Road": "longdash", "Settlement": "solid", "City": "solid"}
+        _width = {"Road": 1.5, "Settlement": 2, "City": 4}
+        _btimeline_fig = go.Figure()
+
+        _marker_symbol = {"Settlement": "circle", "City": "circle"}  # cities use text overlay instead
+        _marker_size   = {"Settlement": 10, "City": 13}
+
+        for pid in sorted(players.keys()):
+            _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
+            for btype in ("Road", "Settlement", "City"):
+                _event_turns = sorted(
+                    e["turn"] for e in _build_events if e["player"] == pid and e["type"] == btype
+                )
+                if not _event_turns:
+                    continue
+                _cum, _count = [], 0
+                for t in _turns:
+                    _count += _event_turns.count(t)
+                    _cum.append(_count)
+                _btimeline_fig.add_trace(go.Scatter(
+                    x=_turns,
+                    y=_cum,
+                    mode="lines",
+                    name=f"{pid} – {btype}",
+                    line=dict(color=_pcolor, dash=_dash[btype], width=_width[btype]),
+                    hovertemplate=f"<b>{pid}</b> {btype}<br>Turn %{{x}}: %{{y}}<extra></extra>",
+                ))
+                # Markers at each build event: circle for settlements, ⌂ house for cities
+                if btype == "Settlement":
+                    _mx = list(_event_turns)
+                    _my = [_cum[_turns.index(t)] for t in _mx]
+                    _btimeline_fig.add_trace(go.Scatter(
+                        x=_mx, y=_my,
+                        mode="markers",
+                        marker=dict(symbol="circle", size=10, color=_pcolor, line=dict(width=1.5, color="#0f172a")),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+                elif btype == "City":
+                    _mx = list(_event_turns)
+                    _my = [_cum[_turns.index(t)] for t in _mx]
+                    _btimeline_fig.add_trace(go.Scatter(
+                        x=_mx, y=_my,
+                        mode="text",
+                        text=["⌂"] * len(_mx),
+                        textfont=dict(size=18, color=_pcolor),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+
+        _btimeline_fig.update_layout(
+            height=320,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(title="Turn", gridcolor="#1e293b", color="#94a3b8"),
+            yaxis=dict(title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=11)),
+            margin=dict(l=40, r=10, t=10, b=40),
+            hovermode="x unified",
+        )
+        st.plotly_chart(_btimeline_fig, width="stretch")
 
     # ── Per-Player Summary Cards ──
     st.subheader("Player Summary")
@@ -2184,16 +2278,136 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             })
         st.dataframe(chat_rows, width="stretch")
 
-        # Counterparty heatmap as a table
-        cp_rows = []
+        # Per-resource trade network diagrams (undirected, curved edges)
+        # Build {resource: {(a, b): units_exchanged}} from counterparty_resource_flow
+        _RESOURCE_EMOJIS = {
+            "WOOD": "🪵", "BRICK": "🧱", "SHEEP": "🐑", "WHEAT": "🌾", "ORE": "🪨",
+        }
+        resource_edge_counts: dict[str, dict[tuple[str, str], int]] = {}
+        all_trade_nodes: set[str] = set()
         for pid, pdata in players.items():
-            cp = pdata.get("trade_chat", {}).get("counterparty_frequency", {})
-            if cp:
-                for partner, count in sorted(cp.items(), key=lambda x: -x[1]):
-                    cp_rows.append({"Player": pid, "Trade Partner": partner, "Completed Trades": count})
-        if cp_rows:
-            st.caption("Trade partnerships (completed chat trades)")
-            st.dataframe(cp_rows, width="stretch")
+            flow = pdata.get("trade_chat", {}).get("counterparty_resource_flow", {})
+            for partner, res_counts in flow.items():
+                all_trade_nodes.update([pid, partner])
+                for res, cnt in res_counts.items():
+                    if cnt > 0:
+                        key: tuple[str, str] = tuple(sorted([pid, partner]))  # type: ignore[assignment]
+                        res_edges = resource_edge_counts.setdefault(res, {})
+                        res_edges[key] = max(res_edges.get(key, 0), cnt)
+
+        active_resources = [r for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE") if r in resource_edge_counts]
+
+        if active_resources and all_trade_nodes:
+            st.caption("Trade partnerships by resource (completed chat trades)")
+
+            # Shared node layout — same positions across all diagrams
+            all_nodes = sorted(all_trade_nodes)
+            n_nodes = len(all_nodes)
+            angle_step = 2 * math.pi / n_nodes if n_nodes > 1 else 0
+            pos = {
+                p: (math.cos(i * angle_step - math.pi / 2), math.sin(i * angle_step - math.pi / 2))
+                for i, p in enumerate(all_nodes)
+            }
+
+            def _make_edge(x0: float, y0: float, x1: float, y1: float, n_pts: int = 60) -> tuple[list[float], list[float], float]:
+                """Return (xs, ys, label_frac).
+                Edges whose midpoint is far from the origin curve outward (convex).
+                Edges that cross through the centre are kept straight with label at 1/3.
+                """
+                mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+                dist = math.hypot(mx, my)
+                if dist < 0.25:
+                    # Crossing edge — straight line, label at first third
+                    xs = [x0 + (x1 - x0) * i / n_pts for i in range(n_pts + 1)]
+                    ys = [y0 + (y1 - y0) * i / n_pts for i in range(n_pts + 1)]
+                    return xs, ys, 0.33
+                # Peripheral edge — push control point away from origin (convex)
+                offset = 0.35
+                cx = mx + offset * mx / dist
+                cy = my + offset * my / dist
+                xs, ys = [], []
+                for i in range(n_pts + 1):
+                    t = i / n_pts
+                    xs.append((1 - t) ** 2 * x0 + 2 * (1 - t) * t * cx + t ** 2 * x1)
+                    ys.append((1 - t) ** 2 * y0 + 2 * (1 - t) * t * cy + t ** 2 * y1)
+                return xs, ys, 0.5
+
+            # Global max for consistent edge thickness across diagrams
+            global_max = max(
+                cnt
+                for edges in resource_edge_counts.values()
+                for cnt in edges.values()
+            )
+
+            # Two rows of 3 columns each — always 3 cols so all charts are the same width
+            _ROW_SIZE = 3
+            for row_resources in [active_resources[:_ROW_SIZE], active_resources[_ROW_SIZE:]]:
+                if not row_resources:
+                    continue
+                cols = st.columns(_ROW_SIZE)
+                for col, resource in zip(cols, row_resources):
+                    edge_counts = resource_edge_counts[resource]
+                    fig = go.Figure()
+
+                    for (a, b), count in edge_counts.items():
+                        x0, y0 = pos[a]
+                        x1, y1 = pos[b]
+                        lw = 1.5 + 5 * (count / global_max)
+                        curve_xs, curve_ys, label_frac = _make_edge(x0, y0, x1, y1)
+
+                        fig.add_trace(go.Scatter(
+                            x=curve_xs + [None],
+                            y=curve_ys + [None],
+                            mode="lines",
+                            line=dict(width=lw, color="rgba(180,180,180,0.45)"),
+                            hoverinfo="none",
+                            showlegend=False,
+                        ))
+
+                        lbl_idx = int(label_frac * len(curve_xs))
+                        fig.add_annotation(
+                            x=curve_xs[lbl_idx], y=curve_ys[lbl_idx],
+                            text=str(count),
+                            showarrow=False,
+                            font=dict(color="#e5e7eb", size=10),
+                            bgcolor="rgba(0,0,0,0.5)",
+                            borderpad=2,
+                        )
+
+                    for pid in all_nodes:
+                        x, y = pos[pid]
+                        node_color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
+                        has_edge = any(pid in edge for edge in edge_counts)
+                        opacity = 1.0 if has_edge else 0.25
+                        fig.add_trace(go.Scatter(
+                            x=[x], y=[y],
+                            mode="markers",
+                            marker=dict(
+                                size=32,
+                                color=node_color,
+                                opacity=opacity,
+                                line=dict(width=2, color="#1f2937"),
+                            ),
+                            hovertext=pid,
+                            hoverinfo="text",
+                            showlegend=False,
+                        ))
+
+                    emoji = _RESOURCE_EMOJIS.get(resource, "")
+                    fig.update_layout(
+                        title=dict(
+                            text=f"{emoji} {resource}",
+                            font=dict(size=12, color="#94a3b8"),
+                            x=0.5, xanchor="center",
+                        ),
+                        height=320,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.8, 1.8]),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.8, 1.8], scaleanchor="x", scaleratio=1),
+                        margin=dict(l=8, r=8, t=32, b=8),
+                    )
+                    col.plotly_chart(fig, width="stretch")
 
     # ── Strategy Evolution ──
     any_strategy = any(

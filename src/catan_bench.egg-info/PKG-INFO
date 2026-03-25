@@ -29,6 +29,7 @@ Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: jinja2>=3.1.6
+Requires-Dist: plotly>=6.6.0
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: streamlit>=1.55.0
 Dynamic: license-file
@@ -73,7 +74,7 @@ The runtime is organized around a small set of boundaries:
   - `choose_action(observation) -> {action, short_term}`
   - `end_turn(observation) -> long_term`
   - `respond_reactive(observation) -> action`
-  - optional trade-chat helpers for open / reply / select.
+  - optional trade-chat helpers for open / reply / owner decision.
 - `Storage`
   - `public_history.jsonl`
   - `public_state_trace.jsonl`
@@ -139,6 +140,12 @@ An example file lives at [`.env.example`](.env.example). The CLI looks for `.env
 python -m catan_bench --game configs/game.toml --players configs/openai-players.toml
 ```
 
+You can also override the run path from the CLI with one flag:
+
+```bash
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/
+```
+
 3. The configured `run_dir` is treated as a base directory. Each execution creates a timestamped child directory such as:
 
 ```text
@@ -146,6 +153,12 @@ runs/0.3.0/dev/<game-id>-<timestamp>-<token>/
 ```
 
 The resolved run directory is written into both `metadata.json` and `result.json`.
+
+If `--run-dir` points to an existing run directory, the CLI resumes that run in place instead of creating a new child directory:
+
+```bash
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/<run-name>
+```
 
 4. Export a simple public replay page for a completed run:
 
@@ -182,7 +195,11 @@ seed = 12
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
-trading_chat_enabled = false
+prompt_history_limit = 12
+trading_chat_enabled = true
+trading_chat_max_failed_attempts_per_turn = 5
+trading_chat_max_rooms_per_turn = 5
+trading_chat_max_rounds_per_attempt = 3
 run_dir = "runs/0.3.0/dev/"
 ```
 
@@ -195,7 +212,6 @@ type = "llm"
 model = "gpt-4o-mini"
 api_key_env = "OPENAI_API_KEY"
 temperature = 0.2
-prompt_history_limit = 12
 ```
 
 Supported player types:
@@ -240,7 +256,7 @@ Prompt text lives in package-local Jinja templates under [`src/catan_bench/templ
 - action choice,
 - turn end,
 - reactive decisions,
-- trade chat open / reply / select,
+- trade chat open / reply / owner decision,
 - shared rules and response-contract partials.
 
 This keeps prompt editing out of Python source and makes it easier to iterate on stage-specific instructions.

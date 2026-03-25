@@ -14,6 +14,9 @@ Core rules:
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
 - When a 7 is rolled, no resources are produced. Every player with more than 7 resource cards discards half, rounded down, then the active player must move the robber and may steal 1 random resource from an adjacent opponent.
 - The robber blocks resource production on its hex, but does not block building or harbor access.
+- When opening a new trade chatroom, state clearly which resource you want and which resource(s) you are willing to trade away.
+- You may also open a trade chatroom by stating only the resource you want, then wait to see what exchange rates or markets other players propose before deciding what to offer.
+- When joining another player's trade chatroom, respond with a concrete market if you are interested, including what you will give and what you want in return.
 - Domestic trades are voluntary exchanges between the active player and exactly one other player. Non-active players may not trade with each other.
 - Trades must exchange resources for resources. No gifts, no trades on credit, no secret side deals, and no triangular trades.
 - If a domestic trade offer is rejected by everyone and draws no counteroffers, do not repeat that exact offer/request market again in the same turn.

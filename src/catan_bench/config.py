@@ -13,6 +13,7 @@ class GameConfig:
     vps_to_win: int = 10
     run_dir: Path | None = None
     history_window: int | None = 40
+    prompt_history_limit: int | None = 12
     trading_chat_enabled: bool = False
     trading_chat_max_failed_attempts_per_turn: int = 5
     trading_chat_max_rooms_per_turn: int = 5
@@ -32,7 +33,6 @@ class PlayerConfig:
     temperature: float = 0.2
     top_p: float | None = None
     reasoning_enabled: bool | None = None
-    prompt_history_limit: int | None = 12
     timeout_seconds: float = 60.0
 
 
@@ -51,6 +51,7 @@ def load_game_config(path: str | Path) -> GameConfig:
     vps_to_win = int(payload.get("vps_to_win", 10))
     run_dir = payload.get("run_dir")
     history_window = payload.get("history_window", 40)
+    prompt_history_limit = payload.get("prompt_history_limit", 12)
     trading_chat_enabled = bool(payload.get("trading_chat_enabled", False))
     trading_chat_max_failed_attempts_per_turn = int(
         payload.get("trading_chat_max_failed_attempts_per_turn", 5)
@@ -63,6 +64,10 @@ def load_game_config(path: str | Path) -> GameConfig:
     trading_chat_history_limit = payload.get("trading_chat_history_limit", 16)
     if history_window is not None:
         history_window = int(history_window)
+    if prompt_history_limit is not None:
+        prompt_history_limit = int(prompt_history_limit)
+        if prompt_history_limit < 0:
+            raise ValueError("`prompt_history_limit` must be non-negative when provided.")
     if trading_chat_history_limit is not None:
         trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
@@ -75,6 +80,7 @@ def load_game_config(path: str | Path) -> GameConfig:
         vps_to_win=vps_to_win,
         run_dir=run_dir,
         history_window=history_window,
+        prompt_history_limit=prompt_history_limit,
         trading_chat_enabled=trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=trading_chat_max_failed_attempts_per_turn,
         trading_chat_max_rooms_per_turn=trading_chat_max_rooms_per_turn,
@@ -123,14 +129,13 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
         top_p = entry.get("top_p")
         if top_p is not None:
             top_p = float(top_p)
+        if "prompt_history_limit" in entry:
+            raise ValueError(
+                "`prompt_history_limit` now belongs in the game config, not individual [[players]] entries."
+            )
         reasoning_enabled = entry.get("reasoning_enabled")
         if reasoning_enabled is not None:
             reasoning_enabled = bool(reasoning_enabled)
-        prompt_history_limit = entry.get("prompt_history_limit", 12)
-        if prompt_history_limit is not None:
-            prompt_history_limit = int(prompt_history_limit)
-            if prompt_history_limit < 0:
-                raise ValueError("`prompt_history_limit` must be non-negative when provided.")
         timeout_seconds = float(entry.get("timeout_seconds", 60.0))
         configs.append(
             PlayerConfig(
@@ -143,7 +148,6 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
                 temperature=temperature,
                 top_p=top_p,
                 reasoning_enabled=reasoning_enabled,
-                prompt_history_limit=prompt_history_limit,
                 timeout_seconds=timeout_seconds,
             )
         )

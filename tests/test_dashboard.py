@@ -8,6 +8,8 @@ from pathlib import Path
 
 from catan_bench.dashboard import (
     DashboardSnapshot,
+    _colorize_player_mentions_html,
+    _infer_turn_owner_player_id,
     _render_player_summary_table,
     build_board_svg,
     build_player_timelines,
@@ -19,10 +21,70 @@ from catan_bench.dashboard import (
     _turn_event_digest_body,
     _turn_index_for_cursor,
 )
-from catan_bench.schemas import Event
+from catan_bench.schemas import Event, PromptTrace, PublicStateSnapshot
 
 
 class DashboardTests(unittest.TestCase):
+    def test_infer_turn_owner_prefers_earliest_turn_event_actor(self) -> None:
+        snapshot = DashboardSnapshot(
+            run_dir=Path("/tmp/fake-run"),
+            metadata={},
+            player_ids=("WHITE", "BLUE"),
+            public_events=(
+                Event(
+                    "dice_rolled",
+                    {"result": [6, 4]},
+                    history_index=110,
+                    turn_index=18,
+                    phase="play_turn",
+                    decision_index=77,
+                    actor_player_id="WHITE",
+                ),
+            ),
+            public_state_snapshots=(
+                PublicStateSnapshot(
+                    history_index=110,
+                    turn_index=18,
+                    phase="play_turn",
+                    decision_index=77,
+                    public_state={
+                        "turn": {
+                            "turn_player_id": "BLUE",
+                            "current_player_id": "BLUE",
+                        }
+                    },
+                ),
+            ),
+            memory_traces_by_player={"WHITE": (), "BLUE": ()},
+            prompt_traces_by_player={
+                "WHITE": (
+                    PromptTrace(
+                        player_id="WHITE",
+                        history_index=110,
+                        turn_index=18,
+                        phase="play_turn",
+                        decision_index=78,
+                        stage="turn_start",
+                        model="fake-model",
+                        temperature=0.0,
+                        attempts=(),
+                    ),
+                ),
+                "BLUE": (),
+            },
+            result=None,
+        )
+
+        owner = _infer_turn_owner_player_id(
+            snapshot,
+            turn_index=18,
+            cursor=110,
+            current_state=snapshot.public_state_snapshots[0],
+            turn_events=snapshot.public_events,
+        )
+
+        self.assertEqual(owner, "WHITE")
+
     def test_render_player_summary_table_includes_army_column(self) -> None:
         class FakeStreamlit:
             def __init__(self) -> None:
@@ -441,6 +503,20 @@ class DashboardTests(unittest.TestCase):
                 )
             ),
             "Trade 3 WOOD to the bank for 1 BRICK.",
+        )
+
+    def test_colorize_player_mentions_html_styles_in_text_names(self) -> None:
+        self.assertEqual(
+            _colorize_player_mentions_html("↔ RED: 1 ORE, 1 SHEEP for 1 WOOD"),
+            "↔ <span style='color:#dc2626'>RED</span>: 1 ORE, 1 SHEEP for 1 WOOD",
+        )
+        self.assertEqual(
+            _colorize_player_mentions_html("WHITE ↔ RED"),
+            "<span style='color:#ffffff'>WHITE</span> ↔ <span style='color:#dc2626'>RED</span>",
+        )
+        self.assertEqual(
+            _colorize_player_mentions_html("trade cancelled"),
+            "trade cancelled",
         )
 
     def test_recent_turn_event_sections_group_recent_turns_and_filter_chat_noise(self) -> None:

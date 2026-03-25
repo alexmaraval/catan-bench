@@ -31,12 +31,29 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(game_config.engine, "catanatron")
         self.assertEqual(game_config.seed, 24)
+        self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertTrue(game_config.trading_chat_enabled)
         self.assertEqual(game_config.trading_chat_max_rooms_per_turn, 5)
         self.assertEqual(len(player_configs), 4)
         self.assertEqual(player_configs[0].id, "RED")
 
-    def test_load_llm_player_config_without_prompt_memory_limit(self) -> None:
+    def test_load_game_config_with_prompt_history_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    "engine = \"catanatron\"\n"
+                    "prompt_history_limit = 10\n"
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_game_config(game_toml)
+
+            self.assertEqual(config.prompt_history_limit, 10)
+
+    def test_load_player_config_rejects_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             players_toml = Path(tmpdir) / "players.toml"
             players_toml.write_text(
@@ -53,15 +70,15 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            configs = load_player_configs(players_toml)
-
-            self.assertEqual(configs[0].model, "gpt-4o-mini")
-            self.assertEqual(configs[0].prompt_history_limit, 10)
+            with self.assertRaisesRegex(ValueError, "game config"):
+                load_player_configs(players_toml)
 
     def test_build_players_from_config(self) -> None:
+        game_config = load_game_config("configs/game.toml")
         player_configs = load_player_configs("configs/openai-players.toml")
-        players = build_players(player_configs)
+        players = build_players(player_configs, game_config)
         self.assertEqual(set(players.keys()), {"RED", "BLUE", "ORANGE", "WHITE"})
+        self.assertEqual(players["RED"].prompt_history_limit, game_config.prompt_history_limit)
 
     def test_runner_executes_game_from_toml_configs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

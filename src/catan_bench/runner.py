@@ -66,6 +66,7 @@ def build_engine(
 
 def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | None = None):
     built_players = {}
+    effective_game_config = game_config or GameConfig()
     for player_config in players:
         if player_config.type == "random":
             built_players[player_config.id] = RandomLegalPlayer(
@@ -84,7 +85,7 @@ def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | Non
                 temperature=player_config.temperature,
                 top_p=player_config.top_p,
                 reasoning_enabled=player_config.reasoning_enabled,
-                prompt_history_limit=player_config.prompt_history_limit,
+                prompt_history_limit=effective_game_config.prompt_history_limit,
             )
         else:  # pragma: no cover - validated in config loading.
             raise ValueError(f"Unsupported player type {player_config.type!r}.")

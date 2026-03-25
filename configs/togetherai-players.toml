@@ -3,21 +3,21 @@
 id = "RED"
 type = "llm"
 model = "openai/gpt-oss-120b"
-api_base = "https://api.groq.com/openai/v1"
-api_key_env = "GROQ_API_KEY"
+api_base = "https://api.together.ai/v1"
+api_key_env = "TOGETHER_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
-temperature = 0.3
+temperature = 0.5
 top_p = 1.0
 
 # Together AI
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "moonshotai/Kimi-K2.5"
+model = "zai-org/GLM-4.5-Air-FP8"
 api_base = "https://api.together.ai/v1"
 api_key_env = "TOGETHER_API_KEY"
-temperature = 0.3
+temperature = 0.6
 top_p = 1.0
 reasoning_enabled = false
 
@@ -25,23 +25,22 @@ reasoning_enabled = false
 [[players]]
 id = "BLUE"
 type = "llm"
-#model = "gemini-2.0-flash"
-model = "MiniMaxAI/MiniMax-M2.5"
-#api_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
+model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 api_base = "https://api.together.ai/v1"
-#api_key_env = "GEMINI_API_KEY"
 api_key_env = "TOGETHER_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
-temperature = 0.3
+temperature = 0.5
 top_p = 1.0
 
 
 [[players]]
 id = "WHITE"
 type = "llm"
-model = "gpt-4.1-nano"
-api_key_env = "OPENAI_API_KEY"
+model = "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
+api_base = "https://api.together.ai/v1"
+api_key_env = "TOGETHER_API_KEY"
+reasoning_enabled = false
 timeout_seconds = 300
-temperature = 0.3
-top_p = 1.0
+temperature = 0.7
+top_p = 0.8

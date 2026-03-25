@@ -532,6 +532,99 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertIn("has_longest_road", first_player)
         self.assertIn("has_largest_army", first_player)
 
+    def test_recompute_longest_road_counts_segment_ending_at_enemy_settlement(self) -> None:
+        from catan_bench.catanatron_adapter import Color
+
+        orange = Color.ORANGE
+        blue = Color.BLUE
+        red = Color.RED
+        state = SimpleNamespace(
+            colors=(orange, blue, red),
+            color_to_index={orange: 0, blue: 1, red: 2},
+            player_state={
+                "P0_HAS_ROAD": False,
+                "P0_VICTORY_POINTS": 3,
+                "P0_ACTUAL_VICTORY_POINTS": 3,
+                "P0_LONGEST_ROAD_LENGTH": 0,
+                "P1_HAS_ROAD": False,
+                "P1_VICTORY_POINTS": 2,
+                "P1_ACTUAL_VICTORY_POINTS": 2,
+                "P1_LONGEST_ROAD_LENGTH": 0,
+                "P2_HAS_ROAD": False,
+                "P2_VICTORY_POINTS": 2,
+                "P2_ACTUAL_VICTORY_POINTS": 2,
+                "P2_LONGEST_ROAD_LENGTH": 0,
+            },
+            board=SimpleNamespace(
+                roads={
+                    (0, 5): orange,
+                    (5, 0): orange,
+                    (0, 20): orange,
+                    (20, 0): orange,
+                    (19, 20): orange,
+                    (20, 19): orange,
+                    (20, 22): orange,
+                    (22, 20): orange,
+                    (22, 49): orange,
+                    (49, 22): orange,
+                },
+                buildings={
+                    5: (blue, "SETTLEMENT"),
+                    19: (orange, "SETTLEMENT"),
+                    49: (orange, "SETTLEMENT"),
+                },
+                road_lengths={},
+                road_color=None,
+                road_length=0,
+            ),
+        )
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter.game = SimpleNamespace(state=state)
+
+        adapter._recompute_longest_road_state()
+
+        self.assertEqual(state.player_state["P0_LONGEST_ROAD_LENGTH"], 4)
+        self.assertFalse(state.player_state["P0_HAS_ROAD"])
+
+    def test_recompute_longest_road_keeps_current_holder_on_tie(self) -> None:
+        from catan_bench.catanatron_adapter import Color
+
+        blue = Color.BLUE
+        orange = Color.ORANGE
+        state = SimpleNamespace(
+            colors=(blue, orange),
+            color_to_index={blue: 0, orange: 1},
+            player_state={
+                "P0_HAS_ROAD": True,
+                "P0_VICTORY_POINTS": 5,
+                "P0_ACTUAL_VICTORY_POINTS": 5,
+                "P0_LONGEST_ROAD_LENGTH": 5,
+                "P1_HAS_ROAD": False,
+                "P1_VICTORY_POINTS": 3,
+                "P1_ACTUAL_VICTORY_POINTS": 3,
+                "P1_LONGEST_ROAD_LENGTH": 4,
+            },
+            board=SimpleNamespace(
+                roads={},
+                buildings={},
+                road_lengths={},
+                road_color=blue,
+                road_length=5,
+            ),
+        )
+        adapter = object.__new__(CatanatronEngineAdapter)
+        adapter.game = SimpleNamespace(state=state)
+        adapter._longest_road_length_for_color = lambda color: 5  # type: ignore[method-assign]
+
+        adapter._recompute_longest_road_state()
+
+        self.assertTrue(state.player_state["P0_HAS_ROAD"])
+        self.assertFalse(state.player_state["P1_HAS_ROAD"])
+        self.assertEqual(state.player_state["P0_VICTORY_POINTS"], 5)
+        self.assertEqual(state.player_state["P1_VICTORY_POINTS"], 3)
+        self.assertEqual(state.player_state["P0_LONGEST_ROAD_LENGTH"], 5)
+        self.assertEqual(state.player_state["P1_LONGEST_ROAD_LENGTH"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()

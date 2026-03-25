@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,8 +17,9 @@ PLAYER_COLORS: dict[str, tuple[str, str, str]] = {
     "RED": ("#dc2626", "#fee2e2", "#dc2626"),
     "BLUE": ("#2563eb", "#dbeafe", "#2563eb"),
     "ORANGE": ("#ea580c", "#ffedd5", "#ea580c"),
-    "WHITE": ("#ffffff", "#f1f5f9", "#ffffff"),
+    "WHITE": ("#ffffff", "#cbd5e1", "#ffffff"),
 }
+PLAYER_NAME_PATTERN = re.compile(r"\b(" + "|".join(re.escape(player_id) for player_id in PLAYER_COLORS) + r")\b")
 NEUTRAL_COLORS = ("#374151", "#f3f4f6", "#9ca3af")
 TRADE_EVENT_KINDS = {
     "trade_offered",
@@ -532,7 +534,7 @@ def _render_turn_event_digest(
             html_parts.append(
                 "<div class='turn-event-row'>"
                 f"<div class='turn-event-player' style='color:{accent}'>{_escape_html(speaker)}</div>"
-                f"<div class='turn-event-text'>{_escape_html(body)}</div>"
+                f"<div class='turn-event-text'>{_colorize_player_mentions_html(body)}</div>"
                 "</div>"
             )
         html_parts.append("</section>")
@@ -577,6 +579,45 @@ def _turn_event_section_label(turn_index: int, events: tuple[Event, ...]) -> str
     if first_phase.startswith("build_initial"):
         return f"Setup {turn_index}"
     return f"Turn {turn_index}"
+
+
+def _infer_turn_owner_player_id(
+    snapshot: DashboardSnapshot,
+    *,
+    turn_index: int,
+    cursor: int,
+    current_state: PublicStateSnapshot | None,
+    turn_events: tuple[Event, ...] = (),
+) -> str:
+    for event in turn_events:
+        if isinstance(event.actor_player_id, str) and event.actor_player_id:
+            return event.actor_player_id
+
+    candidate_traces: list[PromptTrace] = []
+    for player_id in snapshot.player_ids:
+        for trace in snapshot.prompt_traces_by_player.get(player_id, ()):
+            if trace.turn_index == turn_index and trace.history_index <= cursor:
+                candidate_traces.append(trace)
+    candidate_traces.sort(
+        key=lambda trace: (
+            trace.history_index,
+            trace.decision_index,
+            STAGE_ORDER.get(trace.stage, 99),
+        )
+    )
+    for trace in candidate_traces:
+        if trace.player_id:
+            return trace.player_id
+
+    if current_state is None:
+        return ""
+    turn_dict = (
+        current_state.public_state.get("turn")
+        if isinstance(current_state.public_state.get("turn"), dict)
+        else {}
+    )
+    owner = turn_dict.get("turn_player_id") or turn_dict.get("current_player_id")
+    return str(owner) if isinstance(owner, str) else ""
 
 
 def _turn_event_digest_body(event: Event) -> str | None:
@@ -681,10 +722,20 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         return
 
     turn_index = current_state.turn_index
+    turn_events = sorted(
+        (e for e in snapshot.public_events if e.turn_index == turn_index and e.history_index <= cursor),
+        key=lambda e: e.history_index,
+    )
+    turn_owner_id = _infer_turn_owner_player_id(
+        snapshot,
+        turn_index=turn_index,
+        cursor=cursor,
+        current_state=current_state,
+        turn_events=tuple(turn_events),
+    )
     turn_dict = current_state.public_state.get("turn") if isinstance(current_state.public_state.get("turn"), dict) else {}
-    acting_player_id = str(turn_dict.get("turn_player_id") or turn_dict.get("current_player_id") or "")
 
-    accent, background, _ = _palette_for_player(acting_player_id or None)
+    accent, background, _ = _palette_for_player(turn_owner_id or None)
     first_phase = current_state.phase or ""
     label_prefix = "Setup" if first_phase.startswith("build_initial") else "Turn"
     st.markdown(
@@ -692,8 +743,8 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         f"style='border-left:6px solid {accent}; background:{background};'>"
         f"<strong>{TURN_EMOJI} {label_prefix} {turn_index}</strong>&nbsp;"
         + (
-            f"<span style='color:{accent};font-weight:700'>{acting_player_id}</span>&nbsp;is acting"
-            if acting_player_id
+            f"<span style='color:{accent};font-weight:700'>{turn_owner_id}</span>&nbsp;is acting"
+            if turn_owner_id
             else ""
         )
         + f"&nbsp;<span style='font-size:0.8rem;color:#6b7280'>{first_phase}</span>"
@@ -719,12 +770,7 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
                 if existing is None or mem.history_index >= existing.history_index:
                     memories_for_turn[key] = mem
 
-    turn_events = sorted(
-        (e for e in snapshot.public_events if e.turn_index == turn_index and e.history_index <= cursor),
-        key=lambda e: e.history_index,
-    )
-
-    trade_artifacts = _build_trade_artifacts(acting_player_id, tuple(turn_events)) if acting_player_id else ()
+    trade_artifacts = _build_trade_artifacts(turn_owner_id, tuple(turn_events)) if turn_owner_id else ()
     trade_hi_set = {e.history_index for ta in trade_artifacts for e in ta.events}
     non_trade_events = [e for e in turn_events if e.history_index not in trade_hi_set]
 
@@ -1449,6 +1495,22 @@ def _palette_for_player(player_id: str | None) -> tuple[str, str, str]:
     return PLAYER_COLORS.get(player_id, NEUTRAL_COLORS)
 
 
+def _colorize_player_mentions_html(text: str) -> str:
+    html_parts: list[str] = []
+    cursor = 0
+    for match in PLAYER_NAME_PATTERN.finditer(text):
+        start, end = match.span()
+        if start > cursor:
+            html_parts.append(_escape_html(text[cursor:start]))
+        player_id = match.group(0)
+        accent, _, _ = _palette_for_player(player_id)
+        html_parts.append(f"<span style='color:{accent}'>{_escape_html(player_id)}</span>")
+        cursor = end
+    if cursor < len(text):
+        html_parts.append(_escape_html(text[cursor:]))
+    return "".join(html_parts)
+
+
 def _card_html(
     *,
     emoji: str,
@@ -1944,17 +2006,31 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     if vp_chart_data and max_turn > 0:
         chart_rows = []
         for turn in range(max_turn + 1):
-            row: dict[str, int | float] = {"Turn": turn}
             for pid in players:
                 series = vp_chart_data.get(pid, {})
-                # Forward fill: use last known VP
                 vp = 0
                 for t in range(turn + 1):
                     if t in series:
                         vp = series[t]
-                row[pid] = vp
-            chart_rows.append(row)
-        st.line_chart(chart_rows, x="Turn", y=list(players.keys()))
+                chart_rows.append({"Turn": turn, "Player": pid, "VP": vp})
+        pids = list(players.keys())
+        colors = [PLAYER_COLORS.get(p, NEUTRAL_COLORS)[0] for p in pids]
+        vp_chart = (
+            alt.Chart(pd.DataFrame(chart_rows))
+            .mark_line(strokeWidth=2)
+            .encode(
+                x=alt.X("Turn:Q", axis=alt.Axis(title=None, labelFontSize=10)),
+                y=alt.Y("VP:Q", axis=alt.Axis(title=None, labelFontSize=10)),
+                color=alt.Color(
+                    "Player:N",
+                    scale=alt.Scale(domain=pids, range=colors),
+                    legend=alt.Legend(title=None),
+                ),
+                tooltip=["Turn:Q", "Player:N", "VP:Q"],
+            )
+            .properties(height=250)
+        )
+        st.altair_chart(vp_chart, use_container_width=True)
 
     # ── Resource Production ──
     st.subheader("Estimated Resource Production")
@@ -2058,8 +2134,8 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     player_cols = st.columns(len(players) or 1)
     for idx, (pid, pdata) in enumerate(players.items()):
         with player_cols[idx]:
-            color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
-            st.markdown(f"**:{pid.lower()}[{pid}]** {'🏆' if pdata.get('is_winner') else ''}")
+            accent, _, _ = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            st.markdown(f"<span style='color:{accent};font-weight:700'>{pid}</span> {'🏆' if pdata.get('is_winner') else ''}", unsafe_allow_html=True)
             st.metric("Final VP", pdata.get("final_vp", "?"))
 
             counts = pdata.get("buildings", {}).get("counts", {})
@@ -2164,12 +2240,14 @@ def _inject_styles(st) -> None:
         .timeline-title {
           font-weight: 700;
           margin-bottom: 0.2rem;
+          color: #0f172a;
         }
         .timeline-body {
           font-size: 0.95rem;
           line-height: 1.35;
           margin-bottom: 0.35rem;
           white-space: pre-wrap;
+          color: #0f172a;
         }
         .timeline-footer {
           font-size: 0.75rem;
@@ -2179,6 +2257,7 @@ def _inject_styles(st) -> None:
           border-radius: 0.75rem;
           padding: 0.7rem 0.8rem;
           margin-bottom: 0.8rem;
+          color: #0f172a;
         }
         .player-column-badge {
           font-size: 0.72rem;
@@ -2231,6 +2310,7 @@ def _inject_styles(st) -> None:
           border: 1px solid #e5e7eb;
           padding: 0.65rem 0.85rem;
           box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+          color: #0f172a;
         }
         .trade-chat-header {
           display: flex;
@@ -2238,6 +2318,7 @@ def _inject_styles(st) -> None:
           align-items: baseline;
           gap: 0.45rem;
           margin-bottom: 0.2rem;
+          color: #0f172a;
         }
         .trade-chat-speaker {
           font-size: 0.84rem;
@@ -2255,6 +2336,7 @@ def _inject_styles(st) -> None:
           line-height: 1.4;
           white-space: pre-wrap;
           word-break: break-word;
+          color: #0f172a;
         }
         .trade-chat-meta {
           margin-top: 0.35rem;
@@ -2280,7 +2362,7 @@ def _inject_styles(st) -> None:
           align-items: center;
           gap: 0.65rem;
           margin: 0.05rem 0 0.55rem;
-          color: #64748b;
+          color: #cbd5e1;
           font-size: 0.74rem;
           font-weight: 700;
           letter-spacing: 0.05em;
@@ -2302,13 +2384,14 @@ def _inject_styles(st) -> None:
           font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
           font-size: 0.9rem;
           line-height: 1.35;
+          color: #e2e8f0;
         }
         .turn-event-player {
           font-weight: 700;
           min-width: 4.6rem;
         }
         .turn-event-text {
-          color: #0f172a;
+          color: #e2e8f0;
           word-break: break-word;
         }
         </style>

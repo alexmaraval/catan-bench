@@ -159,6 +159,7 @@ seed = 12
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
+prompt_history_limit = 12
 trading_chat_enabled = true
 trading_chat_max_failed_attempts_per_turn = 5
 trading_chat_max_rooms_per_turn = 5
@@ -175,7 +176,6 @@ type = "llm"
 model = "gpt-4o-mini"
 api_key_env = "OPENAI_API_KEY"
 temperature = 0.2
-prompt_history_limit = 12
 ```
 
 Supported player types:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -417,6 +418,7 @@ class CatanatronEngineAdapter:
 
         native_action = self._action_to_native(action)
         action_record = self.game.execute(native_action, validate_action=True)
+        self._recompute_longest_road_state()
 
         state_after = self.game.state
 
@@ -477,6 +479,119 @@ class CatanatronEngineAdapter:
             "has_longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),
             "has_largest_army": bool(state.player_state[f"{key}_HAS_ARMY"]),
         }
+
+    def _recompute_longest_road_state(self) -> None:
+        state = self.game.state
+        board = state.board
+        lengths = {
+            color: self._longest_road_length_for_color(color)
+            for color in state.colors
+        }
+
+        previous_holder = next(
+            (
+                color
+                for color in state.colors
+                if state.player_state.get(f"{player_key(state, color)}_HAS_ROAD")
+            ),
+            None,
+        )
+        candidates = [color for color, length in lengths.items() if length >= 5]
+        if candidates:
+            max_length = max(lengths[color] for color in candidates)
+            leaders = [color for color in candidates if lengths[color] == max_length]
+        else:
+            max_length = 0
+            leaders = []
+
+        if len(leaders) == 1:
+            winner = leaders[0]
+        elif previous_holder in leaders:
+            winner = previous_holder
+        else:
+            winner = None
+
+        for color in state.colors:
+            key = player_key(state, color)
+            if state.player_state[f"{key}_HAS_ROAD"]:
+                state.player_state[f"{key}_HAS_ROAD"] = False
+                state.player_state[f"{key}_VICTORY_POINTS"] -= 2
+                state.player_state[f"{key}_ACTUAL_VICTORY_POINTS"] -= 2
+            state.player_state[f"{key}_LONGEST_ROAD_LENGTH"] = lengths[color]
+
+        if winner is not None:
+            winner_key = player_key(state, winner)
+            state.player_state[f"{winner_key}_HAS_ROAD"] = True
+            state.player_state[f"{winner_key}_VICTORY_POINTS"] += 2
+            state.player_state[f"{winner_key}_ACTUAL_VICTORY_POINTS"] += 2
+
+        board.road_lengths = defaultdict(int, lengths)
+        board.road_color = winner
+        board.road_length = max_length if winner is not None else 0
+
+    def _longest_road_length_for_color(self, color: Color) -> int:
+        roads = self.game.state.board.roads
+        unique_edges = {
+            tuple(sorted(edge))
+            for edge, edge_color in roads.items()
+            if edge_color == color
+        }
+        if not unique_edges:
+            return 0
+
+        adjacency: dict[int, set[int]] = defaultdict(set)
+        for start, end in unique_edges:
+            adjacency[start].add(end)
+            adjacency[end].add(start)
+
+        best = 0
+        for node in adjacency:
+            best = max(
+                best,
+                self._dfs_longest_road_from_node(
+                    color=color,
+                    adjacency=adjacency,
+                    node=node,
+                    used_edges=set(),
+                    path_length=0,
+                ),
+            )
+        return best
+
+    def _dfs_longest_road_from_node(
+        self,
+        *,
+        color: Color,
+        adjacency: Mapping[int, set[int]],
+        node: int,
+        used_edges: set[tuple[int, int]],
+        path_length: int,
+    ) -> int:
+        best = path_length
+        if path_length > 0 and self._is_enemy_building_node(node=node, color=color):
+            return best
+
+        for neighbor in adjacency.get(node, ()):
+            edge = tuple(sorted((node, neighbor)))
+            if edge in used_edges:
+                continue
+            used_edges.add(edge)
+            best = max(
+                best,
+                self._dfs_longest_road_from_node(
+                    color=color,
+                    adjacency=adjacency,
+                    node=neighbor,
+                    used_edges=used_edges,
+                    path_length=path_length + 1,
+                ),
+            )
+            used_edges.remove(edge)
+        return best
+
+    def _is_enemy_building_node(self, *, node: int, color: Color) -> bool:
+        building = self.game.state.board.buildings.get(node)
+        return building is not None and building[0] != color
 
     def _public_player_prompt_summary(self, color: Color) -> dict[str, JsonValue]:
         key = player_key(self.game.state, color)

@@ -30,7 +30,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/openai-players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
-        self.assertEqual(game_config.seed, 12)
+        self.assertEqual(game_config.seed, 24)
         self.assertTrue(game_config.trading_chat_enabled)
         self.assertEqual(game_config.trading_chat_max_rooms_per_turn, 5)
         self.assertEqual(len(player_configs), 4)

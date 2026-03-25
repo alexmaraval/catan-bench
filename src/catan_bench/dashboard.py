@@ -334,10 +334,14 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
         _maybe_rerun(st, auto_refresh=auto_refresh, refresh_interval=refresh_interval)
         return
 
-    cursor = _render_cursor_controls(st, snapshot)
-    _render_board_summary(st, snapshot, cursor=cursor)
-    _render_header(st, snapshot, cursor=cursor)
-    _render_current_turn_view(st, snapshot, cursor=cursor)
+    tab_replay, tab_analysis = st.tabs(["Game Replay", "Post-Game Analysis"])
+    with tab_replay:
+        cursor = _render_cursor_controls(st, snapshot)
+        _render_board_summary(st, snapshot, cursor=cursor)
+        _render_header(st, snapshot, cursor=cursor)
+        _render_current_turn_view(st, snapshot, cursor=cursor)
+    with tab_analysis:
+        _render_analysis_tab(st, snapshot)
     _maybe_rerun(st, auto_refresh=auto_refresh, refresh_interval=refresh_interval)
 
 
@@ -1882,6 +1886,194 @@ def _jump_history_to_next_turn(
         if turn_index > current_turn:
             return history_index
     return max_history_index
+
+
+def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
+    """Render the post-game analysis tab."""
+    analysis_path = snapshot.run_dir / "analysis.json"
+    analysis_data = _read_json_if_exists(analysis_path)
+
+    if analysis_data is None:
+        if snapshot.result is None:
+            st.info("Game is still in progress. Analysis will be available once the game ends.")
+            return
+        if st.button("Generate Analysis", type="primary"):
+            from .analysis import analyze_game
+            analysis_data = analyze_game(snapshot.run_dir)
+            st.rerun()
+        else:
+            st.info("No analysis.json found. Click the button above to generate it.")
+            return
+
+    gs = analysis_data.get("game_summary", {})
+    players = analysis_data.get("players", {})
+
+    # ── Game summary metrics ──
+    st.subheader("Game Summary")
+    cols = st.columns(5)
+    cols[0].metric("Winner", ", ".join(gs.get("winner_ids", [])) or "—")
+    cols[1].metric("Turns", gs.get("num_turns", "?"))
+    cols[2].metric("Total Decisions", gs.get("total_decisions", "?"))
+    cols[3].metric("Trade Activity", f"{gs.get('trade_activity_rate', 0):.1%}")
+    cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
+
+    # ── VP Progression Chart ──
+    st.subheader("Victory Point Progression")
+    vp_chart_data: dict[str, dict[int, int]] = {}
+    max_turn = 0
+    for pid, pdata in players.items():
+        vp_prog = pdata.get("vp_progression", [])
+        vp_chart_data[pid] = {entry["turn_index"]: entry["vp"] for entry in vp_prog}
+        if vp_prog:
+            max_turn = max(max_turn, max(e["turn_index"] for e in vp_prog))
+
+    if vp_chart_data and max_turn > 0:
+        chart_rows = []
+        for turn in range(max_turn + 1):
+            row: dict[str, int | float] = {"Turn": turn}
+            for pid in players:
+                series = vp_chart_data.get(pid, {})
+                # Forward fill: use last known VP
+                vp = 0
+                for t in range(turn + 1):
+                    if t in series:
+                        vp = series[t]
+                row[pid] = vp
+            chart_rows.append(row)
+        st.line_chart(chart_rows, x="Turn", y=list(players.keys()))
+
+    # ── Resource Production ──
+    st.subheader("Estimated Resource Production")
+    res_rows = []
+    for pid, pdata in players.items():
+        production = pdata.get("resource_production", {}).get("total", {})
+        row: dict[str, Any] = {"Player": pid}
+        for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"):
+            row[r] = production.get(r, 0)
+        row["Total"] = sum(row[r] for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"))
+        res_rows.append(row)
+    if res_rows:
+        st.bar_chart(res_rows, x="Player", y=["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"])
+
+    # ── Trade Activity ──
+    st.subheader("Trade Activity")
+    trade_rows = []
+    for pid, pdata in players.items():
+        trade = pdata.get("trade", {})
+        trade_rows.append({
+            "Player": pid,
+            "Offers Made": trade.get("offers_made", 0),
+            "Acceptances": trade.get("acceptances", 0),
+            "Rejections": trade.get("rejections", 0),
+            "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
+        })
+    if trade_rows:
+        st.bar_chart(trade_rows, x="Player", y=["Offers Made", "Acceptances", "Rejections", "Completed"])
+
+    # ── Building Timeline ──
+    st.subheader("Building Timeline")
+    building_rows = []
+    for pid, pdata in players.items():
+        buildings = pdata.get("buildings", {})
+        for s in buildings.get("settlements", []):
+            building_rows.append({"Player": pid, "Turn": s.get("turn_index"), "Type": "Settlement", "Location": str(s.get("node_id"))})
+        for c in buildings.get("cities", []):
+            building_rows.append({"Player": pid, "Turn": c.get("turn_index"), "Type": "City", "Location": str(c.get("node_id"))})
+        for r in buildings.get("roads", []):
+            building_rows.append({"Player": pid, "Turn": r.get("turn_index"), "Type": "Road", "Location": str(r.get("edge"))})
+    if building_rows:
+        building_rows.sort(key=lambda r: (r["Turn"], r["Player"]))
+        st.dataframe(building_rows, use_container_width=True)
+
+    # ── Per-Player Summary Cards ──
+    st.subheader("Player Summary")
+    player_cols = st.columns(len(players) or 1)
+    for idx, (pid, pdata) in enumerate(players.items()):
+        with player_cols[idx]:
+            color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            st.markdown(f"**:{pid.lower()}[{pid}]** {'🏆' if pdata.get('is_winner') else ''}")
+            st.metric("Final VP", pdata.get("final_vp", "?"))
+
+            counts = pdata.get("buildings", {}).get("counts", {})
+            st.caption(f"Buildings: {counts.get('settlements', 0)}S / {counts.get('cities', 0)}C / {counts.get('roads', 0)}R")
+
+            achievements = pdata.get("achievements", {})
+            if achievements.get("has_longest_road"):
+                st.caption("Longest Road")
+            if achievements.get("has_largest_army"):
+                st.caption("Largest Army")
+
+            robber = pdata.get("robber", {})
+            st.caption(f"Robber: moved {robber.get('times_moved_robber', 0)}x, targeted {robber.get('times_targeted', 0)}x")
+
+            dev = pdata.get("dev_cards", {})
+            if dev.get("cards_played", 0) or dev.get("cards_held_at_end", 0):
+                st.caption(f"Dev cards: {dev.get('cards_played', 0)} played, {dev.get('cards_held_at_end', 0)} held")
+
+            dq = pdata.get("decision_quality", {})
+            if dq.get("total_prompts", 0):
+                st.caption(f"Retries: {dq.get('retries', 0)}/{dq.get('total_prompts', 0)} ({dq.get('retry_rate', 0):.1%})")
+
+            phase = pdata.get("phase_analysis", {}).get("opening", {})
+            if phase.get("pip_count", 0):
+                st.caption(f"Opening: {phase.get('resource_diversity', 0)} types, {phase.get('pip_count', 0)} pips")
+
+    # ── Trade Negotiation Breakdown ──
+    any_chat = any(
+        pdata.get("trade_chat", {}).get("rooms_opened", 0)
+        or pdata.get("trade_chat", {}).get("proposals_made", 0)
+        for pdata in players.values()
+    )
+    if any_chat:
+        st.subheader("Trade Chat Negotiations")
+        chat_rows = []
+        for pid, pdata in players.items():
+            tc = pdata.get("trade_chat", {})
+            chat_rows.append({
+                "Player": pid,
+                "Rooms Opened": tc.get("rooms_opened", 0),
+                "Success Rate": f"{tc.get('negotiation_success_rate', 0):.0%}",
+                "Proposals Made": tc.get("proposals_made", 0),
+                "Proposals Accepted": tc.get("proposals_accepted", 0),
+                "Rooms Participated": tc.get("rooms_participated_in", 0),
+                "Avg Rounds": tc.get("avg_rounds_per_room", 0),
+            })
+        st.dataframe(chat_rows, use_container_width=True)
+
+        # Counterparty heatmap as a table
+        cp_rows = []
+        for pid, pdata in players.items():
+            cp = pdata.get("trade_chat", {}).get("counterparty_frequency", {})
+            if cp:
+                for partner, count in sorted(cp.items(), key=lambda x: -x[1]):
+                    cp_rows.append({"Player": pid, "Trade Partner": partner, "Completed Trades": count})
+        if cp_rows:
+            st.caption("Trade partnerships (completed chat trades)")
+            st.dataframe(cp_rows, use_container_width=True)
+
+    # ── Strategy Evolution ──
+    any_strategy = any(
+        pdata.get("strategy", {}).get("opening_strategy")
+        for pdata in players.values()
+    )
+    if any_strategy:
+        st.subheader("Strategy Evolution")
+        for pid, pdata in players.items():
+            strat = pdata.get("strategy", {})
+            if not strat.get("opening_strategy") and not strat.get("strategy_updates"):
+                continue
+            color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            with st.expander(f"{pid} — {strat.get('strategy_update_count', 0)} strategy updates"):
+                if strat.get("opening_strategy"):
+                    st.markdown(f"**Opening strategy:** {strat['opening_strategy']}")
+                updates = strat.get("strategy_updates", [])
+                for i, upd in enumerate(updates):
+                    if i == 0 and upd.get("stage") == "opening_strategy":
+                        continue  # Already shown above
+                    lt = upd.get("long_term", "")
+                    st.markdown(f"**Turn {upd.get('turn_index', '?')}** ({upd.get('stage', '')}): {lt}")
+                if strat.get("final_strategy") and (not updates or updates[-1].get("long_term") != strat["final_strategy"]):
+                    st.markdown(f"**Final strategy:** {strat['final_strategy']}")
 
 
 def _maybe_rerun(st, *, auto_refresh: bool, refresh_interval: int) -> None:

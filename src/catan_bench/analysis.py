@@ -348,11 +348,14 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
     confirmations_as_acceptee = 0
     resources_given: dict[str, int] = {}
     resources_received: dict[str, int] = {}
+    offers_made_by_turn: dict[int, int] = {}
+    completed_by_turn: dict[int, int] = {}
 
     for event in events:
         if event.kind == "trade_offered":
             if event.actor_player_id == player_id:
                 offers_made += 1
+                offers_made_by_turn[event.turn_index] = offers_made_by_turn.get(event.turn_index, 0) + 1
             else:
                 offers_received += 1
 
@@ -376,10 +379,12 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
 
             if offering_id == player_id:
                 confirmations_as_offerer += 1
+                completed_by_turn[event.turn_index] = completed_by_turn.get(event.turn_index, 0) + 1
                 _add_resources(resources_given, offer)
                 _add_resources(resources_received, request)
             elif accepting_id == player_id:
                 confirmations_as_acceptee += 1
+                completed_by_turn[event.turn_index] = completed_by_turn.get(event.turn_index, 0) + 1
                 # Acceptee gives what offerer requested, receives what offerer offered
                 _add_resources(resources_given, request)
                 _add_resources(resources_received, offer)
@@ -402,6 +407,8 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
         "resources_given": resources_given,
         "resources_received": resources_received,
         "net_trade_balance": net_balance,
+        "offers_made_by_turn": offers_made_by_turn,
+        "completed_by_turn": completed_by_turn,
     }
 
 
@@ -492,14 +499,20 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
     counterparty_freq: dict[str, int] = {}
     resources_gained: dict[str, int] = {}
     resources_given: dict[str, int] = {}
+    rooms_opened_by_turn: dict[int, int] = {}
+    rooms_participated_by_turn: dict[int, int] = {}
+    proposals_made_by_turn: dict[int, int] = {}
+    proposals_accepted_by_turn: dict[int, int] = {}
 
     for session in sessions.values():
         owner = session["owner_player_id"]
+        turn = session["turn_index"]
         is_owner = (owner == player_id)
         participated = player_id in session.get("speakers", set()) or is_owner
 
         if is_owner:
             rooms_opened += 1
+            rooms_opened_by_turn[turn] = rooms_opened_by_turn.get(turn, 0) + 1
             total_rounds_as_owner += session["rounds"]
             if session["outcome"] == "no_deal":
                 rooms_no_deal += 1
@@ -518,11 +531,13 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
 
         if participated and not is_owner:
             rooms_participated_in += 1
+            rooms_participated_by_turn[turn] = rooms_participated_by_turn.get(turn, 0) + 1
 
         # Count proposals made by this player
         for proposal in session.get("proposals", []):
             if proposal.get("player_id") == player_id:
                 proposals_made += 1
+                proposals_made_by_turn[turn] = proposals_made_by_turn.get(turn, 0) + 1
 
         # Count proposals from this player that were accepted
         if session["outcome"] == "selected":
@@ -534,6 +549,7 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     selected_proposal_id = proposal.get("proposal_id")
             if selected_pid == player_id:
                 proposals_accepted += 1
+                proposals_accepted_by_turn[turn] = proposals_accepted_by_turn.get(turn, 0) + 1
                 if not is_owner:
                     # As acceptee: gain what owner offered, give what owner requested
                     offer = session.get("selected_offer") or {}
@@ -566,6 +582,10 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
         "counterparty_frequency": counterparty_freq,
         "resources_gained_via_chat": resources_gained,
         "resources_given_via_chat": resources_given,
+        "rooms_opened_by_turn": rooms_opened_by_turn,
+        "rooms_participated_by_turn": rooms_participated_by_turn,
+        "proposals_made_by_turn": proposals_made_by_turn,
+        "proposals_accepted_by_turn": proposals_accepted_by_turn,
     }
 
 

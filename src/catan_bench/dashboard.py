@@ -1968,34 +1968,46 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     st.subheader("Trade Activity")
     has_classic = any(pdata.get("trade", {}).get("offers_made", 0) > 0 for pdata in players.values())
     has_chat = any(pdata.get("trade_chat", {}).get("rooms_opened", 0) > 0 for pdata in players.values())
+
+    def _cumulative_line(by_player: dict[str, dict], max_turn: int) -> list[dict]:
+        """Build a cumulative line chart dataset: one row per turn, one column per player."""
+        cum = {pid: 0 for pid in by_player}
+        rows = []
+        for t in range(max_turn + 1):
+            row: dict = {"Turn": t}
+            for pid, by_turn in by_player.items():
+                cum[pid] += by_turn.get(str(t), 0) + by_turn.get(t, 0)
+                row[pid] = cum[pid]
+            rows.append(row)
+        return rows
+
+    _max_turn = gs.get("num_turns", 0)
+    _player_ids = list(players.keys())
+
     if has_classic:
-        classic_rows = []
-        for pid, pdata in players.items():
-            trade = pdata.get("trade", {})
-            classic_rows.append({
-                "Player": pid,
-                "Offers Made": trade.get("offers_made", 0),
-                "Acceptances": trade.get("acceptances", 0),
-                "Rejections": trade.get("rejections", 0),
-                "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
-            })
-        st.bar_chart(classic_rows, x="Player", y=["Offers Made", "Acceptances", "Rejections", "Completed"])
+        for label, key in [
+            ("Offers Made", "offers_made_by_turn"),
+            ("Completed", "completed_by_turn"),
+        ]:
+            by_player = {pid: players[pid].get("trade", {}).get(key, {}) for pid in _player_ids}
+            if any(by_player.values()):
+                st.caption(label)
+                st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
+
     if has_chat:
-        chat_rows = []
-        for pid, pdata in players.items():
-            tc = pdata.get("trade_chat", {})
-            trade = pdata.get("trade", {})
-            chat_rows.append({
-                "Player": pid,
-                "Rooms Opened": tc.get("rooms_opened", 0),
-                "Rooms Joined": tc.get("rooms_participated_in", 0),
-                "Proposals Made": tc.get("proposals_made", 0),
-                "Proposals Accepted": tc.get("proposals_accepted", 0),
-                "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
-            })
         if not has_classic:
             st.caption("All trades negotiated via chat rooms")
-        st.bar_chart(chat_rows, x="Player", y=["Rooms Opened", "Rooms Joined", "Proposals Made", "Proposals Accepted", "Completed"])
+        for label, (section, key) in [
+            ("Rooms Opened", ("trade_chat", "rooms_opened_by_turn")),
+            ("Rooms Joined", ("trade_chat", "rooms_participated_by_turn")),
+            ("Proposals Made", ("trade_chat", "proposals_made_by_turn")),
+            ("Proposals Accepted", ("trade_chat", "proposals_accepted_by_turn")),
+            ("Completed", ("trade", "completed_by_turn")),
+        ]:
+            by_player = {pid: players[pid].get(section, {}).get(key, {}) for pid in _player_ids}
+            if any(by_player.values()):
+                st.caption(label)
+                st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
 
     # ── Building Timeline ──
     st.subheader("Building Timeline")

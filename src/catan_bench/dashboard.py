@@ -7,13 +7,16 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import altair as alt
+import pandas as pd
+
 from .schemas import Event, JsonValue, MemorySnapshot, PromptTrace, PublicStateSnapshot
 
 PLAYER_COLORS: dict[str, tuple[str, str, str]] = {
     "RED": ("#dc2626", "#fee2e2", "#dc2626"),
     "BLUE": ("#2563eb", "#dbeafe", "#2563eb"),
     "ORANGE": ("#ea580c", "#ffedd5", "#ea580c"),
-    "WHITE": ("#7c3aed", "#ede9fe", "#7c3aed"),
+    "WHITE": ("#ffffff", "#f1f5f9", "#ffffff"),
 }
 NEUTRAL_COLORS = ("#374151", "#f3f4f6", "#9ca3af")
 TRADE_EVENT_KINDS = {
@@ -1969,8 +1972,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     has_classic = any(pdata.get("trade", {}).get("offers_made", 0) > 0 for pdata in players.values())
     has_chat = any(pdata.get("trade_chat", {}).get("rooms_opened", 0) > 0 for pdata in players.values())
 
-    def _cumulative_line(by_player: dict[str, dict], max_turn: int) -> list[dict]:
-        """Build a cumulative line chart dataset: one row per turn, one column per player."""
+    def _cumulative_by_turn(by_player: dict[str, dict], max_turn: int) -> list[dict]:
         cum = {pid: 0 for pid in by_player}
         rows = []
         for t in range(max_turn + 1):
@@ -1981,39 +1983,57 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             rows.append(row)
         return rows
 
+    def _altair_line(by_player: dict[str, dict], max_turn: int, title: str) -> alt.Chart:
+        rows = _cumulative_by_turn(by_player, max_turn)
+        df = pd.DataFrame(rows).melt(id_vars=["Turn"], var_name="Player", value_name="Count")
+        pids = list(by_player.keys())
+        colors = [PLAYER_COLORS.get(p, NEUTRAL_COLORS)[0] for p in pids]
+        return (
+            alt.Chart(df)
+            .mark_line(strokeWidth=2)
+            .encode(
+                x=alt.X("Turn:Q", axis=alt.Axis(title=None, labelFontSize=10)),
+                y=alt.Y("Count:Q", axis=alt.Axis(title=None, labelFontSize=10)),
+                color=alt.Color(
+                    "Player:N",
+                    scale=alt.Scale(domain=pids, range=colors),
+                    legend=None,
+                ),
+                tooltip=["Turn:Q", "Player:N", "Count:Q"],
+            )
+            .properties(title=title, height=180)
+        )
+
     _max_turn = gs.get("num_turns", 0)
     _player_ids = list(players.keys())
 
-    _charts_rendered = 0
+    def _render_chart_row(specs: list[tuple[str, dict[str, dict]]]) -> int:
+        """Render a row of altair line charts in columns. Returns number rendered."""
+        active = [(lbl, bp) for lbl, bp in specs if any(bp.values())]
+        if not active:
+            return 0
+        cols = st.columns(len(active))
+        for col, (lbl, bp) in zip(cols, active):
+            col.altair_chart(_altair_line(bp, _max_turn, lbl), use_container_width=True)
+        return len(active)
 
+    rendered = 0
     if has_classic:
-        for label, key in [
-            ("Offers Made", "offers_made_by_turn"),
-            ("Completed", "completed_by_turn"),
-        ]:
-            by_player = {pid: players[pid].get("trade", {}).get(key, {}) for pid in _player_ids}
-            if any(by_player.values()):
-                st.caption(label)
-                st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
-                _charts_rendered += 1
-
+        rendered += _render_chart_row([
+            ("Offers Made", {pid: players[pid].get("trade", {}).get("offers_made_by_turn", {}) for pid in _player_ids}),
+            ("Completed", {pid: players[pid].get("trade", {}).get("completed_by_turn", {}) for pid in _player_ids}),
+        ])
     if has_chat:
         if not has_classic:
             st.caption("All trades negotiated via chat rooms")
-        for label, (section, key) in [
-            ("Rooms Opened", ("trade_chat", "rooms_opened_by_turn")),
-            ("Rooms Joined", ("trade_chat", "rooms_participated_by_turn")),
-            ("Proposals Made", ("trade_chat", "proposals_made_by_turn")),
-            ("Proposals Accepted", ("trade_chat", "proposals_accepted_by_turn")),
-            ("Completed", ("trade", "completed_by_turn")),
-        ]:
-            by_player = {pid: players[pid].get(section, {}).get(key, {}) for pid in _player_ids}
-            if any(by_player.values()):
-                st.caption(label)
-                st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
-                _charts_rendered += 1
-
-    if _charts_rendered == 0 and (has_classic or has_chat):
+        rendered += _render_chart_row([
+            ("Rooms Opened", {pid: players[pid].get("trade_chat", {}).get("rooms_opened_by_turn", {}) for pid in _player_ids}),
+            ("Rooms Joined", {pid: players[pid].get("trade_chat", {}).get("rooms_participated_by_turn", {}) for pid in _player_ids}),
+            ("Proposals Made", {pid: players[pid].get("trade_chat", {}).get("proposals_made_by_turn", {}) for pid in _player_ids}),
+            ("Proposals Accepted", {pid: players[pid].get("trade_chat", {}).get("proposals_accepted_by_turn", {}) for pid in _player_ids}),
+            ("Completed", {pid: players[pid].get("trade", {}).get("completed_by_turn", {}) for pid in _player_ids}),
+        ])
+    if rendered == 0 and (has_classic or has_chat):
         st.info("Per-turn data not available — regenerate analysis.json to see trade activity charts.")
 
     # ── Building Timeline ──

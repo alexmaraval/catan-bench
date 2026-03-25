@@ -1984,6 +1984,8 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     _max_turn = gs.get("num_turns", 0)
     _player_ids = list(players.keys())
 
+    _charts_rendered = 0
+
     if has_classic:
         for label, key in [
             ("Offers Made", "offers_made_by_turn"),
@@ -1993,6 +1995,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             if any(by_player.values()):
                 st.caption(label)
                 st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
+                _charts_rendered += 1
 
     if has_chat:
         if not has_classic:
@@ -2008,6 +2011,10 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             if any(by_player.values()):
                 st.caption(label)
                 st.line_chart(_cumulative_line(by_player, _max_turn), x="Turn", y=_player_ids)
+                _charts_rendered += 1
+
+    if _charts_rendered == 0 and (has_classic or has_chat):
+        st.info("Per-turn data not available — regenerate analysis.json to see trade activity charts.")
 
     # ── Building Timeline ──
     st.subheader("Building Timeline")

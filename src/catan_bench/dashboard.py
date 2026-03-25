@@ -2192,8 +2192,8 @@ def _inject_styles(st) -> None:
         .board-shell {
           width: 100%;
           overflow-x: auto;
-          background: linear-gradient(180deg, #fffefb 0%, #f8fafc 100%);
-          border: 1px solid #e5e7eb;
+          background: #000000;
+          border: 1px solid #374151;
           border-radius: 1rem;
           padding: 0.6rem;
           margin-bottom: 1rem;

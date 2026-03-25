@@ -340,7 +340,9 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
         _maybe_rerun(st, auto_refresh=auto_refresh, refresh_interval=refresh_interval)
         return
 
-    tab_replay, tab_analysis = st.tabs(["Game Replay", "Post-Game Analysis"])
+    tab_replay, tab_analysis, tab_benchmark = st.tabs(
+        ["Game Replay", "Post-Game Analysis", "Benchmark"]
+    )
     with tab_replay:
         cursor = _render_cursor_controls(st, snapshot)
         _render_board_summary(st, snapshot, cursor=cursor)
@@ -348,6 +350,10 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
         _render_current_turn_view(st, snapshot, cursor=cursor)
     with tab_analysis:
         _render_analysis_tab(st, snapshot)
+    with tab_benchmark:
+        from .benchmark_dashboard import render_benchmark_tab
+
+        render_benchmark_tab(st, base_run_dir=base_run_dir)
     _maybe_rerun(st, auto_refresh=auto_refresh, refresh_interval=refresh_interval)
 
 

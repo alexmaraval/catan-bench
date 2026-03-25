@@ -1,8 +1,8 @@
-# catan-bench v0.3.0
+# catan-bench v0.4.0
 
 `catan-bench` is a benchmark harness for running multi-player Settlers of Catan games with baseline bots and LLM players on top of a live `catanatron` engine.
 
-Version `0.3.0` is a simplification pass. The benchmark now revolves around:
+Version `0.4.0` is a simplification pass. The benchmark now revolves around:
 
 - one shared public history stream for the whole table,
 - one two-slot `PlayerMemory` per player with `long_term` and `short_term`,
@@ -53,7 +53,7 @@ The turn model is intentionally simple:
 - Reactive off-turn decisions can read `long_term`, but they do not persist `short_term`.
 - Public history is the only shared transcript. There is no private history stream anymore.
 
-## What ships in 0.3.0
+## What ships in 0.4.0
 
 - a live `CatanatronEngineAdapter` for the current GitHub version of `catanatron`,
 - baseline `RandomLegalPlayer`, `FirstLegalPlayer`, and `ScriptedPlayer` implementations,
@@ -107,13 +107,13 @@ python -m catan_bench --game configs/game.toml --players configs/openai-players.
 You can also override the run path from the CLI with one flag:
 
 ```bash
-python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.4.0/dev/
 ```
 
 3. The configured `run_dir` is treated as a base directory. Each execution creates a timestamped child directory such as:
 
 ```text
-runs/0.3.0/dev/<game-id>-<timestamp>-<token>/
+runs/0.4.0/dev/<game-id>-<timestamp>-<token>/
 ```
 
 The resolved run directory is written into both `metadata.json` and `result.json`.
@@ -121,13 +121,13 @@ The resolved run directory is written into both `metadata.json` and `result.json
 If `--run-dir` points to an existing run directory, the CLI resumes that run in place instead of creating a new child directory:
 
 ```bash
-python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.3.0/dev/<run-name>
+python -m catan_bench --game configs/game.toml --players configs/openai-players.toml --run-dir runs/0.4.0/dev/<run-name>
 ```
 
 4. Export a simple public replay page for a completed run:
 
 ```bash
-python -m catan_bench.replay runs/0.3.0/dev/<run-name>
+python -m catan_bench.replay runs/0.4.0/dev/<run-name>
 ```
 
 This writes `replay.html` inside that run directory.
@@ -135,7 +135,7 @@ This writes `replay.html` inside that run directory.
 5. Open the live dashboard against the same run:
 
 ```bash
-streamlit run dashboard.py -- --run-dir runs/0.3.0/dev/<run-name>
+streamlit run dashboard.py -- --run-dir runs/0.4.0/dev/<run-name>
 ```
 
 The dashboard reads the live artifacts directly, so it can stay open while a game is still running.
@@ -164,7 +164,7 @@ trading_chat_enabled = true
 trading_chat_max_failed_attempts_per_turn = 5
 trading_chat_max_rooms_per_turn = 5
 trading_chat_max_rounds_per_attempt = 3
-run_dir = "runs/0.3.0/dev/"
+run_dir = "runs/0.4.0/dev/"
 ```
 
 Player config example:

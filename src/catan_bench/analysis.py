@@ -1006,10 +1006,14 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
 
         # Trade
         trade = data.get("trade", {})
-        if trade.get("offers_made", 0) or trade.get("confirmations_as_offerer", 0) or trade.get("confirmations_as_acceptee", 0):
-            out.write(f"    Trades: {trade.get('offers_made', 0)} offered, "
-                      f"{trade.get('confirmations_as_offerer', 0) + trade.get('confirmations_as_acceptee', 0)} completed "
-                      f"({trade.get('acceptance_rate', 0):.0%} accept rate)\n")
+        completed = trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0)
+        offers = trade.get("offers_made", 0)
+        if offers or completed:
+            if offers:
+                out.write(f"    Trades: {offers} offered, {completed} completed "
+                          f"({trade.get('acceptance_rate', 0):.0%} accept rate)\n")
+            else:
+                out.write(f"    Trades: {completed} completed (via chat)\n")
 
         # Robber
         robber = data.get("robber", {})

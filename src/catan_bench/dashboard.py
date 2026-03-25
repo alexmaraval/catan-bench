@@ -1918,7 +1918,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     cols[1].metric("Turns", gs.get("num_turns", "?"))
     cols[2].metric("Total Decisions", gs.get("total_decisions", "?"))
     cols[3].metric("Trade Activity", f"{gs.get('trade_activity_rate', 0):.1%}")
-    cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
+    _chat_rooms_total = sum(p.get("trade_chat", {}).get("rooms_opened", 0) for p in players.values())
+    if _chat_rooms_total and gs.get("trade_efficiency", 0) == 0.0:
+        _selected = sum(p.get("trade_chat", {}).get("rooms_closed_selected", 0) for p in players.values())
+        _chat_rate = _selected / _chat_rooms_total
+        cols[4].metric("Chat Success Rate", f"{_chat_rate:.1%}")
+    else:
+        cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
 
     # ── VP Progression Chart ──
     st.subheader("Victory Point Progression")
@@ -1960,18 +1966,36 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── Trade Activity ──
     st.subheader("Trade Activity")
-    trade_rows = []
-    for pid, pdata in players.items():
-        trade = pdata.get("trade", {})
-        trade_rows.append({
-            "Player": pid,
-            "Offers Made": trade.get("offers_made", 0),
-            "Acceptances": trade.get("acceptances", 0),
-            "Rejections": trade.get("rejections", 0),
-            "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
-        })
-    if trade_rows:
-        st.bar_chart(trade_rows, x="Player", y=["Offers Made", "Acceptances", "Rejections", "Completed"])
+    has_classic = any(pdata.get("trade", {}).get("offers_made", 0) > 0 for pdata in players.values())
+    has_chat = any(pdata.get("trade_chat", {}).get("rooms_opened", 0) > 0 for pdata in players.values())
+    if has_classic:
+        classic_rows = []
+        for pid, pdata in players.items():
+            trade = pdata.get("trade", {})
+            classic_rows.append({
+                "Player": pid,
+                "Offers Made": trade.get("offers_made", 0),
+                "Acceptances": trade.get("acceptances", 0),
+                "Rejections": trade.get("rejections", 0),
+                "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
+            })
+        st.bar_chart(classic_rows, x="Player", y=["Offers Made", "Acceptances", "Rejections", "Completed"])
+    if has_chat:
+        chat_rows = []
+        for pid, pdata in players.items():
+            tc = pdata.get("trade_chat", {})
+            trade = pdata.get("trade", {})
+            chat_rows.append({
+                "Player": pid,
+                "Rooms Opened": tc.get("rooms_opened", 0),
+                "Rooms Joined": tc.get("rooms_participated_in", 0),
+                "Proposals Made": tc.get("proposals_made", 0),
+                "Proposals Accepted": tc.get("proposals_accepted", 0),
+                "Completed": trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0),
+            })
+        if not has_classic:
+            st.caption("All trades negotiated via chat rooms")
+        st.bar_chart(chat_rows, x="Player", y=["Rooms Opened", "Rooms Joined", "Proposals Made", "Proposals Accepted", "Completed"])
 
     # ── Building Timeline ──
     st.subheader("Building Timeline")

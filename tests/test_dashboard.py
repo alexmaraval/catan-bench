@@ -27,9 +27,13 @@ class DashboardTests(unittest.TestCase):
         class FakeStreamlit:
             def __init__(self) -> None:
                 self.markdown_calls: list[tuple[str, bool]] = []
+                self.caption_calls: list[str] = []
 
             def markdown(self, body: str, unsafe_allow_html: bool = False) -> None:
                 self.markdown_calls.append((body, unsafe_allow_html))
+
+            def caption(self, body: str) -> None:
+                self.caption_calls.append(body)
 
         st = FakeStreamlit()
 
@@ -41,6 +45,7 @@ class DashboardTests(unittest.TestCase):
                     "resource_card_count": 4,
                     "development_card_count": 1,
                     "longest_road_length": 5,
+                    "played_knights": 3,
                     "has_longest_road": True,
                     "has_largest_army": True,
                 }
@@ -51,7 +56,11 @@ class DashboardTests(unittest.TestCase):
         html, unsafe = st.markdown_calls[0]
         self.assertTrue(unsafe)
         self.assertIn("<th>Army</th>", html)
-        self.assertIn("<td style='text-align:center'>🏆</td>", html)
+        self.assertIn("<td style='text-align:center'>3🏆</td>", html)
+        self.assertEqual(
+            st.caption_calls,
+            ["VP includes public bonuses such as Longest Road and Largest Army."],
+        )
 
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

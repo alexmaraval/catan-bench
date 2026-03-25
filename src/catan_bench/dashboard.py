@@ -460,7 +460,10 @@ def _render_player_summary_table(st, players: dict) -> None:
         res = summary.get("resource_card_count") or summary.get("res_cards", 0)
         dev = summary.get("development_card_count") or summary.get("dev_cards", 0)
         roads = summary.get("longest_road_length", "-")
-        army = "🏆" if summary.get("has_largest_army") else "—"
+        army_count = summary.get("played_knights", 0)
+        if not isinstance(army_count, int):
+            army_count = 0
+        army = f"{army_count}🏆" if summary.get("has_largest_army") else str(army_count)
         flags = []
         if summary.get("has_longest_road"):
             flags.append("🏆 Road")
@@ -488,6 +491,7 @@ def _render_player_summary_table(st, players: dict) -> None:
             + "</tbody></table>"
         )
         st.markdown(table_html, unsafe_allow_html=True)
+        st.caption("VP includes public bonuses such as Longest Road and Largest Army.")
 
 
 def _render_turn_event_digest(

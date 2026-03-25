@@ -477,6 +477,7 @@ class CatanatronEngineAdapter:
                 state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
             ),
             "longest_road_length": state.player_state[f"{key}_LONGEST_ROAD_LENGTH"],
+            "played_knights": state.player_state[f"{key}_PLAYED_KNIGHT"],
             "has_longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),
             "has_largest_army": bool(state.player_state[f"{key}_HAS_ARMY"]),
         }

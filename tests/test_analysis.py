@@ -8,6 +8,7 @@ from pathlib import Path
 
 from catan_bench.analysis import (
     analyze_game,
+    compute_market_analysis,
     compute_building_timeline,
     compute_decision_quality,
     compute_dev_card_analysis,
@@ -731,6 +732,49 @@ class TestComputeStrategyEvolution(unittest.TestCase):
         self.assertEqual(red_result["opening_strategy"], "Red plan")
         self.assertEqual(red_result["strategy_update_count"], 1)
 
+    def test_strategy_stability_reflects_rewrites(self) -> None:
+        snapshots = [
+            _mem_snapshot("RED", 1, "opening_strategy", long_term="ore city plan"),
+            _mem_snapshot("RED", 2, "turn_end", long_term="sheep knight strategy"),
+        ]
+        result = compute_strategy_evolution("RED", snapshots)
+        self.assertEqual(result["strategy_stability"], 0.0)
+
+
+class TestComputeMarketAnalysis(unittest.TestCase):
+    def test_market_roles_and_bank_taker_are_tracked(self) -> None:
+        events = [
+            _event(
+                "trade_confirmed",
+                offering_player_id="RED",
+                accepting_player_id="BLUE",
+                offer={"WOOD": 1},
+                request={"BRICK": 1},
+            ),
+            _event(
+                "action_taken",
+                actor="WHITE",
+                action={
+                    "action_type": "MARITIME_TRADE",
+                    "payload": {
+                        "give": ["ORE", "ORE", "ORE", "ORE"],
+                        "receive": "WOOD",
+                    },
+                },
+            ),
+        ]
+
+        result = compute_market_analysis(events, ["RED", "BLUE", "WHITE"])
+
+        self.assertEqual(result["actors"]["RED"]["market_role"], "Market maker")
+        self.assertEqual(result["actors"]["BLUE"]["market_role"], "Market taker")
+        self.assertEqual(result["actors"]["WHITE"]["market_role"], "Market maker")
+        self.assertEqual(result["actors"]["BANK"]["market_role"], "Market taker")
+        self.assertEqual(result["actors"]["BANK"]["taker_deals"], 1)
+        self.assertAlmostEqual(result["actors"]["RED"]["market_initiation_rate"], 1.0)
+        self.assertGreater(result["actors"]["WHITE"]["resource_market_share"]["WOOD"], 0.0)
+        self.assertGreater(result["resource_involvement_totals"]["WOOD"], 0)
+
 
 # ── PIPS constant test ────────────────────────────────────────────────────────
 
@@ -852,7 +896,7 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             analysis = analyze_game(run_dir, write=True)
 
             self.assertEqual(analysis["game_id"], "test-game")
-            self.assertEqual(analysis["version"], "2")
+            self.assertEqual(analysis["version"], "3")
 
             gs = analysis["game_summary"]
             self.assertEqual(gs["winner_ids"], ["RED"])
@@ -875,9 +919,12 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             # New keys present
             self.assertIn("trade_chat", players["RED"])
             self.assertIn("strategy", players["RED"])
+            self.assertIn("market_profile", players["RED"])
             self.assertEqual(players["RED"]["strategy"]["opening_strategy"], "Expand toward ore ports")
             self.assertEqual(players["RED"]["strategy"]["strategy_update_count"], 2)
             self.assertEqual(players["RED"]["strategy"]["final_strategy"], "Pivot to city strategy")
+            self.assertIn("strategy_stability", players["RED"]["strategy"])
+            self.assertIn("market", analysis)
 
             # analysis.json was written
             self.assertTrue((run_dir / "analysis.json").exists())

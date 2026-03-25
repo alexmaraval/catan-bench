@@ -5,6 +5,7 @@ src/catan_bench/__init__.py
 src/catan_bench/__main__.py
 src/catan_bench/analysis.py
 src/catan_bench/catanatron_adapter.py
+src/catan_bench/cleanup_runs.py
 src/catan_bench/config.py
 src/catan_bench/dashboard.py
 src/catan_bench/engine.py
@@ -57,6 +58,7 @@ src/catan_bench/templates/partials/turn_end_contract.jinja
 src/catan_bench/templates/partials/turn_start_contract.jinja
 tests/test_analysis.py
 tests/test_catanatron_adapter.py
+tests/test_cleanup_runs.py
 tests/test_config_and_runner.py
 tests/test_dashboard.py
 tests/test_llm.py

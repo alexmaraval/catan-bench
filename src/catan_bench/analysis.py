@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -338,6 +339,55 @@ def _add_resources(target: dict[str, int], source: dict[str, Any]) -> None:
             target[resource] = target.get(resource, 0) + int(amount)
 
 
+def _safe_div(numerator: int | float, denominator: int | float) -> float:
+    if not denominator:
+        return 0.0
+    return float(numerator) / float(denominator)
+
+
+def _role_label(maker_value: int, taker_value: int) -> str:
+    if maker_value == 0 and taker_value == 0:
+        return "Inactive"
+    if maker_value > taker_value:
+        return "Market maker"
+    if taker_value > maker_value:
+        return "Market taker"
+    return "Balanced"
+
+
+def _resource_counts_from_list(items: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not isinstance(items, list):
+        return counts
+    for item in items:
+        if isinstance(item, str) and item in RESOURCES:
+            counts[item] = counts.get(item, 0) + 1
+    return counts
+
+
+def _strategy_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True)
+
+
+def _tokenize_strategy(value: Any) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", _strategy_text(value).lower()))
+
+
+def _strategy_similarity(left: Any, right: Any) -> float:
+    left_tokens = _tokenize_strategy(left)
+    right_tokens = _tokenize_strategy(right)
+    if not left_tokens and not right_tokens:
+        return 1.0
+    union = left_tokens | right_tokens
+    if not union:
+        return 1.0
+    return len(left_tokens & right_tokens) / len(union)
+
+
 def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any]:
     """Compute per-player trade metrics from event log."""
     offers_made = 0
@@ -649,12 +699,143 @@ def compute_strategy_evolution(
         if lt is not None:
             final_strategy = lt
 
+    similarities: list[float] = []
+    for previous, current in zip(strategy_updates, strategy_updates[1:]):
+        similarities.append(
+            _strategy_similarity(previous.get("long_term"), current.get("long_term"))
+        )
+    strategy_stability = round(sum(similarities) / len(similarities), 4) if similarities else 1.0
+
     return {
         "opening_strategy": opening_strategy,
         "strategy_updates": strategy_updates,
         "strategy_update_count": len(strategy_updates),
         "final_strategy": final_strategy,
         "short_term_note_count": short_term_note_count,
+        "strategy_stability": strategy_stability,
+    }
+
+
+def compute_market_analysis(
+    events: list[Event],
+    player_ids: Sequence[str],
+) -> dict[str, Any]:
+    actors = list(dict.fromkeys([*player_ids, "BANK", "PORT"]))
+    actor_stats: dict[str, dict[str, Any]] = {
+        actor: {
+            "maker_deals": 0,
+            "taker_deals": 0,
+            "maker_volume_by_resource": {},
+            "taker_volume_by_resource": {},
+            "deal_volume_by_resource": {},
+        }
+        for actor in actors
+    }
+    resource_involvement_totals: dict[str, int] = {}
+
+    def register_deal(*, maker: str, taker: str, resources: dict[str, int]) -> None:
+        actor_stats[maker]["maker_deals"] += 1
+        actor_stats[taker]["taker_deals"] += 1
+        for resource, amount in resources.items():
+            if resource not in RESOURCES or amount <= 0:
+                continue
+            actor_stats[maker]["maker_volume_by_resource"][resource] = (
+                actor_stats[maker]["maker_volume_by_resource"].get(resource, 0) + amount
+            )
+            actor_stats[taker]["taker_volume_by_resource"][resource] = (
+                actor_stats[taker]["taker_volume_by_resource"].get(resource, 0) + amount
+            )
+            actor_stats[maker]["deal_volume_by_resource"][resource] = (
+                actor_stats[maker]["deal_volume_by_resource"].get(resource, 0) + amount
+            )
+            actor_stats[taker]["deal_volume_by_resource"][resource] = (
+                actor_stats[taker]["deal_volume_by_resource"].get(resource, 0) + amount
+            )
+            resource_involvement_totals[resource] = resource_involvement_totals.get(resource, 0) + amount * 2
+
+    for event in events:
+        if event.kind == "trade_confirmed":
+            maker = event.payload.get("offering_player_id")
+            taker = event.payload.get("accepting_player_id")
+            if not isinstance(maker, str) or not isinstance(taker, str):
+                continue
+            offer = event.payload.get("offer", {})
+            request = event.payload.get("request", {})
+            resources: dict[str, int] = {}
+            if isinstance(offer, dict):
+                _add_resources(resources, offer)
+            if isinstance(request, dict):
+                _add_resources(resources, request)
+            register_deal(maker=maker, taker=taker, resources=resources)
+            continue
+
+        if event.kind != "action_taken":
+            continue
+        action = event.payload.get("action", {})
+        if not isinstance(action, dict) or action.get("action_type") != "MARITIME_TRADE":
+            continue
+        maker = event.actor_player_id
+        if not isinstance(maker, str):
+            continue
+        payload = action.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        give_counts = _resource_counts_from_list(payload.get("give"))
+        receive = payload.get("receive")
+        resources = dict(give_counts)
+        if isinstance(receive, str) and receive in RESOURCES:
+            resources[receive] = resources.get(receive, 0) + 1
+        give_total = sum(give_counts.values())
+        taker = "BANK" if give_total >= 4 else "PORT"
+        register_deal(maker=maker, taker=taker, resources=resources)
+
+    resource_market_share: dict[str, dict[str, float]] = {}
+    for resource in RESOURCES:
+        total = resource_involvement_totals.get(resource, 0)
+        if total <= 0:
+            continue
+        shares: dict[str, float] = {}
+        for actor, stats in actor_stats.items():
+            volume = int(stats["deal_volume_by_resource"].get(resource, 0))
+            if volume > 0:
+                shares[actor] = round(_safe_div(volume, total), 4)
+        resource_market_share[resource] = shares
+
+    actor_profiles: dict[str, Any] = {}
+    for actor, stats in actor_stats.items():
+        maker_deals = int(stats["maker_deals"])
+        taker_deals = int(stats["taker_deals"])
+        total_deals = maker_deals + taker_deals
+        initiation_rate = round(_safe_div(maker_deals, total_deals), 4) if total_deals else 0.0
+        share_by_resource = {
+            resource: resource_market_share.get(resource, {}).get(actor, 0.0)
+            for resource in RESOURCES
+            if resource_market_share.get(resource, {}).get(actor, 0.0) > 0
+        }
+        resource_roles = {
+            resource: _role_label(
+                int(stats["maker_volume_by_resource"].get(resource, 0)),
+                int(stats["taker_volume_by_resource"].get(resource, 0)),
+            )
+            for resource in RESOURCES
+            if stats["maker_volume_by_resource"].get(resource, 0)
+            or stats["taker_volume_by_resource"].get(resource, 0)
+        }
+        actor_profiles[actor] = {
+            "maker_deals": maker_deals,
+            "taker_deals": taker_deals,
+            "market_initiation_rate": initiation_rate,
+            "market_role": _role_label(maker_deals, taker_deals),
+            "maker_volume_by_resource": stats["maker_volume_by_resource"],
+            "taker_volume_by_resource": stats["taker_volume_by_resource"],
+            "resource_market_role": resource_roles,
+            "resource_market_share": share_by_resource,
+        }
+
+    return {
+        "actors": actor_profiles,
+        "resource_market_share": resource_market_share,
+        "resource_involvement_totals": resource_involvement_totals,
     }
 
 
@@ -911,6 +1092,27 @@ def analyze_player(
     final_vp = int(player_meta.get("actual_victory_points", 0)) if isinstance(player_meta, dict) else 0
 
     vp_progression = compute_vp_progression(player_id, state_snapshots)
+    trade = compute_trade_analysis(player_id, events)
+    trade_chat = compute_trade_chat_analysis(player_id, events)
+    strategy = compute_strategy_evolution(player_id, memory_snapshots)
+    total_completed_trades = trade["confirmations_as_offerer"] + trade["confirmations_as_acceptee"]
+    market_profile = {
+        "market_initiation_rate": round(
+            _safe_div(
+                trade["offers_made"] + trade_chat["rooms_opened"],
+                trade["offers_made"]
+                + trade["offers_received"]
+                + trade_chat["rooms_opened"]
+                + trade_chat["rooms_participated_in"],
+            ),
+            4,
+        ),
+        "offerer_share": round(
+            _safe_div(trade["confirmations_as_offerer"], total_completed_trades),
+            4,
+        ) if total_completed_trades else 0.0,
+        "strategy_stability": strategy["strategy_stability"],
+    }
 
     return {
         "final_vp": final_vp,
@@ -918,15 +1120,16 @@ def analyze_player(
         "vp_progression": vp_progression,
         "resource_production": compute_resource_production(player_id, events, state_snapshots),
         "buildings": compute_building_timeline(player_id, events),
-        "trade": compute_trade_analysis(player_id, events),
-        "trade_chat": compute_trade_chat_analysis(player_id, events),
+        "trade": trade,
+        "trade_chat": trade_chat,
         "robber": compute_robber_analysis(player_id, events),
         "discard": compute_discard_analysis(player_id, events),
         "dev_cards": compute_dev_card_analysis(player_id, events, final_snapshot),
         "decision_quality": compute_decision_quality(prompt_traces),
         "achievements": compute_achievements(player_id, final_snapshot),
         "phase_analysis": compute_phase_analysis(player_id, events, state_snapshots, vp_progression),
-        "strategy": compute_strategy_evolution(player_id, memory_snapshots),
+        "strategy": strategy,
+        "market_profile": market_profile,
     }
 
 
@@ -966,11 +1169,18 @@ def analyze_game(run_dir: str | Path, *, write: bool = True) -> dict[str, Any]:
             result=result,
         )
 
+    market = compute_market_analysis(events, player_ids)
+    for player_id in player_ids:
+        market_actor = market["actors"].get(player_id, {})
+        if isinstance(market_actor, dict):
+            players[player_id]["market_profile"].update(market_actor)
+
     analysis = {
         "game_id": str(result.get("game_id", "")),
-        "version": "2",
+        "version": "3",
         "game_summary": game_summary,
         "players": players,
+        "market": market,
     }
 
     if write:

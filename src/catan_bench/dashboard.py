@@ -2465,6 +2465,17 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             phase = pdata.get("phase_analysis", {}).get("opening", {})
             if phase.get("pip_count", 0):
                 st.caption(f"Opening: {phase.get('resource_diversity', 0)} types, {phase.get('pip_count', 0)} pips")
+            market_profile = pdata.get("market_profile", {})
+            if market_profile:
+                st.caption(
+                    "Market: "
+                    f"{market_profile.get('market_role', '—')} · "
+                    f"init {market_profile.get('market_initiation_rate', 0):.0%} · "
+                    f"offerer {market_profile.get('offerer_share', 0):.0%}"
+                )
+            strat = pdata.get("strategy", {})
+            if strat.get("strategy_stability") is not None:
+                st.caption(f"Strategy stability: {strat.get('strategy_stability', 0):.0%}")
 
     # ── Trade Negotiation Breakdown ──
     any_chat = any(
@@ -2619,6 +2630,64 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     )
                     col.plotly_chart(fig, width="stretch")
 
+    # ── Market Structure ──
+    market = analysis_data.get("market", {})
+    actors = market.get("actors", {}) if isinstance(market, dict) else {}
+    if actors:
+        st.subheader("Market Structure")
+
+        role_rows = []
+        for actor, stats in actors.items():
+            if not isinstance(stats, dict):
+                continue
+            role_rows.append({
+                "Actor": actor,
+                "Role": stats.get("market_role", "—"),
+                "Maker Deals": stats.get("maker_deals", 0),
+                "Taker Deals": stats.get("taker_deals", 0),
+                "Init Rate": (
+                    f"{stats.get('market_initiation_rate', 0):.0%}"
+                    if actor in players else "—"
+                ),
+            })
+        if role_rows:
+            st.caption("Overall maker/taker profile across domestic and maritime deals.")
+            st.dataframe(role_rows, width="stretch")
+
+        resource_role_rows = []
+        for actor, stats in actors.items():
+            if not isinstance(stats, dict):
+                continue
+            resource_roles = stats.get("resource_market_role", {})
+            resource_role_rows.append({
+                "Actor": actor,
+                "Overall": stats.get("market_role", "—"),
+                "WOOD": resource_roles.get("WOOD", "—"),
+                "BRICK": resource_roles.get("BRICK", "—"),
+                "SHEEP": resource_roles.get("SHEEP", "—"),
+                "WHEAT": resource_roles.get("WHEAT", "—"),
+                "ORE": resource_roles.get("ORE", "—"),
+            })
+        if resource_role_rows:
+            st.caption("Per-resource role rubric. BANK and PORT appear as takers for maritime trades.")
+            st.dataframe(resource_role_rows, width="stretch")
+
+        share_rows = []
+        for pid, pdata in players.items():
+            profile = pdata.get("market_profile", {})
+            shares = profile.get("resource_market_share", {})
+            share_rows.append({
+                "Player": pid,
+                "WOOD": f"{shares.get('WOOD', 0):.1%}",
+                "BRICK": f"{shares.get('BRICK', 0):.1%}",
+                "SHEEP": f"{shares.get('SHEEP', 0):.1%}",
+                "WHEAT": f"{shares.get('WHEAT', 0):.1%}",
+                "ORE": f"{shares.get('ORE', 0):.1%}",
+            })
+        if share_rows:
+            st.caption("Per-resource market share based on each player's involvement in completed deals.")
+            st.dataframe(share_rows, width="stretch")
+
     # ── Strategy Evolution ──
     any_strategy = any(
         pdata.get("strategy", {}).get("opening_strategy")
@@ -2632,6 +2701,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 continue
             color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
             with st.expander(f"{pid} — {strat.get('strategy_update_count', 0)} strategy updates"):
+                st.caption(f"Strategy stability: {strat.get('strategy_stability', 0):.0%}")
                 if strat.get("opening_strategy"):
                     st.markdown(f"**Opening strategy:** {strat['opening_strategy']}")
                 updates = strat.get("strategy_updates", [])
@@ -2840,7 +2910,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--run-dir",
-        default="runs/0.3.0/dev",
+        default="runs/0.4.0/dev",
         help="Run directory to monitor live.",
     )
     return parser.parse_args(argv)

@@ -1,40 +1,39 @@
-# Groq (free tier available, very fast)
 [[players]]
 id = "RED"
 type = "llm"
-model = "openai/gpt-oss-120b"
-api_base = "https://api.groq.com/openai/v1"
-api_key_env = "GROQ_API_KEY"
+model = "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
+api_base = "https://api.together.ai/v1"
+api_key_env = "TOGETHER_API_KEY"
+reasoning_enabled = false
+timeout_seconds = 300
+temperature = 0.7
+top_p = 0.8
+
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "nousresearch/hermes-4-70b"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
 reasoning_enabled = false
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-
-# Together AI
-[[players]]
-id = "ORANGE"
-type = "llm"
-model = "moonshotai/Kimi-K2.5"
-api_base = "https://api.together.ai/v1"
-api_key_env = "TOGETHER_API_KEY"
-temperature = 0.3
-top_p = 1.0
-reasoning_enabled = false
 
 
 [[players]]
 id = "BLUE"
 type = "llm"
-#model = "gemini-2.0-flash"
-model = "MiniMaxAI/MiniMax-M2.5"
-#api_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
-api_base = "https://api.together.ai/v1"
-#api_key_env = "GEMINI_API_KEY"
-api_key_env = "TOGETHER_API_KEY"
+model = "arcee-ai/trinity-large-preview:free"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
 reasoning_enabled = false
-timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
+#model = "gemini-2.0-flash"
+#api_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
+#api_key_env = "GEMINI_API_KEY"
 
 
 [[players]]

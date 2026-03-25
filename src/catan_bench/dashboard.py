@@ -313,7 +313,7 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
     auto_refresh = st.sidebar.toggle("Auto refresh", value=True)
     refresh_interval = st.sidebar.slider("Refresh interval (seconds)", 1, 15, 2)
     st.sidebar.caption(f"Base directory: `{base_run_dir}`")
-    st.sidebar.button("Refresh now", use_container_width=True)
+    st.sidebar.button("Refresh now", width="stretch")
 
     if not base_run_dir.exists():
         st.warning(f"Base run directory does not exist yet: `{base_run_dir}`")
@@ -368,26 +368,26 @@ def _render_cursor_controls(st, snapshot: DashboardSnapshot) -> int:
             f"Turn {current_turn} · history {current_cursor}/{max_history_index}"
         )
     with prev_turn_col:
-        if st.button("Previous turn", use_container_width=True, key=f"prev-turn::{snapshot.run_dir}"):
+        if st.button("Previous turn", width="stretch", key=f"prev-turn::{snapshot.run_dir}"):
             st.session_state[cursor_key] = _jump_history_to_previous_turn(
                 current_cursor,
                 turn_markers,
             )
     with prev_event_col:
-        if st.button("Previous event", use_container_width=True, key=f"prev-event::{snapshot.run_dir}"):
+        if st.button("Previous event", width="stretch", key=f"prev-event::{snapshot.run_dir}"):
             st.session_state[cursor_key] = max(0, current_cursor - 1)
     with next_event_col:
-        if st.button("Next event", use_container_width=True, key=f"next-event::{snapshot.run_dir}"):
+        if st.button("Next event", width="stretch", key=f"next-event::{snapshot.run_dir}"):
             st.session_state[cursor_key] = min(max_history_index, current_cursor + 1)
     with next_turn_col:
-        if st.button("Next turn", use_container_width=True, key=f"next-turn::{snapshot.run_dir}"):
+        if st.button("Next turn", width="stretch", key=f"next-turn::{snapshot.run_dir}"):
             st.session_state[cursor_key] = _jump_history_to_next_turn(
                 current_cursor,
                 turn_markers,
                 max_history_index=max_history_index,
             )
     with live_col:
-        if st.button("Jump to latest", use_container_width=True, key=f"jump-live::{snapshot.run_dir}"):
+        if st.button("Jump to latest", width="stretch", key=f"jump-live::{snapshot.run_dir}"):
             st.session_state[cursor_key] = max_history_index
 
     cursor = st.slider(
@@ -1526,9 +1526,11 @@ def build_board_svg(board: Mapping[str, JsonValue], *, height: int = 520) -> str
         if isinstance(node, dict)
     ]
 
+    bg_rect = f"<rect x='{min_x:.1f}' y='{min_y:.1f}' width='{width:.1f}' height='{(max_y - min_y):.1f}' fill='#000000'/>"
     return (
         "<div class='board-shell'>"
         f"<svg class='board-svg' viewBox='{view_box}' style='height:{height}px'>"
+        + bg_rect
         + "".join(tile_fragments)
         + "".join(edge_fragments)
         + "".join(node_fragments)
@@ -2014,7 +2016,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             return 0
         cols = st.columns(len(active))
         for col, (lbl, bp) in zip(cols, active):
-            col.altair_chart(_altair_line(bp, _max_turn, lbl), use_container_width=True)
+            col.altair_chart(_altair_line(bp, _max_turn, lbl), width="stretch")
         return len(active)
 
     rendered = 0
@@ -2049,7 +2051,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             building_rows.append({"Player": pid, "Turn": r.get("turn_index"), "Type": "Road", "Location": str(r.get("edge"))})
     if building_rows:
         building_rows.sort(key=lambda r: (r["Turn"], r["Player"]))
-        st.dataframe(building_rows, use_container_width=True)
+        st.dataframe(building_rows, width="stretch")
 
     # ── Per-Player Summary Cards ──
     st.subheader("Player Summary")
@@ -2104,7 +2106,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 "Rooms Participated": tc.get("rooms_participated_in", 0),
                 "Avg Rounds": tc.get("avg_rounds_per_room", 0),
             })
-        st.dataframe(chat_rows, use_container_width=True)
+        st.dataframe(chat_rows, width="stretch")
 
         # Counterparty heatmap as a table
         cp_rows = []
@@ -2115,7 +2117,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     cp_rows.append({"Player": pid, "Trade Partner": partner, "Completed Trades": count})
         if cp_rows:
             st.caption("Trade partnerships (completed chat trades)")
-            st.dataframe(cp_rows, use_container_width=True)
+            st.dataframe(cp_rows, width="stretch")
 
     # ── Strategy Evolution ──
     any_strategy = any(

@@ -472,45 +472,49 @@ def _render_player_summary_table(st, players: dict) -> None:
         if not isinstance(summary, dict):
             continue
         accent, _, _ = _palette_for_player(player_id)
-        vp = summary.get("visible_victory_points") or summary.get("vp", 0)
-        res = summary.get("resource_card_count") or summary.get("res_cards", 0)
+        visible_vp = int(summary.get("visible_victory_points") or summary.get("vp", 0))
         dev_vp = summary.get("dev_victory_points", 0)
         if not isinstance(dev_vp, int):
             dev_vp = 0
-        roads = summary.get("longest_road_length", "-")
+        has_road = bool(summary.get("has_longest_road"))
+        has_army = bool(summary.get("has_largest_army"))
+        # Board VP = visible VP minus road/army bonuses (each worth 2)
+        board_vp = visible_vp - (2 if has_road else 0) - (2 if has_army else 0)
+        total_vp = visible_vp + dev_vp
+        road_len = summary.get("longest_road_length", "-")
+        road_cell = f"{road_len} 🛤️" if has_road else str(road_len)
         army_count = summary.get("played_knights", 0)
         if not isinstance(army_count, int):
             army_count = 0
-        army = f"{army_count}🏆" if summary.get("has_largest_army") else str(army_count)
-        flags = []
-        if summary.get("has_longest_road"):
-            flags.append("🏆 Road")
-        if summary.get("has_largest_army"):
-            flags.append("⚔️ Army")
-        rows.append(
-            f"<tr>"
-            f"<td><span style='color:{accent};font-weight:600'>{player_id}</span></td>"
-            f"<td style='text-align:center'>{vp}</td>"
-            f"<td style='text-align:center'>{res}</td>"
-            f"<td style='text-align:center'>{dev_vp}</td>"
-            f"<td style='text-align:center'>{roads}</td>"
-            f"<td style='text-align:center'>{army}</td>"
-            f"<td>{' '.join(flags)}</td>"
-            f"</tr>"
-        )
+        army_cell = f"{army_count} ⚔️" if has_army else str(army_count)
+        rows.append((player_id, accent, board_vp, dev_vp, road_cell, army_cell, total_vp))
+
     if rows:
+        # Winner = player with highest total VP
+        max_vp = max(r[6] for r in rows)
+        html_rows = []
+        for pid, accent, board_vp, dev_vp, road_cell, army_cell, total_vp in rows:
+            trophy = " 🏆" if total_vp == max_vp and total_vp > 0 else ""
+            html_rows.append(
+                f"<tr>"
+                f"<td><span style='color:{accent};font-weight:600'>{pid}</span></td>"
+                f"<td style='text-align:center'>{board_vp}</td>"
+                f"<td style='text-align:center'>{dev_vp}</td>"
+                f"<td style='text-align:center'>{road_cell}</td>"
+                f"<td style='text-align:center'>{army_cell}</td>"
+                f"<td style='text-align:center;font-weight:700'>{total_vp}{trophy}</td>"
+                f"</tr>"
+            )
         table_html = (
             "<table style='width:100%;border-collapse:collapse;font-size:0.82rem'>"
             "<thead><tr style='border-bottom:1px solid #e5e7eb'>"
             "<th style='text-align:left'>Player</th>"
-            "<th>VP</th><th>Res</th><th>Dev VP</th><th>Road</th><th>Army</th><th></th>"
+            "<th>Board VP</th><th>Dev VP</th><th>L. Road</th><th>L. Army</th><th>Total VP</th>"
             "</tr></thead><tbody>"
-            + "".join(rows)
+            + "".join(html_rows)
             + "</tbody></table>"
         )
         st.markdown(table_html, unsafe_allow_html=True)
-        st.caption("VP includes public bonuses such as Longest Road and Largest Army.")
-        st.caption("Dev VP counts victory-point development cards, including hidden ones.")
 
 
 def _render_turn_event_digest(
@@ -2212,6 +2216,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── VP Progression Chart ──
     st.subheader("Victory Point Progression")
+    num_turns = gs.get("num_turns", 0)
     vp_chart_data: dict[str, dict[int, int]] = {}
     max_turn = 0
     for pid, pdata in players.items():
@@ -2219,6 +2224,11 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         vp_chart_data[pid] = {entry["turn_index"]: entry["vp"] for entry in vp_prog}
         if vp_prog:
             max_turn = max(max_turn, max(e["turn_index"] for e in vp_prog))
+        # Extend to the final turn with actual VP so the plot reaches the game end
+        final_vp = pdata.get("final_vp", 0)
+        if final_vp and num_turns > 0:
+            vp_chart_data[pid][num_turns] = final_vp
+            max_turn = max(max_turn, num_turns)
 
     if vp_chart_data and max_turn > 0:
         chart_rows = []
@@ -2359,8 +2369,8 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     if rendered == 0 and (has_classic or has_chat):
         st.info("Per-turn data not available — regenerate analysis.json to see trade activity charts.")
 
-    # ── Building Timeline ──
-    st.subheader("Building Timeline")
+    # ── Building Timeline + Longest Road + Largest Army ──
+    st.subheader("Building & Achievement Progression")
     _build_events: list[dict] = []
     for pid, pdata in players.items():
         buildings = pdata.get("buildings", {})
@@ -2374,70 +2384,163 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             if r.get("turn_index") is not None:
                 _build_events.append({"player": pid, "turn": r["turn_index"], "type": "Road"})
 
-    if _build_events:
-        _max_turn = max(e["turn"] for e in _build_events)
-        _turns = list(range(0, _max_turn + 2))
-        _dash = {"Road": "longdash", "Settlement": "solid", "City": "solid"}
-        _width = {"Road": 1.5, "Settlement": 2, "City": 4}
-        _btimeline_fig = go.Figure()
+    _game_max_turn = gs.get("num_turns", 0)
+    _plotly_layout_base = dict(
+        height=320,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="Turn", gridcolor="#1e293b", color="#94a3b8",
+                   range=[0, _game_max_turn] if _game_max_turn else None),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=10)),
+        margin=dict(l=40, r=10, t=30, b=40),
+        hovermode="x unified",
+    )
 
-        _marker_symbol = {"Settlement": "circle", "City": "circle"}  # cities use text overlay instead
-        _marker_size   = {"Settlement": 10, "City": 13}
+    _build_col, _road_col, _army_col = st.columns(3)
 
+    # (a) Building timeline
+    with _build_col:
+        st.markdown("**🏘️ Buildings**")
+        if _build_events:
+            _max_turn = max(e["turn"] for e in _build_events)
+            _turns = list(range(0, _max_turn + 2))
+            _dash = {"Road": "longdash", "Settlement": "solid", "City": "solid"}
+            _width = {"Road": 1.5, "Settlement": 2, "City": 4}
+            _btimeline_fig = go.Figure()
+
+            for pid in sorted(players.keys()):
+                _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
+                for btype in ("Road", "Settlement", "City"):
+                    _event_turns = sorted(
+                        e["turn"] for e in _build_events if e["player"] == pid and e["type"] == btype
+                    )
+                    if not _event_turns:
+                        continue
+                    _cum, _count = [], 0
+                    for t in _turns:
+                        _count += _event_turns.count(t)
+                        _cum.append(_count)
+                    _btimeline_fig.add_trace(go.Scatter(
+                        x=_turns,
+                        y=_cum,
+                        mode="lines",
+                        name=f"{pid} – {btype}",
+                        line=dict(color=_pcolor, dash=_dash[btype], width=_width[btype]),
+                        showlegend=False,
+                        hovertemplate=f"<b>{pid}</b> {btype}<br>Turn %{{x}}: %{{y}}<extra></extra>",
+                    ))
+                    if btype == "Settlement":
+                        _mx = list(_event_turns)
+                        _my = [_cum[_turns.index(t)] for t in _mx]
+                        _btimeline_fig.add_trace(go.Scatter(
+                            x=_mx, y=_my,
+                            mode="markers",
+                            marker=dict(symbol="circle", size=8, color=_pcolor, line=dict(width=1.5, color="#0f172a")),
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ))
+                    elif btype == "City":
+                        _mx = list(_event_turns)
+                        _my = [_cum[_turns.index(t)] for t in _mx]
+                        _btimeline_fig.add_trace(go.Scatter(
+                            x=_mx, y=_my,
+                            mode="text",
+                            text=["⌂"] * len(_mx),
+                            textfont=dict(size=20, color=_pcolor),
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ))
+
+            # Static legend as annotations at the top
+            _btimeline_fig.update_layout(
+                **{**_plotly_layout_base, "margin": dict(l=40, r=10, t=50, b=40)},
+                showlegend=False,
+                yaxis=dict(title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"),
+                annotations=[
+                    dict(
+                        text="- - Road &nbsp;&nbsp; ── ● Settlement &nbsp;&nbsp; ━━ ⌂ City",
+                        xref="paper", yref="paper", x=0.5, y=1.12,
+                        showarrow=False, font=dict(color="#94a3b8", size=10),
+                        xanchor="center",
+                    ),
+                ],
+            )
+            st.plotly_chart(_btimeline_fig, width="stretch")
+        else:
+            st.info("No building data available.")
+
+    # (b) Longest road progression
+    with _road_col:
+        st.markdown("**🛤️ Longest Road**")
+        _road_fig = go.Figure()
+        _has_road_data = False
         for pid in sorted(players.keys()):
             _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
-            for btype in ("Road", "Settlement", "City"):
-                _event_turns = sorted(
-                    e["turn"] for e in _build_events if e["player"] == pid and e["type"] == btype
-                )
-                if not _event_turns:
-                    continue
-                _cum, _count = [], 0
-                for t in _turns:
-                    _count += _event_turns.count(t)
-                    _cum.append(_count)
-                _btimeline_fig.add_trace(go.Scatter(
-                    x=_turns,
-                    y=_cum,
-                    mode="lines",
-                    name=f"{pid} – {btype}",
-                    line=dict(color=_pcolor, dash=_dash[btype], width=_width[btype]),
-                    hovertemplate=f"<b>{pid}</b> {btype}<br>Turn %{{x}}: %{{y}}<extra></extra>",
-                ))
-                # Markers at each build event: circle for settlements, ⌂ house for cities
-                if btype == "Settlement":
-                    _mx = list(_event_turns)
-                    _my = [_cum[_turns.index(t)] for t in _mx]
-                    _btimeline_fig.add_trace(go.Scatter(
-                        x=_mx, y=_my,
-                        mode="markers",
-                        marker=dict(symbol="circle", size=10, color=_pcolor, line=dict(width=1.5, color="#0f172a")),
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ))
-                elif btype == "City":
-                    _mx = list(_event_turns)
-                    _my = [_cum[_turns.index(t)] for t in _mx]
-                    _btimeline_fig.add_trace(go.Scatter(
-                        x=_mx, y=_my,
-                        mode="text",
-                        text=["⌂"] * len(_mx),
-                        textfont=dict(size=18, color=_pcolor),
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ))
+            road_prog = players[pid].get("road_progression", [])
+            if not road_prog:
+                continue
+            _has_road_data = True
+            turns = [e["turn_index"] for e in road_prog]
+            lengths = [e["road_length"] for e in road_prog]
+            _road_fig.add_trace(go.Scatter(
+                x=turns,
+                y=lengths,
+                mode="lines",
+                name=pid,
+                line=dict(color=_pcolor, width=2),
+                showlegend=False,
+                hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} segments<extra></extra>",
+            ))
+        # Add threshold line at 5 (minimum for longest road award)
+        if _has_road_data:
+            _road_fig.add_hline(
+                y=5, line_dash="dot", line_color="#94a3b8",
+                annotation_text="Min for 🏆", annotation_position="top left",
+                annotation_font_color="#94a3b8", annotation_font_size=10,
+            )
+            _road_fig.update_layout(
+                **_plotly_layout_base,
+                yaxis=dict(title="Road length", gridcolor="#1e293b", color="#94a3b8"),
+            )
+            st.plotly_chart(_road_fig, width="stretch")
+        else:
+            st.info("No road progression data — regenerate analysis.json.")
 
-        _btimeline_fig.update_layout(
-            height=320,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="Turn", gridcolor="#1e293b", color="#94a3b8"),
-            yaxis=dict(title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"),
-            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=11)),
-            margin=dict(l=40, r=10, t=10, b=40),
-            hovermode="x unified",
-        )
-        st.plotly_chart(_btimeline_fig, width="stretch")
+    # (c) Largest army progression
+    with _army_col:
+        st.markdown("**⚔️ Largest Army**")
+        _army_fig = go.Figure()
+        _has_army_data = False
+        for pid in sorted(players.keys()):
+            _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
+            army_prog = players[pid].get("army_progression", [])
+            if not army_prog:
+                continue
+            _has_army_data = True
+            turns = [e["turn_index"] for e in army_prog]
+            knights = [e["knights"] for e in army_prog]
+            _army_fig.add_trace(go.Scatter(
+                x=turns,
+                y=knights,
+                mode="lines",
+                name=pid,
+                line=dict(color=_pcolor, width=2),
+                showlegend=False,
+                hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} knights<extra></extra>",
+            ))
+        if _has_army_data:
+            _army_fig.add_hline(
+                y=3, line_dash="dot", line_color="#94a3b8",
+                annotation_text="Min for 🏆", annotation_position="top left",
+                annotation_font_color="#94a3b8", annotation_font_size=10,
+            )
+            _army_fig.update_layout(
+                **_plotly_layout_base,
+                yaxis=dict(title="Knights played", gridcolor="#1e293b", color="#94a3b8"),
+            )
+            st.plotly_chart(_army_fig, width="stretch")
+        else:
+            st.info("No army progression data — regenerate analysis.json.")
 
     # ── Per-Player Summary Cards ──
     st.subheader("Player Summary")
@@ -2490,209 +2593,326 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         for pdata in players.values()
     )
     if any_chat:
+        num_turns = gs.get("num_turns", 0)
+
         st.subheader("Trade Chat Negotiations")
         chat_rows = []
         for pid, pdata in players.items():
             tc = pdata.get("trade_chat", {})
+            opened = tc.get("rooms_opened", 0)
             chat_rows.append({
                 "Player": pid,
-                "Rooms Opened": tc.get("rooms_opened", 0),
-                "Success Rate": f"{tc.get('negotiation_success_rate', 0):.0%}",
+                "Rooms Opened": opened,
+                "Successful Initiated Trades": f"{tc.get('negotiation_success_rate', 0):.0%}",
                 "Proposals Made": tc.get("proposals_made", 0),
                 "Proposals Accepted": tc.get("proposals_accepted", 0),
-                "Rooms Participated": tc.get("rooms_participated_in", 0),
-                "Avg Rounds": tc.get("avg_rounds_per_room", 0),
+                "Counter-Offers Made": tc.get("counter_offers_made", 0),
+                "Others' Rooms Participated": tc.get("rooms_participated_in", 0),
+                "Rooms Opened / Turn": (
+                    f"{opened / num_turns:.2f}" if num_turns > 0 else "—"
+                ),
             })
         st.dataframe(chat_rows, width="stretch")
 
-        # Per-resource trade network diagrams (undirected, curved edges)
-        # Build {resource: {(a, b): units_exchanged}} from counterparty_resource_flow
+        # ── Negotiation Strategy Analysis ──
+        st.subheader("🎯 Negotiation Strategy")
+        st.caption(
+            "Owner perspective: whether final deals match the original ask."
+        )
+        neg_rows = []
+        for pid, pdata in players.items():
+            tc = pdata.get("trade_chat", {})
+            opened = tc.get("rooms_opened", 0)
+            matched = tc.get("deals_matched_original", 0)
+            negotiated = tc.get("deals_negotiated_away", 0)
+            total_deals = matched + negotiated
+            neg_rows.append({
+                "Player": pid,
+                "🏠 Rooms Opened": opened,
+                "✅ Deals at Original Terms": matched,
+                "🔄 Deals Negotiated Away": negotiated,
+                "📊 Original Terms Rate": (
+                    f"{matched / total_deals:.0%}"
+                    if total_deals > 0 else "—"
+                ),
+                "🔁 Counter-Offers Received": tc.get("counter_offers_received", 0),
+                "🤝 Others' Rooms Participated": tc.get("rooms_participated_in", 0),
+            })
+        if any(r["🏠 Rooms Opened"] > 0 for r in neg_rows):
+            st.dataframe(neg_rows, width="stretch")
+        else:
+            st.info("No trade room data available for negotiation analysis.")
+
+        # ── Bipartite trade network (aggregated across all resources) ──
         _RESOURCE_EMOJIS = {
             "WOOD": "🪵", "BRICK": "🧱", "SHEEP": "🐑", "WHEAT": "🌾", "ORE": "🪨",
         }
-        resource_edge_counts: dict[str, dict[tuple[str, str], int]] = {}
+        _ENTITY_COLORS: dict[str, str] = {"BANK": "#6b7280", "PORT": "#8b5cf6"}
+        # Build total trading volume between each pair of actors
+        pair_volume: dict[tuple[str, str], int] = {}
         all_trade_nodes: set[str] = set()
+        # Player-to-player edges from chat trades
         for pid, pdata in players.items():
             flow = pdata.get("trade_chat", {}).get("counterparty_resource_flow", {})
             for partner, res_counts in flow.items():
                 all_trade_nodes.update([pid, partner])
-                for res, cnt in res_counts.items():
+                for cnt in res_counts.values():
                     if cnt > 0:
                         key: tuple[str, str] = tuple(sorted([pid, partner]))  # type: ignore[assignment]
-                        res_edges = resource_edge_counts.setdefault(res, {})
-                        res_edges[key] = max(res_edges.get(key, 0), cnt)
+                        pair_volume[key] = pair_volume.get(key, 0) + cnt
 
-        active_resources = [r for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE") if r in resource_edge_counts]
+        # Add BANK/PORT edges from market actor data
+        market = analysis_data.get("market", {})
+        market_actors = market.get("actors", {}) if isinstance(market, dict) else {}
+        for passive_entity in ("BANK", "PORT"):
+            entity_stats = market_actors.get(passive_entity, {})
+            if not isinstance(entity_stats, dict):
+                continue
+            taker_vol = entity_stats.get("taker_volume_by_resource", {})
+            for res, vol in taker_vol.items():
+                if vol <= 0:
+                    continue
+                for pid in players:
+                    p_stats = market_actors.get(pid, {})
+                    if not isinstance(p_stats, dict):
+                        continue
+                    if p_stats.get("maker_volume_by_resource", {}).get(res, 0) > 0:
+                        all_trade_nodes.update([pid, passive_entity])
+                        key = tuple(sorted([pid, passive_entity]))  # type: ignore[assignment]
+                        pair_volume[key] = pair_volume.get(key, 0) + vol
 
-        if active_resources and all_trade_nodes:
-            st.caption("Trade partnerships by resource (completed chat trades)")
+        if pair_volume and all_trade_nodes:
+            st.caption("Total trade volume between each pair of actors (incl. 🏦 BANK / ⚓ PORT maritime)")
 
-            # Shared node layout — same positions across all diagrams
-            all_nodes = sorted(all_trade_nodes)
-            n_nodes = len(all_nodes)
-            angle_step = 2 * math.pi / n_nodes if n_nodes > 1 else 0
-            pos = {
-                p: (math.cos(i * angle_step - math.pi / 2), math.sin(i * angle_step - math.pi / 2))
-                for i, p in enumerate(all_nodes)
+            _NODE_ORDER = ("BLUE", "ORANGE", "RED", "WHITE", "BANK", "PORT")
+            _NODE_EMOJIS: dict[str, str] = {
+                "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
+                "BANK": "🏦", "PORT": "⚓",
             }
+            hex_nodes = [n for n in _NODE_ORDER if n in all_trade_nodes]
+            n_nodes = len(hex_nodes)
 
-            def _make_edge(x0: float, y0: float, x1: float, y1: float, n_pts: int = 60) -> tuple[list[float], list[float], float]:
-                """Return (xs, ys, label_frac).
-                Edges whose midpoint is far from the origin curve outward (convex).
-                Edges that cross through the centre are kept straight with label at 1/3.
-                """
+            # Regular hexagon: all 6 nodes at equal radius, one per vertex
+            # Vertex order clockwise from top: BLUE, ORANGE, BANK, WHITE, RED, PORT
+            _HEX_ORDER = ("BLUE", "ORANGE", "BANK", "WHITE", "RED", "PORT")
+            all_hex = [n for n in _HEX_ORDER if n in hex_nodes]
+            # Pad with any nodes not in the fixed order
+            all_hex += [n for n in hex_nodes if n not in _HEX_ORDER]
+            _R = 1.0
+            pos: dict[str, tuple[float, float]] = {}
+            n_total = len(all_hex)
+            for i, node in enumerate(all_hex):
+                angle = math.pi / 2 - 2 * math.pi * i / n_total  # clockwise from top
+                pos[node] = (_R * math.cos(angle), _R * math.sin(angle))
+
+            # Faint circle guide
+            circle_xs = [_R * math.cos(2 * math.pi * i / 60) for i in range(61)]
+            circle_ys = [_R * math.sin(2 * math.pi * i / 60) for i in range(61)]
+
+            fig = go.Figure()
+            max_vol = max(pair_volume.values()) if pair_volume else 1
+
+            # Faint circle
+            fig.add_trace(go.Scatter(
+                x=circle_xs, y=circle_ys,
+                mode="lines",
+                line=dict(width=1, color="rgba(148,163,184,0.1)"),
+                hoverinfo="none", showlegend=False,
+            ))
+
+            # Edges
+            for (a, b), vol in pair_volume.items():
+                if a not in pos or b not in pos:
+                    continue
+                x0, y0 = pos[a]
+                x1, y1 = pos[b]
+                lw = 1.5 + 8.5 * (vol / max_vol)
+                # Slight quadratic bezier curving outward
                 mx, my = (x0 + x1) / 2, (y0 + y1) / 2
                 dist = math.hypot(mx, my)
-                if dist < 0.25:
-                    # Crossing edge — straight line, label at first third
-                    xs = [x0 + (x1 - x0) * i / n_pts for i in range(n_pts + 1)]
-                    ys = [y0 + (y1 - y0) * i / n_pts for i in range(n_pts + 1)]
-                    return xs, ys, 0.33
-                # Peripheral edge — push control point away from origin (convex)
-                offset = 0.35
-                cx = mx + offset * mx / dist
-                cy = my + offset * my / dist
-                xs, ys = [], []
-                for i in range(n_pts + 1):
-                    t = i / n_pts
-                    xs.append((1 - t) ** 2 * x0 + 2 * (1 - t) * t * cx + t ** 2 * x1)
-                    ys.append((1 - t) ** 2 * y0 + 2 * (1 - t) * t * cy + t ** 2 * y1)
-                return xs, ys, 0.5
+                if dist > 0.05:
+                    cx = mx + 0.25 * mx / dist
+                    cy = my + 0.25 * my / dist
+                else:
+                    cx, cy = mx, my
+                curve_xs = [(1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1 for t in [i/40 for i in range(41)]]
+                curve_ys = [(1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1 for t in [i/40 for i in range(41)]]
+                fig.add_trace(go.Scatter(
+                    x=curve_xs + [None], y=curve_ys + [None],
+                    mode="lines",
+                    line=dict(width=lw, color="rgba(200,200,200,0.4)"),
+                    hoverinfo="none", showlegend=False,
+                ))
 
-            # Global max for consistent edge thickness across diagrams
-            global_max = max(
-                cnt
-                for edges in resource_edge_counts.values()
-                for cnt in edges.values()
+            # Nodes
+            for node in all_hex:
+                x, y = pos[node]
+                node_color = _ENTITY_COLORS.get(node, PLAYER_COLORS.get(node, NEUTRAL_COLORS)[0])
+                node_size = 34
+                label = f"{_NODE_EMOJIS.get(node, '')} {node}"
+                # Position label away from center
+                if abs(y) > 0.5:
+                    text_pos = "top center" if y > 0 else "bottom center"
+                elif x < 0:
+                    text_pos = "middle left"
+                else:
+                    text_pos = "middle right"
+                fig.add_trace(go.Scatter(
+                    x=[x], y=[y],
+                    mode="markers+text",
+                    marker=dict(size=node_size, color=node_color, symbol="hexagon", line=dict(width=2, color="#1f2937")),
+                    text=label, textposition=text_pos,
+                    textfont=dict(size=11, color="#cbd5e1"),
+                    hovertext=f"{node}: {sum(v for (a,b),v in pair_volume.items() if node in (a,b))} total vol",
+                    hoverinfo="text", showlegend=False,
+                ))
+
+            fig.update_layout(
+                height=500,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.6, 1.6]),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.6, 1.6], scaleanchor="x", scaleratio=1),
+                margin=dict(l=20, r=20, t=20, b=20),
             )
-
-            # Two rows of 3 columns each — always 3 cols so all charts are the same width
-            _ROW_SIZE = 3
-            for row_resources in [active_resources[:_ROW_SIZE], active_resources[_ROW_SIZE:]]:
-                if not row_resources:
-                    continue
-                cols = st.columns(_ROW_SIZE)
-                for col, resource in zip(cols, row_resources):
-                    edge_counts = resource_edge_counts[resource]
-                    fig = go.Figure()
-
-                    for (a, b), count in edge_counts.items():
-                        x0, y0 = pos[a]
-                        x1, y1 = pos[b]
-                        lw = 1.5 + 5 * (count / global_max)
-                        curve_xs, curve_ys, label_frac = _make_edge(x0, y0, x1, y1)
-
-                        fig.add_trace(go.Scatter(
-                            x=curve_xs + [None],
-                            y=curve_ys + [None],
-                            mode="lines",
-                            line=dict(width=lw, color="rgba(180,180,180,0.45)"),
-                            hoverinfo="none",
-                            showlegend=False,
-                        ))
-
-                        lbl_idx = int(label_frac * len(curve_xs))
-                        fig.add_annotation(
-                            x=curve_xs[lbl_idx], y=curve_ys[lbl_idx],
-                            text=str(count),
-                            showarrow=False,
-                            font=dict(color="#e5e7eb", size=10),
-                            bgcolor="rgba(0,0,0,0.5)",
-                            borderpad=2,
-                        )
-
-                    for pid in all_nodes:
-                        x, y = pos[pid]
-                        node_color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
-                        has_edge = any(pid in edge for edge in edge_counts)
-                        opacity = 1.0 if has_edge else 0.25
-                        fig.add_trace(go.Scatter(
-                            x=[x], y=[y],
-                            mode="markers",
-                            marker=dict(
-                                size=32,
-                                color=node_color,
-                                opacity=opacity,
-                                line=dict(width=2, color="#1f2937"),
-                            ),
-                            hovertext=pid,
-                            hoverinfo="text",
-                            showlegend=False,
-                        ))
-
-                    emoji = _RESOURCE_EMOJIS.get(resource, "")
-                    fig.update_layout(
-                        title=dict(
-                            text=f"{emoji} {resource}",
-                            font=dict(size=12, color="#94a3b8"),
-                            x=0.5, xanchor="center",
-                        ),
-                        height=320,
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.8, 1.8]),
-                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.8, 1.8], scaleanchor="x", scaleratio=1),
-                        margin=dict(l=8, r=8, t=32, b=8),
-                    )
-                    col.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, width="stretch")
 
     # ── Market Structure ──
     market = analysis_data.get("market", {})
-    actors = market.get("actors", {}) if isinstance(market, dict) else {}
-    if actors:
+    market_actors = market.get("actors", {}) if isinstance(market, dict) else {}
+    if market_actors:
         st.subheader("Market Structure")
 
-        role_rows = []
-        for actor, stats in actors.items():
+        _TABLE_EMOJIS: dict[str, str] = {
+            "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
+            "BANK": "🏦", "PORT": "⚓",
+        }
+
+        # ── Maker / Taker bar chart ──
+        _MT_ACTOR_EMOJIS: dict[str, str] = {
+            "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
+            "BANK": "🏦", "PORT": "⚓",
+        }
+        maker_taker_rows = []
+        # Players first, then BANK/PORT grouped at the end
+        mt_actor_order_raw = [a for a in market_actors if a in players] + [a for a in ("BANK", "PORT") if a in market_actors]
+        for actor in mt_actor_order_raw:
+            stats = market_actors[actor]
             if not isinstance(stats, dict):
                 continue
-            role_rows.append({
-                "Actor": actor,
-                "Role": stats.get("market_role", "—"),
-                "Maker Deals": stats.get("maker_deals", 0),
-                "Taker Deals": stats.get("taker_deals", 0),
-                "Init Rate": (
-                    f"{stats.get('market_initiation_rate', 0):.0%}"
-                    if actor in players else "—"
-                ),
-            })
-        if role_rows:
-            st.caption("Overall maker/taker profile across domestic and maritime deals.")
-            st.dataframe(role_rows, width="stretch")
+            label = f"{_MT_ACTOR_EMOJIS.get(actor, '')} {actor}"
+            maker_taker_rows.append({"Actor": label, "Deals": stats.get("maker_deals", 0), "Type": "📈 Maker"})
+            maker_taker_rows.append({"Actor": label, "Deals": stats.get("taker_deals", 0), "Type": "📉 Taker"})
+        if maker_taker_rows:
+            mt_df = pd.DataFrame(maker_taker_rows)
+            actor_order = [f"{_MT_ACTOR_EMOJIS.get(a, '')} {a}" for a in mt_actor_order_raw]
+            actor_colors = [
+                _ENTITY_COLORS.get(a, PLAYER_COLORS.get(a, NEUTRAL_COLORS)[0])
+                for a in mt_actor_order_raw
+            ]
+            mt_chart = (
+                alt.Chart(mt_df)
+                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+                .encode(
+                    x=alt.X("Actor:N", sort=actor_order, axis=alt.Axis(labelColor="#e2e8f0", titleColor="#e2e8f0", labelAngle=0)),
+                    y=alt.Y("Deals:Q", axis=alt.Axis(labelColor="#94a3b8", titleColor="#e2e8f0")),
+                    color=alt.Color(
+                        "Type:N",
+                        scale=alt.Scale(
+                            domain=["📈 Maker", "📉 Taker"],
+                            range=["#22c55e", "#ef4444"],
+                        ),
+                        legend=alt.Legend(title="Type", labelColor="#e2e8f0", titleColor="#e2e8f0"),
+                    ),
+                    xOffset="Type:N",
+                    tooltip=["Actor", "Type", "Deals"],
+                )
+                .properties(height=360, title=alt.Title("Maker vs Taker Deals", color="#e2e8f0"))
+                .configure_view(strokeWidth=0)
+                .configure_axis(gridColor="rgba(148,163,184,0.15)")
+            )
+            st.altair_chart(mt_chart, width="stretch")
 
-        resource_role_rows = []
-        for actor, stats in actors.items():
-            if not isinstance(stats, dict):
-                continue
-            resource_roles = stats.get("resource_market_role", {})
-            resource_role_rows.append({
-                "Actor": actor,
-                "Overall": stats.get("market_role", "—"),
-                "WOOD": resource_roles.get("WOOD", "—"),
-                "BRICK": resource_roles.get("BRICK", "—"),
-                "SHEEP": resource_roles.get("SHEEP", "—"),
-                "WHEAT": resource_roles.get("WHEAT", "—"),
-                "ORE": resource_roles.get("ORE", "—"),
-            })
-        if resource_role_rows:
-            st.caption("Per-resource role rubric. BANK and PORT appear as takers for maritime trades.")
-            st.dataframe(resource_role_rows, width="stretch")
+        # ── Market Share Histogram ──
+        resource_market_share = market.get("resource_market_share", {})
+        if resource_market_share:
+            st.subheader("Market Share by Resource")
+            st.caption("Each player's share of total trade volume per resource (including BANK/PORT).")
 
-        share_rows = []
-        for pid, pdata in players.items():
-            profile = pdata.get("market_profile", {})
-            shares = profile.get("resource_market_share", {})
-            share_rows.append({
-                "Player": pid,
-                "WOOD": f"{shares.get('WOOD', 0):.1%}",
-                "BRICK": f"{shares.get('BRICK', 0):.1%}",
-                "SHEEP": f"{shares.get('SHEEP', 0):.1%}",
-                "WHEAT": f"{shares.get('WHEAT', 0):.1%}",
-                "ORE": f"{shares.get('ORE', 0):.1%}",
-            })
-        if share_rows:
-            st.caption("Per-resource market share based on each player's involvement in completed deals.")
-            st.dataframe(share_rows, width="stretch")
+            _RESOURCE_LABELS = {
+                "WOOD": "🪵 WOOD", "BRICK": "🧱 BRICK", "SHEEP": "🐑 SHEEP",
+                "WHEAT": "🌾 WHEAT", "ORE": "🪨 ORE",
+            }
+            _ACTOR_LABELS = {
+                "BLUE": "🔵 BLUE", "RED": "🔴 RED", "WHITE": "⚪ WHITE",
+                "ORANGE": "🟠 ORANGE", "BANK": "🏦 BANK", "PORT": "⚓ PORT",
+            }
+            share_chart_rows = []
+            all_share_actors: list[str] = []
+            for resource in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"):
+                shares = resource_market_share.get(resource, {})
+                for actor, share in shares.items():
+                    if actor not in all_share_actors:
+                        all_share_actors.append(actor)
+                    share_chart_rows.append({
+                        "Resource": _RESOURCE_LABELS.get(resource, resource),
+                        "Actor": _ACTOR_LABELS.get(actor, actor),
+                        "Share": share,
+                    })
+
+            if share_chart_rows:
+                share_df = pd.DataFrame(share_chart_rows)
+                # Stack order (bottom→top): BANK, PORT, BLUE, ORANGE, RED, WHITE
+                # Legend reads top→bottom matching the visual top→bottom of bars
+                _STACK_ORDER = ("BANK", "PORT", "BLUE", "ORANGE", "RED", "WHITE")
+                ordered_actors_raw_bottom_up = [a for a in _STACK_ORDER if a in all_share_actors]
+                # Legend order is reversed (top→bottom = top of stack first)
+                legend_order_raw = list(reversed(ordered_actors_raw_bottom_up))
+                legend_actors = [_ACTOR_LABELS.get(a, a) for a in legend_order_raw]
+                legend_colors = [
+                    _ENTITY_COLORS.get(a, PLAYER_COLORS.get(a, NEUTRAL_COLORS)[0])
+                    for a in legend_order_raw
+                ]
+                # Add stack sort index (lower = bottom of stack)
+                stack_index_map = {
+                    _ACTOR_LABELS.get(a, a): i
+                    for i, a in enumerate(ordered_actors_raw_bottom_up)
+                }
+                share_df["_stack_order"] = share_df["Actor"].map(stack_index_map)
+                resource_order = [_RESOURCE_LABELS[r] for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")]
+
+                share_chart = (
+                    alt.Chart(share_df)
+                    .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+                    .encode(
+                        x=alt.X(
+                            "Resource:N",
+                            sort=resource_order,
+                            axis=alt.Axis(labelColor="#e2e8f0", titleColor="#e2e8f0"),
+                        ),
+                        y=alt.Y(
+                            "Share:Q",
+                            stack="normalize",
+                            axis=alt.Axis(format="%", labelColor="#94a3b8", titleColor="#e2e8f0"),
+                            title="Market Share",
+                        ),
+                        color=alt.Color(
+                            "Actor:N",
+                            scale=alt.Scale(domain=legend_actors, range=legend_colors),
+                            legend=alt.Legend(title="Actor", labelColor="#e2e8f0", titleColor="#e2e8f0"),
+                        ),
+                        order=alt.Order("_stack_order:Q"),
+                        tooltip=[
+                            alt.Tooltip("Resource:N"),
+                            alt.Tooltip("Actor:N"),
+                            alt.Tooltip("Share:Q", format=".1%"),
+                        ],
+                    )
+                    .properties(height=380, title=alt.Title("Market Share per Resource", color="#e2e8f0"))
+                    .configure_view(strokeWidth=0)
+                    .configure_axis(gridColor="rgba(148,163,184,0.15)")
+                )
+                st.altair_chart(share_chart, width="stretch")
 
     # ── Strategy Evolution ──
     any_strategy = any(

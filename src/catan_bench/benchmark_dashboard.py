@@ -235,7 +235,7 @@ def _render_leaderboard(
             "Mechanics": st.column_config.ProgressColumn(min_value=0, max_value=100),
             "Overall": st.column_config.ProgressColumn(min_value=0, max_value=100),
         },
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -294,7 +294,7 @@ def _render_rubric_radar(st: Any, rubrics: dict[str, RubricScores]) -> None:
         margin=dict(l=60, r=60, t=30, b=30),
         height=420,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ def _render_elo_history(st: Any, elo: EloState) -> None:
             titleColor="#e2e8f0",
         )
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -407,24 +407,21 @@ def _render_head_to_head(
             hovertemplate="Row %{y} vs Col %{x}: %{text}<extra></extra>",
             showscale=True,
             colorbar=dict(
-                title="Win Rate",
+                title=dict(text="Win Rate", font=dict(color="#e2e8f0")),
                 tickvals=[0, 0.5, 1],
                 ticktext=["0%", "50%", "100%"],
                 tickfont=dict(color="#94a3b8"),
-                titlefont=dict(color="#e2e8f0"),
             ),
         )
     )
     fig.update_layout(
         xaxis=dict(
-            title="Opponent",
+            title=dict(text="Opponent", font=dict(color="#e2e8f0")),
             tickfont=dict(color="#e2e8f0"),
-            titlefont=dict(color="#e2e8f0"),
         ),
         yaxis=dict(
-            title="Model",
+            title=dict(text="Model", font=dict(color="#e2e8f0")),
             tickfont=dict(color="#e2e8f0"),
-            titlefont=dict(color="#e2e8f0"),
             autorange="reversed",
         ),
         paper_bgcolor="rgba(0,0,0,0)",
@@ -432,7 +429,7 @@ def _render_head_to_head(
         margin=dict(l=20, r=20, t=30, b=20),
         height=max(300, 80 * len(models)),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------------------

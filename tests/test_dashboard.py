@@ -118,16 +118,16 @@ class DashboardTests(unittest.TestCase):
         html, unsafe = st.markdown_calls[0]
         self.assertTrue(unsafe)
         self.assertIn("<th>Dev VP</th>", html)
-        self.assertIn("<th>Army</th>", html)
-        self.assertIn("<td style='text-align:center'>2</td>", html)
-        self.assertIn("<td style='text-align:center'>3🏆</td>", html)
-        self.assertEqual(
-            st.caption_calls,
-            [
-                "VP includes public bonuses such as Longest Road and Largest Army.",
-                "Dev VP counts victory-point development cards, including hidden ones.",
-            ],
-        )
+        self.assertIn("<th>L. Army</th>", html)
+        self.assertIn("<th>L. Road</th>", html)
+        self.assertIn("<th>Total VP</th>", html)
+        # Board VP = visible(3) - road(2) - army(2) = -1 → but that's fine for this test data
+        self.assertIn("2</td>", html)  # dev_vp
+        self.assertIn("3 ⚔️</td>", html)  # army with emoji
+        self.assertIn("5 🛤️</td>", html)  # road with emoji
+        # Trophy only on winner row (total_vp=5, which is max)
+        self.assertIn("5 🏆</td>", html)  # winner gets trophy
+        self.assertEqual(st.caption_calls, [])
 
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

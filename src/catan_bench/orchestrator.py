@@ -183,6 +183,7 @@ class GameOrchestrator:
         self._resume_run_dir = (
             Path(resume_run_dir) if resume_run_dir is not None else None
         )
+        self._resume_checkpoint_history_index: int | None = None
         self._prepared = False
 
     def run(self) -> GameResult:
@@ -317,6 +318,7 @@ class GameOrchestrator:
         self._pending_trade_chat_selection = None
         self._opening_strategy_done = False
         self._completed_decisions = 0
+        self._resume_checkpoint_history_index = None
 
         if self.run_dir is not None:
             write_json(
@@ -372,6 +374,7 @@ class GameOrchestrator:
         self.memory_store.hydrate(self.engine.player_ids)
         self.prompt_trace_store.hydrate(self.engine.player_ids)
         self.action_trace_store.hydrate()
+        self._validate_initial_resume_artifacts()
         self._replay_saved_actions()
         checkpoint = read_json(self.run_dir / "checkpoint.json") or {}
         self._restore_checkpoint_state(checkpoint)
@@ -487,6 +490,11 @@ class GameOrchestrator:
         else:
             self._pending_trade_chat_selection = None
 
+        checkpoint_history_index = checkpoint.get("current_history_index")
+        if checkpoint_history_index is None:
+            self._resume_checkpoint_history_index = None
+        else:
+            self._resume_checkpoint_history_index = int(checkpoint_history_index)
         self._completed_decisions = int(
             checkpoint.get("total_decisions", len(self.action_trace_store.entries))
         )
@@ -507,11 +515,17 @@ class GameOrchestrator:
                 f"{self._completed_decisions} decisions recorded in checkpoint versus "
                 f"{len(self.action_trace_store.entries)} actions in trace."
             )
+        if (
+            self._resume_checkpoint_history_index is not None
+            and self._resume_checkpoint_history_index
+            != self.event_log.current_history_index
+        ):
+            raise RuntimeError(
+                "Resume checkpoint current_history_index does not match public history "
+                f"length: checkpoint recorded {self._resume_checkpoint_history_index} "
+                f"events versus {self.event_log.current_history_index} in history."
+            )
         if self.event_log.current_history_index:
-            if not self.public_state_store.snapshots:
-                raise RuntimeError(
-                    "Resume run is missing public state snapshots for its recorded history."
-                )
             if (
                 self.public_state_store.snapshots[-1].history_index
                 != self.event_log.current_history_index
@@ -519,6 +533,36 @@ class GameOrchestrator:
                 raise RuntimeError(
                     "Resume run has inconsistent public history and public state traces."
                 )
+        if (
+            self.public_state_store.snapshots[-1].public_state
+            != dict(self.engine.public_state())
+        ):
+            raise RuntimeError(
+                "Resume run final public state snapshot does not match the rebuilt "
+                "engine state."
+            )
+
+    def _validate_initial_resume_artifacts(self) -> None:
+        if not self.public_state_store.snapshots:
+            raise RuntimeError(
+                "Resume run is missing its initial public state snapshot."
+            )
+        if (
+            self.public_state_store.snapshots[0]
+            != self._expected_initial_public_state_snapshot()
+        ):
+            raise RuntimeError(
+                "Resume run initial public state snapshot does not match the rebuilt engine."
+            )
+
+    def _expected_initial_public_state_snapshot(self) -> PublicStateSnapshot:
+        return PublicStateSnapshot(
+            history_index=0,
+            turn_index=0,
+            phase="initial",
+            decision_index=None,
+            public_state=dict(self.engine.public_state()),
+        )
 
     def _write_checkpoint(self, *, terminal: bool) -> None:
         if self.run_dir is None:

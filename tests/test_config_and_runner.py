@@ -25,6 +25,21 @@ class _StubEngine:
     player_ids = ("RED", "BLUE")
 
 
+def _write_resume_artifacts(run_dir: Path, *, game_id: str = "saved-game-id") -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "metadata.json").write_text(
+        f'{{"game_id": "{game_id}"}}\n',
+        encoding="utf-8",
+    )
+    for file_name, contents in (
+        ("checkpoint.json", "{}\n"),
+        ("public_history.jsonl", ""),
+        ("public_state_trace.jsonl", ""),
+        ("action_trace.jsonl", ""),
+    ):
+        (run_dir / file_name).write_text(contents, encoding="utf-8")
+
+
 class ConfigAndRunnerTests(unittest.TestCase):
     def test_load_example_configs(self) -> None:
         game_config = load_game_config("configs/game.toml")
@@ -242,11 +257,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml = Path(tmpdir) / "game.toml"
             players_toml = Path(tmpdir) / "players.toml"
             resume_run_dir = Path(tmpdir) / "existing-run"
-            resume_run_dir.mkdir(parents=True)
-            (resume_run_dir / "metadata.json").write_text(
-                '{"game_id": "saved-game-id"}\n',
-                encoding="utf-8",
-            )
+            _write_resume_artifacts(resume_run_dir)
             game_toml.write_text(
                 (
                     "[game]\n"
@@ -438,9 +449,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
     def test_resolve_requested_run_dir_detects_existing_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_path = Path(tmpdir)
-            (run_path / "metadata.json").write_text(
-                '{"game_id":"saved"}\n', encoding="utf-8"
-            )
+            _write_resume_artifacts(run_path, game_id="saved")
 
             run_dir, resume_run_dir = _resolve_requested_run_dir(
                 requested_run_dir=run_path,
@@ -455,7 +464,23 @@ class ConfigAndRunnerTests(unittest.TestCase):
             path = Path(tmpdir)
             self.assertFalse(_is_existing_run_directory(path))
             (path / "checkpoint.json").write_text("{}\n", encoding="utf-8")
+            self.assertFalse(_is_existing_run_directory(path))
+            _write_resume_artifacts(path)
             self.assertTrue(_is_existing_run_directory(path))
+
+    def test_resolve_requested_run_dir_rejects_incomplete_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_path = Path(tmpdir)
+            (run_path / "metadata.json").write_text(
+                '{"game_id":"saved"}\n', encoding="utf-8"
+            )
+            (run_path / "checkpoint.json").write_text("{}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "missing required resume files"):
+                _resolve_requested_run_dir(
+                    requested_run_dir=run_path,
+                    configured_run_dir=Path("runs/default"),
+                )
 
     def test_load_resume_game_id_reads_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

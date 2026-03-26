@@ -37,6 +37,14 @@ from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
 from .reporter import DebugTerminalReporter, TerminalReporter
 from .storage import read_json
 
+_RESUME_ARTIFACT_FILES = (
+    "metadata.json",
+    "checkpoint.json",
+    "public_history.jsonl",
+    "public_state_trace.jsonl",
+    "action_trace.jsonl",
+)
+
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
 except (
@@ -165,23 +173,31 @@ def _resolve_requested_run_dir(
     if requested_run_dir is None:
         return configured_run_dir, None
     requested_path = Path(requested_run_dir)
+    missing_resume_artifacts = _missing_resume_artifact_files(requested_path)
+    if missing_resume_artifacts and len(missing_resume_artifacts) < len(
+        _RESUME_ARTIFACT_FILES
+    ):
+        missing_list = ", ".join(missing_resume_artifacts)
+        raise ValueError(
+            "Requested run directory contains benchmark artifacts but is missing "
+            f"required resume files: {missing_list}."
+        )
     if _is_existing_run_directory(requested_path):
         return None, requested_path
     return requested_path, None
 
 
 def _is_existing_run_directory(path: Path) -> bool:
+    return not _missing_resume_artifact_files(path)
+
+
+def _missing_resume_artifact_files(path: Path) -> tuple[str, ...]:
     if not path.exists() or not path.is_dir():
-        return False
-    return any(
-        (path / file_name).exists()
-        for file_name in (
-            "metadata.json",
-            "checkpoint.json",
-            "public_history.jsonl",
-            "public_state_trace.jsonl",
-            "action_trace.jsonl",
-        )
+        return _RESUME_ARTIFACT_FILES
+    return tuple(
+        file_name
+        for file_name in _RESUME_ARTIFACT_FILES
+        if not (path / file_name).exists()
     )
 
 

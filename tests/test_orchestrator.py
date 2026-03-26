@@ -1348,6 +1348,96 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual(len(resumed_red.action_observations), 1)
             self.assertEqual(len(resumed_red.end_turn_observations), 1)
 
+    def test_resume_rejects_checkpoint_history_index_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            initial = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(
+                        action_responses=[
+                            Action(
+                                "OFFER_TRADE",
+                                payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                            )
+                        ]
+                    ),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                run_dir=tmpdir,
+            )
+
+            initial.step()
+            initial.step()
+
+            run_dir = Path(initial.run_dir)
+            history_path = run_dir / "public_history.jsonl"
+            state_path = run_dir / "public_state_trace.jsonl"
+            history_lines = history_path.read_text(encoding="utf-8").splitlines()
+            state_lines = state_path.read_text(encoding="utf-8").splitlines()
+            history_path.write_text(history_lines[0] + "\n", encoding="utf-8")
+            state_path.write_text("\n".join(state_lines[:2]) + "\n", encoding="utf-8")
+
+            resumed = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(action_responses=[Action("END_TURN")]),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                resume_run_dir=run_dir,
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "current_history_index"):
+                resumed.step()
+
+    def test_resume_rejects_public_state_snapshot_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            initial = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(
+                        action_responses=[
+                            Action(
+                                "OFFER_TRADE",
+                                payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                            )
+                        ]
+                    ),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                run_dir=tmpdir,
+            )
+
+            initial.step()
+            initial.step()
+
+            run_dir = Path(initial.run_dir)
+            history_path = run_dir / "public_history.jsonl"
+            state_path = run_dir / "public_state_trace.jsonl"
+            checkpoint_path = run_dir / "checkpoint.json"
+            history_lines = history_path.read_text(encoding="utf-8").splitlines()
+            state_lines = state_path.read_text(encoding="utf-8").splitlines()
+            history_path.write_text(history_lines[0] + "\n", encoding="utf-8")
+            state_path.write_text("\n".join(state_lines[:2]) + "\n", encoding="utf-8")
+
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            checkpoint["current_history_index"] = 1
+            checkpoint_path.write_text(
+                json.dumps(checkpoint, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            resumed = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(action_responses=[Action("END_TURN")]),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                resume_run_dir=run_dir,
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "public state snapshot"):
+                resumed.step()
+
     def test_orchestrator_persists_two_slot_memory_without_private_history(
         self,
     ) -> None:

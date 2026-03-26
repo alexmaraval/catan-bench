@@ -3085,9 +3085,9 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     if tp.get("active_turns", 0)
                     else "—"
                 ),
-                "Turns to 5 VP": tp.get("turns_to_first_5_vp") or "—",
-                "7 VP Turn": tp.get("first_7_vp_turn") or "—",
-                "Turns from 7 VP to Win": tp.get("turns_from_7_vp_to_win") or "—",
+                "Turns to 5 VP": tp.get("turns_to_first_5_vp"),
+                "7 VP Turn": tp.get("first_7_vp_turn"),
+                "Turns from 7 VP to Win": tp.get("turns_from_7_vp_to_win"),
             }
         )
     if progress_rows:

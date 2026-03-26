@@ -12,6 +12,8 @@ Core rules:
 - New settlements must follow the distance rule: no adjacent settlement/city on neighboring intersections, and outside set-up they must connect to your own road.
 - The first player to reach the configured victory-point target wins.
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
+- Tile numbers indicate production frequency: 6 and 8 are strongest, then 5 and 9, then 4 and 10, then 3 and 11, then 2 and 12; 7 produces no resources and instead triggers the robber.
+- Especially in the opening, prefer placements that combine strong production numbers, useful resource diversity, and good expansion routes.
 - When a 7 is rolled, no resources are produced. Every player with more than 7 resource cards discards half, rounded down, then the active player must move the robber and may steal 1 random resource from an adjacent opponent.
 - The robber blocks resource production on its hex, but does not block building or harbor access.
 - When opening a new trade chatroom, state clearly which resource you want and which resource(s) you are willing to trade away.

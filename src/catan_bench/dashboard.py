@@ -460,14 +460,16 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
     with side_col:
         st.markdown("**Players**")
         if players:
-            _render_player_summary_table(st, players)
+            winner_ids = snapshot.result.get("winner_ids", []) if isinstance(snapshot.result, dict) else []
+            _render_player_summary_table(st, players, winner_ids=winner_ids)
         else:
             st.caption("No public player summary yet.")
         _render_turn_event_digest(st, snapshot, cursor=cursor)
 
 
-def _render_player_summary_table(st, players: dict) -> None:
+def _render_player_summary_table(st, players: dict, *, winner_ids: list[str] | tuple[str, ...] | None = None) -> None:
     rows = []
+    winner_set = {str(player_id) for player_id in (winner_ids or [])}
     for player_id, summary in players.items():
         if not isinstance(summary, dict):
             continue
@@ -490,11 +492,9 @@ def _render_player_summary_table(st, players: dict) -> None:
         rows.append((player_id, accent, board_vp, dev_vp, road_cell, army_cell, total_vp))
 
     if rows:
-        # Winner = player with highest total VP
-        max_vp = max(r[6] for r in rows)
         html_rows = []
         for pid, accent, board_vp, dev_vp, road_cell, army_cell, total_vp in rows:
-            trophy = " 🏆" if total_vp == max_vp and total_vp > 0 else ""
+            trophy = " 🏆" if pid in winner_set else ""
             html_rows.append(
                 f"<tr>"
                 f"<td><span style='color:{accent};font-weight:600'>{pid}</span></td>"

@@ -160,6 +160,10 @@ class OpenAICompatibleChatClient:
             if reasoning_enabled is False and self._google_supports_reasoning_effort_none(model):
                 return {"reasoning_effort": "none"}
             return {}
+        if provider == "openrouter":
+            if reasoning_enabled is False:
+                return {"reasoning": {"effort": "none"}}
+            return {"reasoning": {"enabled": True}}
         if provider == "together":
             return {}
         return {"reasoning": {"enabled": reasoning_enabled}}
@@ -178,6 +182,8 @@ class OpenAICompatibleChatClient:
             return "groq"
         if hostname.endswith("googleapis.com"):
             return "google"
+        if hostname.endswith("openrouter.ai"):
+            return "openrouter"
         if hostname.endswith("together.ai"):
             return "together"
         return "default"

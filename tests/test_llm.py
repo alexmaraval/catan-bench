@@ -149,6 +149,58 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", captured_body)
         self.assertNotIn("include_reasoning", captured_body)
 
+    def test_complete_uses_reasoning_effort_none_for_openrouter_when_disabled(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="openai/gpt-5-mini",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                )
+
+        self.assertEqual(captured_body["reasoning"], {"effort": "none"})
+        self.assertNotIn("reasoning_effort", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
+    def test_complete_enables_reasoning_for_openrouter_when_requested(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="openai/gpt-5-mini",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=True,
+                )
+
+        self.assertEqual(captured_body["reasoning"], {"enabled": True})
+        self.assertNotIn("reasoning_effort", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
     def test_complete_retries_retryable_http_errors(self) -> None:
         attempts: list[str] = []
 

@@ -112,6 +112,7 @@ class DashboardTests(unittest.TestCase):
                     "has_largest_army": True,
                 }
             },
+            winner_ids=["RED"],
         )
 
         self.assertEqual(len(st.markdown_calls), 1)
@@ -125,9 +126,37 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("2</td>", html)  # dev_vp
         self.assertIn("3 ⚔️</td>", html)  # army with emoji
         self.assertIn("5 🛤️</td>", html)  # road with emoji
-        # Trophy only on winner row (total_vp=5, which is max)
+        # Trophy only appears for an explicit recorded winner.
         self.assertIn("5 🏆</td>", html)  # winner gets trophy
         self.assertEqual(st.caption_calls, [])
+
+    def test_render_player_summary_table_only_marks_recorded_winner(self) -> None:
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.markdown_calls: list[tuple[str, bool]] = []
+
+            def markdown(self, body: str, unsafe_allow_html: bool = False) -> None:
+                self.markdown_calls.append((body, unsafe_allow_html))
+
+        st = FakeStreamlit()
+
+        _render_player_summary_table(
+            st,
+            {
+                "BLUE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
+                "ORANGE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
+                "RED": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
+                "WHITE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
+            },
+            winner_ids=["BLUE"],
+        )
+
+        self.assertEqual(len(st.markdown_calls), 1)
+        html, unsafe = st.markdown_calls[0]
+        self.assertTrue(unsafe)
+        self.assertEqual(html.count("🏆"), 1)
+        self.assertIn("BLUE</span></td><td style='text-align:center'>2</td>", html)
+        self.assertIn("2 🏆</td>", html)
 
     def test_load_dashboard_snapshot_reads_simplified_run_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

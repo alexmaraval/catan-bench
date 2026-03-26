@@ -367,6 +367,14 @@ def _describe(event: object) -> str | None:
         return f"{a} ↔ {b}: {_res(p.get('offer'))} for {_res(p.get('request'))}"
     if kind == "trade_cancelled":
         return "trade cancelled"
+    if kind == "public_chat_message":
+        message = p.get("message")
+        target = p.get("target_player_id")
+        if isinstance(message, str) and message.strip():
+            if isinstance(target, str) and target:
+                return f"said publicly to {target}: {message.strip()}"
+            return f"said publicly: {message.strip()}"
+        return "spoke in public chat"
     if kind == "trade_chat_opened":
         requested = _res(p.get("requested_resources"))
         return f"opened trade chat for {requested}"

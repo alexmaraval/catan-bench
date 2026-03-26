@@ -27,6 +27,8 @@ Round: {{ payload.round_index }}
 Requested resources: {{ fmt_resources(payload.requested_resources) }}
 Message character limit: {{ payload.message_char_limit }}
 
+{% include "partials/public_chat_transcript_readonly.jinja" %}
+
 ### Chat transcript
 {% if payload.transcript %}
 {% for event in payload.transcript %}

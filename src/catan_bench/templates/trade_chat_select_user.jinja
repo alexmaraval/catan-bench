@@ -17,6 +17,8 @@ Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% endfor %}
 {% endif %}
 
+{% include "partials/public_chat_transcript_readonly.jinja" %}
+
 ### Chat transcript
 {% if payload.transcript %}
 {% for event in payload.transcript %}

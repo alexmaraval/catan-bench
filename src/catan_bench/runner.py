@@ -135,6 +135,9 @@ def run_from_config_files(
         run_dir=effective_run_dir,
         run_tags=game_config.run_tags,
         resume_run_dir=resume_run_dir,
+        public_chat_enabled=game_config.public_chat_enabled,
+        public_chat_message_chars=game_config.public_chat_message_chars,
+        public_chat_history_limit=game_config.public_chat_history_limit,
         trading_chat_enabled=game_config.trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=(
             game_config.trading_chat_max_failed_attempts_per_turn

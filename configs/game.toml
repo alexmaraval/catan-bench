@@ -1,9 +1,12 @@
 [game]
 engine = "catanatron"
-seed = 24
+seed = 12
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
+public_chat_enabled = true
+public_chat_message_chars = 500
+public_chat_history_limit = 40
 trading_chat_enabled = true
 trading_chat_max_failed_attempts_per_turn = 5
 trading_chat_max_rooms_per_turn = 5

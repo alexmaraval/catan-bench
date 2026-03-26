@@ -39,6 +39,9 @@ class ObservationBuilder:
         event_log: EventLog,
         memory_store: MemoryStore,
         last_turn_history_index: int,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
+        public_chat_message_chars: int = 500,
     ) -> TurnStartObservation:
         player_id = decision.acting_player_id
         return TurnStartObservation(
@@ -61,6 +64,13 @@ class ObservationBuilder:
             public_history_since_last_turn=self._tail_events(
                 event_log.since(last_turn_history_index),
             ),
+            public_chat_enabled=public_chat_enabled,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
+            public_chat_message_char_limit=public_chat_message_chars,
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
         )
@@ -102,6 +112,9 @@ class ObservationBuilder:
         event_log: EventLog,
         memory_store: MemoryStore,
         turn_start_history_index: int,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
+        public_chat_message_chars: int = 500,
         trade_chat_enabled: bool = False,
         trade_chat_attempts_remaining: int | None = None,
     ) -> ActionObservation:
@@ -125,6 +138,13 @@ class ObservationBuilder:
             ),
             public_history=self._tail_events(event_log.recent()),
             turn_public_events=event_log.since(turn_start_history_index),
+            public_chat_enabled=public_chat_enabled,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
+            public_chat_message_char_limit=public_chat_message_chars,
             legal_actions=tuple(decision.legal_actions),
             decision_prompt=decision.prompt,
             trade_chat_enabled=trade_chat_enabled,
@@ -144,6 +164,9 @@ class ObservationBuilder:
         event_log: EventLog,
         memory_store: MemoryStore,
         turn_start_history_index: int,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
+        public_chat_message_chars: int = 500,
     ) -> TurnEndObservation:
         return TurnEndObservation(
             game_id=engine.game_id,
@@ -159,6 +182,13 @@ class ObservationBuilder:
                 engine=engine, player_id=player_id, phase=phase
             ),
             turn_public_events=event_log.since(turn_start_history_index),
+            public_chat_enabled=public_chat_enabled,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
+            public_chat_message_char_limit=public_chat_message_chars,
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
         )
@@ -170,6 +200,9 @@ class ObservationBuilder:
         decision: DecisionPoint,
         event_log: EventLog,
         memory_store: MemoryStore,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
+        public_chat_message_chars: int = 500,
     ) -> ReactiveObservation:
         player_id = decision.acting_player_id
         return ReactiveObservation(
@@ -190,6 +223,13 @@ class ObservationBuilder:
                 player_id=player_id,
             ),
             public_history=self._tail_events(event_log.recent()),
+            public_chat_enabled=public_chat_enabled,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
+            public_chat_message_char_limit=public_chat_message_chars,
             legal_actions=tuple(decision.legal_actions),
             decision_prompt=decision.prompt,
             game_rules=self.game_rules,
@@ -212,6 +252,8 @@ class ObservationBuilder:
         memory_store: MemoryStore,
         message_char_limit: int,
         transcript_limit: int | None,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
     ) -> TradeChatObservation:
         transcript = tuple(
             event
@@ -240,6 +282,11 @@ class ObservationBuilder:
                 player_id=player_id,
             ),
             transcript=transcript,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
             requested_resources=dict(requested_resources),
             other_player_ids=tuple(
                 other_player_id
@@ -260,6 +307,19 @@ class ObservationBuilder:
         if effective_limit <= 0:
             return ()
         return events[-effective_limit:]
+
+    @staticmethod
+    def _public_chat_transcript(event_log: "EventLog", *, limit: int | None):
+        events = tuple(
+            event
+            for event in event_log.public_events
+            if event.kind == "public_chat_message"
+        )
+        if limit is None:
+            return events
+        if limit <= 0:
+            return ()
+        return events[-limit:]
 
     @staticmethod
     def _compact_public_state(

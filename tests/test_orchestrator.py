@@ -12,6 +12,7 @@ from catan_bench import (
     Event,
     GameOrchestrator,
     OpeningStrategyResponse,
+    PublicChatDraft,
     ScriptedPlayer,
     TradeChatOpenResponse,
     TradeChatOwnerDecisionResponse,
@@ -1150,6 +1151,101 @@ class MockSelfTradeResponseEngine:
         return {"winner_ids": ["WHITE"], "num_turns": 1}
 
 
+class MockPublicChatEngine:
+    def __init__(self) -> None:
+        self._game_id = "mock-public-chat-game"
+        self._player_ids = ("RED", "BLUE")
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, str]:
+        return self._player_ids
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        if self._step == 0:
+            return DecisionPoint(
+                acting_player_id="RED",
+                turn_index=1,
+                phase="play_turn",
+                decision_index=0,
+                prompt="Roll.",
+                legal_actions=(Action("ROLL"),),
+            )
+        if self._step == 1:
+            return DecisionPoint(
+                acting_player_id="RED",
+                turn_index=1,
+                phase="play_turn",
+                decision_index=1,
+                prompt="Choose an action.",
+                legal_actions=(Action("END_TURN"),),
+            )
+        raise RuntimeError("No more decisions.")
+
+    def public_state(self):
+        return {
+            "turn": {
+                "turn_player_id": "RED",
+                "current_player_id": "BLUE" if self._terminal else "RED",
+            },
+            "players": {
+                "RED": {"vp": 2},
+                "BLUE": {"vp": 2},
+            },
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {},
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        return {"player_id": player_id, "resources": {"WOOD": 1}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        if self._step == 0:
+            self._step = 1
+            return TransitionResult(
+                public_events=(
+                    Event(
+                        kind="dice_rolled",
+                        payload={"result": [3, 4]},
+                        turn_index=1,
+                        phase="play_turn",
+                        decision_index=0,
+                        actor_player_id="RED",
+                    ),
+                )
+            )
+        if self._step == 1:
+            self._step = 2
+            self._terminal = True
+            return TransitionResult(
+                public_events=(
+                    Event(
+                        kind="turn_ended",
+                        payload={},
+                        turn_index=1,
+                        phase="play_turn",
+                        decision_index=1,
+                        actor_player_id="RED",
+                    ),
+                ),
+                terminal=True,
+                result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+            )
+        raise RuntimeError("Unexpected action.")
+
+    def result(self):
+        return {"winner_ids": ["RED"], "num_turns": 1}
+
+
 class GameOrchestratorTests(unittest.TestCase):
     def test_opening_strategy_phase_runs_for_all_players_before_first_turn_start(
         self,
@@ -1519,6 +1615,141 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertFalse(
                 Path(run_dir, "players", "RED", "private_history.jsonl").exists()
             )
+
+    def test_trade_chat_observations_include_recent_persistent_public_chat(self) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[
+                TurnStartResponse(
+                    short_term={"plan": "Open trade chat."},
+                    public_chat=PublicChatDraft(
+                        message="BLUE, WHITE is the real threat.",
+                        target_player_id="BLUE",
+                    ),
+                )
+            ],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    short_term={"plan": "Try the table first."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Done."}),
+            ],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need brick.",
+                    requested_resources={"BRICK": 1},
+                )
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(
+                    decision="select",
+                    selected_proposal_id="attempt-1-round-1-proposal-1",
+                    message="Deal.",
+                ),
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do that.",
+                    owner_gives={"WOOD": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockTradeChatEngine(),
+            {"RED": red, "BLUE": blue},
+            public_chat_enabled=True,
+            trading_chat_enabled=True,
+        )
+
+        orchestrator.run()
+
+        owner_trade_obs = red.trade_chat_observations[0]
+        counterparty_trade_obs = blue.trade_chat_observations[0]
+        self.assertEqual(
+            owner_trade_obs.public_chat_transcript[0].kind, "public_chat_message"
+        )
+        self.assertEqual(
+            counterparty_trade_obs.public_chat_transcript[0].kind,
+            "public_chat_message",
+        )
+        self.assertEqual(
+            owner_trade_obs.public_chat_transcript[0].payload["message"],
+            "BLUE, WHITE is the real threat.",
+        )
+        self.assertEqual(
+            counterparty_trade_obs.public_chat_transcript[0].payload["message"],
+            "BLUE, WHITE is the real threat.",
+        )
+
+    def test_orchestrator_records_persistent_public_chat_and_surfaces_transcript(
+        self,
+    ) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[
+                TurnStartResponse(
+                    short_term={"plan": "End quietly."},
+                    public_chat=PublicChatDraft(
+                        message="BLUE, do not feed RED the road.",
+                        target_player_id="BLUE",
+                    ),
+                )
+            ],
+            action_responses=[
+                ActionDecision(
+                    action=Action("END_TURN"),
+                    short_term={"plan": "Done."},
+                    public_chat=PublicChatDraft(message="I am done here."),
+                )
+            ],
+            end_turn_responses=[
+                TurnEndResponse(
+                    long_term={"goal": "Keep pressure on BLUE."},
+                    public_chat=PublicChatDraft(
+                        message="BLUE, your move.",
+                        target_player_id="BLUE",
+                    ),
+                )
+            ],
+        )
+        blue = ScriptedPlayer()
+
+        orchestrator = GameOrchestrator(
+            MockPublicChatEngine(),
+            {"RED": red, "BLUE": blue},
+            public_chat_enabled=True,
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("RED",))
+        events = orchestrator.event_log.public_events
+        self.assertEqual(
+            [event.kind for event in events],
+            [
+                "dice_rolled",
+                "public_chat_message",
+                "public_chat_message",
+                "turn_ended",
+                "public_chat_message",
+            ],
+        )
+        self.assertEqual(events[1].payload["source_stage"], "turn_start")
+        self.assertEqual(events[1].payload["target_player_id"], "BLUE")
+        self.assertEqual(events[2].payload["source_stage"], "choose_action")
+        self.assertEqual(events[4].payload["source_stage"], "turn_end")
+        self.assertEqual(
+            red.action_observations[0].public_chat_transcript[0].kind,
+            "public_chat_message",
+        )
+        self.assertEqual(len(red.end_turn_observations[0].public_chat_transcript), 2)
 
     def test_orchestrator_handles_invalid_selected_trade_without_crashing(self) -> None:
         red = ScriptedPlayer(
@@ -1979,7 +2210,9 @@ class GameOrchestratorTests(unittest.TestCase):
             ["dice_rolled", "trade_offered", "trade_rejected", "turn_ended"],
         )
 
-    def test_engine_resolve_action_value_error_retries_instead_of_crashing(self) -> None:
+    def test_engine_resolve_action_value_error_retries_instead_of_crashing(
+        self,
+    ) -> None:
         orange = ScriptedPlayer(
             action_responses=[
                 Action(

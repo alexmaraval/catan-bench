@@ -133,6 +133,12 @@ def fmt_event(event: object) -> str:
         return f"{actor} confirmed trade with {accepting}: gave {offer}, received {req}"
     if kind == "trade_cancelled":
         return f"{actor} cancelled trade"
+    if kind == "public_chat_message":
+        msg = p.get("message", "")
+        target = p.get("target_player_id")
+        if isinstance(target, str) and target:
+            return f"{actor} to {target} (public): {msg}"
+        return f"{actor}: {msg}" if msg else f"{actor} spoke publicly"
     if kind == "trade_chat_opened":
         req = fmt_resources(p.get("requested_resources", {}))
         return f"{actor} opened trade chat requesting {req}"

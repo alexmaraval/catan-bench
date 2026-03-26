@@ -101,6 +101,18 @@ class PlayerMemory:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicChatDraft:
+    message: str
+    target_player_id: str | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        payload: dict[str, JsonValue] = {"message": self.message}
+        if self.target_player_id is not None:
+            payload["target_player_id"] = self.target_player_id
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class MemorySnapshot:
     player_id: str
     history_index: int
@@ -216,6 +228,9 @@ class TurnStartObservation:
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
     public_history_since_last_turn: tuple[Event, ...] = ()
+    public_chat_enabled: bool = False
+    public_chat_transcript: tuple[Event, ...] = ()
+    public_chat_message_char_limit: int = 500
     game_rules: str | None = None
     memory: PlayerMemory = field(default_factory=PlayerMemory)
 
@@ -232,6 +247,11 @@ class TurnStartObservation:
             "public_history_since_last_turn": [
                 event.to_dict() for event in self.public_history_since_last_turn
             ],
+            "public_chat_enabled": self.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
+            "public_chat_message_char_limit": self.public_chat_message_char_limit,
             "game_rules": self.game_rules,
             "memory": self.memory.to_dict(),
         }
@@ -279,6 +299,9 @@ class ActionObservation:
     private_state: dict[str, JsonValue]
     public_history: tuple[Event, ...] = ()
     turn_public_events: tuple[Event, ...] = ()
+    public_chat_enabled: bool = False
+    public_chat_transcript: tuple[Event, ...] = ()
+    public_chat_message_char_limit: int = 500
     legal_actions: tuple[Action, ...] = ()
     decision_prompt: str | None = None
     trade_chat_enabled: bool = False
@@ -300,6 +323,11 @@ class ActionObservation:
             "turn_public_events": [
                 event.to_dict() for event in self.turn_public_events
             ],
+            "public_chat_enabled": self.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
+            "public_chat_message_char_limit": self.public_chat_message_char_limit,
             "legal_actions": [action.to_dict() for action in self.legal_actions],
             "decision_prompt": self.decision_prompt,
             "trade_chat_enabled": self.trade_chat_enabled,
@@ -320,6 +348,9 @@ class TurnEndObservation:
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
     turn_public_events: tuple[Event, ...] = ()
+    public_chat_enabled: bool = False
+    public_chat_transcript: tuple[Event, ...] = ()
+    public_chat_message_char_limit: int = 500
     game_rules: str | None = None
     memory: PlayerMemory = field(default_factory=PlayerMemory)
 
@@ -336,6 +367,11 @@ class TurnEndObservation:
             "turn_public_events": [
                 event.to_dict() for event in self.turn_public_events
             ],
+            "public_chat_enabled": self.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
+            "public_chat_message_char_limit": self.public_chat_message_char_limit,
             "game_rules": self.game_rules,
             "memory": self.memory.to_dict(),
         }
@@ -352,6 +388,9 @@ class ReactiveObservation:
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
     public_history: tuple[Event, ...] = ()
+    public_chat_enabled: bool = False
+    public_chat_transcript: tuple[Event, ...] = ()
+    public_chat_message_char_limit: int = 500
     legal_actions: tuple[Action, ...] = ()
     decision_prompt: str | None = None
     game_rules: str | None = None
@@ -368,6 +407,11 @@ class ReactiveObservation:
             "public_state": self.public_state,
             "private_state": self.private_state,
             "public_history": [event.to_dict() for event in self.public_history],
+            "public_chat_enabled": self.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
+            "public_chat_message_char_limit": self.public_chat_message_char_limit,
             "legal_actions": [action.to_dict() for action in self.legal_actions],
             "decision_prompt": self.decision_prompt,
             "game_rules": self.game_rules,
@@ -416,12 +460,13 @@ class TradeChatObservation:
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
     transcript: tuple[Event, ...] = ()
+    public_chat_transcript: tuple[Event, ...] = ()
     requested_resources: dict[str, JsonValue] = field(default_factory=dict)
     other_player_ids: tuple[str, ...] = ()
     proposals: tuple[TradeChatProposal, ...] = ()
     game_rules: str | None = None
     memory: PlayerMemory = field(default_factory=PlayerMemory)
-    message_char_limit: int = 160
+    message_char_limit: int = 500
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -438,6 +483,9 @@ class TradeChatObservation:
             "public_state": self.public_state,
             "private_state": self.private_state,
             "transcript": [event.to_dict() for event in self.transcript],
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
             "requested_resources": self.requested_resources,
             "other_player_ids": list(self.other_player_ids),
             "proposals": [proposal.to_dict() for proposal in self.proposals],
@@ -450,9 +498,13 @@ class TradeChatObservation:
 @dataclass(frozen=True, slots=True)
 class TurnStartResponse:
     short_term: JsonValue | None = None
+    public_chat: PublicChatDraft | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {"short_term": self.short_term}
+        payload: dict[str, JsonValue] = {"short_term": self.short_term}
+        if self.public_chat is not None:
+            payload["public_chat"] = self.public_chat.to_dict()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,12 +519,15 @@ class OpeningStrategyResponse:
 class ActionDecision:
     action: Action
     short_term: JsonValue | None = None
+    public_chat: PublicChatDraft | None = None
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         payload: dict[str, JsonValue] = {"action": self.action.to_dict()}
         if self.short_term is not None:
             payload["short_term"] = self.short_term
+        if self.public_chat is not None:
+            payload["public_chat"] = self.public_chat.to_dict()
         if self.reasoning is not None:
             payload["reasoning"] = self.reasoning
         return payload
@@ -509,9 +564,13 @@ class ActionTraceEntry:
 @dataclass(frozen=True, slots=True)
 class TurnEndResponse:
     long_term: JsonValue | None = None
+    public_chat: PublicChatDraft | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {"long_term": self.long_term}
+        payload: dict[str, JsonValue] = {"long_term": self.long_term}
+        if self.public_chat is not None:
+            payload["public_chat"] = self.public_chat.to_dict()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,11 +15,14 @@ class GameConfig:
     run_tags: tuple[str, ...] = ()
     history_window: int | None = 40
     prompt_history_limit: int | None = 12
+    public_chat_enabled: bool = False
+    public_chat_message_chars: int = 500
+    public_chat_history_limit: int | None = 40
     trading_chat_enabled: bool = False
     trading_chat_max_failed_attempts_per_turn: int = 5
     trading_chat_max_rooms_per_turn: int = 5
     trading_chat_max_rounds_per_attempt: int = 3
-    trading_chat_message_chars: int = 160
+    trading_chat_message_chars: int = 500
     trading_chat_history_limit: int | None = 16
 
 
@@ -56,6 +59,9 @@ def load_game_config(path: str | Path) -> GameConfig:
     run_tags = payload.get("run_tags", ())
     history_window = payload.get("history_window", 40)
     prompt_history_limit = payload.get("prompt_history_limit", 12)
+    public_chat_enabled = bool(payload.get("public_chat_enabled", False))
+    public_chat_message_chars = int(payload.get("public_chat_message_chars", 500))
+    public_chat_history_limit = payload.get("public_chat_history_limit", 40)
     trading_chat_enabled = bool(payload.get("trading_chat_enabled", False))
     trading_chat_max_failed_attempts_per_turn = int(
         payload.get("trading_chat_max_failed_attempts_per_turn", 5)
@@ -66,7 +72,7 @@ def load_game_config(path: str | Path) -> GameConfig:
     trading_chat_max_rounds_per_attempt = int(
         payload.get("trading_chat_max_rounds_per_attempt", 3)
     )
-    trading_chat_message_chars = int(payload.get("trading_chat_message_chars", 160))
+    trading_chat_message_chars = int(payload.get("trading_chat_message_chars", 500))
     trading_chat_history_limit = payload.get("trading_chat_history_limit", 16)
     if history_window is not None:
         history_window = int(history_window)
@@ -76,6 +82,8 @@ def load_game_config(path: str | Path) -> GameConfig:
             raise ValueError(
                 "`prompt_history_limit` must be non-negative when provided."
             )
+    if public_chat_history_limit is not None:
+        public_chat_history_limit = int(public_chat_history_limit)
     if trading_chat_history_limit is not None:
         trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
@@ -96,6 +104,9 @@ def load_game_config(path: str | Path) -> GameConfig:
         run_tags=run_tags,
         history_window=history_window,
         prompt_history_limit=prompt_history_limit,
+        public_chat_enabled=public_chat_enabled,
+        public_chat_message_chars=public_chat_message_chars,
+        public_chat_history_limit=public_chat_history_limit,
         trading_chat_enabled=trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=trading_chat_max_failed_attempts_per_turn,
         trading_chat_max_rooms_per_turn=trading_chat_max_rooms_per_turn,

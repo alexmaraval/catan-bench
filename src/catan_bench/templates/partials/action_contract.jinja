@@ -6,8 +6,11 @@ Required keys:
 
 Optional keys:
 - `action`: full action object when the selected legal action says it requires a concrete payload.
+- `public_chat`: optional public chat object; use `null` to stay silent.
 - `private_reasoning`: concise private note under 30 words.
 
 Examples:
 - Normal indexed action: `{"action_index": 0, "short_term": "No productive build line this turn; bank trade if ore arrives next turn."}`
 - Payload action: `{"action_index": 2, "action": {"action_type": "OFFER_TRADE", "payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}}, "short_term": "Still aiming for a road if brick appears."}`
+
+{% include "partials/public_chat_contract.jinja" %}

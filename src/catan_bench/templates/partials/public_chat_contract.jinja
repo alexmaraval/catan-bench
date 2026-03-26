@@ -1,0 +1,16 @@
+{% if payload is defined and payload.public_chat_enabled %}
+Optional key:
+- `public_chat`: `null` or an object with:
+  - `message`: public text under the character limit.
+  - `target_player_id`: optional player id you are addressing. The message is still public to everyone.
+
+When using `public_chat`:
+- Write something another player could actually hear across the table.
+- Good uses: warnings, promises, requests, pressure, accusations, alliance signals, trade positioning, bluffing, or attempts to redirect attention.
+- Avoid using it just to narrate your internal strategy or restate the board for no persuasive purpose.
+
+Examples:
+- Speak publicly: `{"public_chat": {"message": "BLUE, if RED gets longest road we both lose. Block it and I will work with you next turn.", "target_player_id": "BLUE"}}`
+- Speak publicly: `{"public_chat": {"message": "Nobody should feed ORANGE ore right now. They are one clean city from taking over."}}`
+- Stay silent: `{"public_chat": null}`
+{% endif %}

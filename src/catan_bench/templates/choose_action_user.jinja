@@ -24,6 +24,8 @@ Short-term memory is a within-turn drawing board for local strategy, not a narra
 {% else %}
 (none)
 {% endif %}
+
+{% include "partials/public_chat_context.jinja" %}
 {% if payload.decision_prompt %}
 
 **Decision:** {{ payload.decision_prompt }}

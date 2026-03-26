@@ -123,11 +123,14 @@ class GameOrchestrator:
         run_tags: tuple[str, ...] = (),
         resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
+        public_chat_enabled: bool = False,
+        public_chat_message_chars: int = 500,
+        public_chat_history_limit: int | None = 40,
         trading_chat_enabled: bool = False,
         trading_chat_max_failed_attempts_per_turn: int = 5,
         trading_chat_max_rooms_per_turn: int = 5,
         trading_chat_max_rounds_per_attempt: int = 3,
-        trading_chat_message_chars: int = 160,
+        trading_chat_message_chars: int = 500,
         trading_chat_history_limit: int | None = 16,
         reporter: TerminalReporter | None = None,
     ) -> None:
@@ -156,6 +159,9 @@ class GameOrchestrator:
         self.run_dir = resolved_run_dir
         self._run_tags = tuple(str(tag) for tag in run_tags)
         self.max_decisions = max_decisions
+        self.public_chat_enabled = public_chat_enabled
+        self.public_chat_message_chars = public_chat_message_chars
+        self.public_chat_history_limit = public_chat_history_limit
         self.trading_chat_enabled = trading_chat_enabled
         self.trading_chat_max_failed_attempts_per_turn = (
             trading_chat_max_failed_attempts_per_turn
@@ -326,6 +332,11 @@ class GameOrchestrator:
                     "player_adapter_types": {
                         player_id: type(self.players[player_id]).__name__
                         for player_id in self.engine.player_ids
+                    },
+                    "public_chat": {
+                        "enabled": self.public_chat_enabled,
+                        "message_chars": self.public_chat_message_chars,
+                        "history_limit": self.public_chat_history_limit,
                     },
                     "trading_chat": {
                         "enabled": self.trading_chat_enabled,
@@ -848,6 +859,9 @@ class GameOrchestrator:
             last_turn_history_index=self._last_turn_history_index_by_player.get(
                 player_id, 0
             ),
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
+            public_chat_message_chars=self.public_chat_message_chars,
         )
         response = player.start_turn(observation)
         self._append_player_prompt_traces(player)
@@ -859,6 +873,14 @@ class GameOrchestrator:
             phase=decision.phase,
             decision_index=decision.decision_index,
             stage="turn_start",
+        )
+        self._record_response_public_chat(
+            acting_player_id=player_id,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            stage="turn_start",
+            response=response,
         )
         self._active_turn = _ActiveTurnSession(
             owner_player_id=player_id,
@@ -881,6 +903,9 @@ class GameOrchestrator:
                     event_log=self.event_log,
                     memory_store=self.memory_store,
                     turn_start_history_index=self._turn_start_history_index(),
+                    public_chat_enabled=self.public_chat_enabled,
+                    public_chat_history_limit=self.public_chat_history_limit,
+                    public_chat_message_chars=self.public_chat_message_chars,
                     trade_chat_enabled=self._trade_chat_available_for_decision(
                         decision
                     ),
@@ -958,6 +983,7 @@ class GameOrchestrator:
                 return ActionDecision(
                     action=selected_action,
                     short_term=response.short_term,
+                    public_chat=response.public_chat,
                     reasoning=response.reasoning,
                 )
 
@@ -972,6 +998,9 @@ class GameOrchestrator:
             decision=decision,
             event_log=self.event_log,
             memory_store=self.memory_store,
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
+            public_chat_message_chars=self.public_chat_message_chars,
         )
         response = player.respond_reactive(observation)
         self._append_player_prompt_traces(player)
@@ -994,6 +1023,14 @@ class GameOrchestrator:
         action = self._resolved_action_for_decision(
             decision=decision,
             proposed_action=proposed_action,
+        )
+        self._record_response_public_chat(
+            acting_player_id=decision.acting_player_id,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            stage="choose_action" if update_short_term else "reactive_action",
+            response=response,
         )
         engine_transition = self.engine.apply_action(action)
         transition = self._record_transition(
@@ -1130,6 +1167,9 @@ class GameOrchestrator:
                     event_log=self.event_log,
                     memory_store=self.memory_store,
                     turn_start_history_index=self._turn_start_history_index(),
+                    public_chat_enabled=self.public_chat_enabled,
+                    public_chat_history_limit=self.public_chat_history_limit,
+                    public_chat_message_chars=self.public_chat_message_chars,
                     trade_chat_enabled=self._trade_chat_available_for_decision(
                         retry_decision
                     ),
@@ -1144,6 +1184,9 @@ class GameOrchestrator:
                     decision=retry_decision,
                     event_log=self.event_log,
                     memory_store=self.memory_store,
+                    public_chat_enabled=self.public_chat_enabled,
+                    public_chat_history_limit=self.public_chat_history_limit,
+                    public_chat_message_chars=self.public_chat_message_chars,
                 )
                 response = player.respond_reactive(observation)
             self._append_player_prompt_traces(player)
@@ -1193,6 +1236,14 @@ class GameOrchestrator:
         reject_action = self._resolved_action_for_decision(
             decision=decision,
             proposed_action=Action("REJECT_TRADE"),
+        )
+        self._record_response_public_chat(
+            acting_player_id=decision.acting_player_id,
+            turn_index=decision.turn_index,
+            phase=decision.phase,
+            decision_index=decision.decision_index,
+            stage="reactive_action",
+            response=response,
         )
         engine_transition = self.engine.apply_action(reject_action)
         transition = self._record_transition(
@@ -1420,6 +1471,9 @@ class GameOrchestrator:
             event_log=self.event_log,
             memory_store=self.memory_store,
             turn_start_history_index=active.start_history_index,
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
+            public_chat_message_chars=self.public_chat_message_chars,
         )
         response = player.end_turn(observation)
         self._append_player_prompt_traces(player)
@@ -1439,6 +1493,14 @@ class GameOrchestrator:
             phase=phase,
             decision_index=decision_index,
             stage="turn_cleanup",
+        )
+        self._record_response_public_chat(
+            acting_player_id=active.owner_player_id,
+            turn_index=active.turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            stage="turn_end",
+            response=response,
         )
         self._last_turn_history_index_by_player[active.owner_player_id] = (
             self.event_log.current_history_index
@@ -1921,6 +1983,8 @@ class GameOrchestrator:
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
             transcript_limit=self.trading_chat_history_limit,
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
         )
         response = open_trade_chat(observation)
         self._append_player_prompt_traces(player)
@@ -1963,6 +2027,8 @@ class GameOrchestrator:
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
             transcript_limit=self.trading_chat_history_limit,
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
         )
         response = respond_trade_chat(observation)
         self._append_player_prompt_traces(player)
@@ -2002,6 +2068,8 @@ class GameOrchestrator:
             memory_store=self.memory_store,
             message_char_limit=self.trading_chat_message_chars,
             transcript_limit=self.trading_chat_history_limit,
+            public_chat_enabled=self.public_chat_enabled,
+            public_chat_history_limit=self.public_chat_history_limit,
         )
         response = decide_trade_chat(observation)
         self._append_player_prompt_traces(player)
@@ -2035,6 +2103,54 @@ class GameOrchestrator:
         self, events: tuple[Event, ...] | list[Event]
     ) -> tuple[Event, ...]:
         return self._store_events(events)
+
+    def _record_response_public_chat(
+        self,
+        *,
+        acting_player_id: str,
+        turn_index: int,
+        phase: str,
+        decision_index: int,
+        stage: str,
+        response: ActionDecision
+        | TradeChatOpenResponse
+        | TradeChatReplyResponse
+        | TradeChatOwnerDecisionResponse
+        | object,
+    ) -> Event | None:
+        if not self.public_chat_enabled:
+            return None
+        public_chat = getattr(response, "public_chat", None)
+        if public_chat is None:
+            return None
+        message = self._truncate_public_chat_message(
+            getattr(public_chat, "message", None)
+        )
+        if message is None:
+            return None
+
+        payload: dict[str, JsonValue] = {
+            "speaker_player_id": acting_player_id,
+            "message": message,
+            "source_stage": stage,
+        }
+        target_player_id = self._normalize_public_chat_target(
+            target_player_id=getattr(public_chat, "target_player_id", None),
+            speaker_player_id=acting_player_id,
+        )
+        if target_player_id is not None:
+            payload["target_player_id"] = target_player_id
+
+        event = Event(
+            kind="public_chat_message",
+            payload=payload,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            actor_player_id=acting_player_id,
+        )
+        self._record_public_events((event,))
+        return event
 
     def _trade_chat_participants(self, owner_player_id: str) -> tuple[str, ...]:
         return tuple(
@@ -2222,6 +2338,29 @@ class GameOrchestrator:
             return None
         return stripped[: self.trading_chat_message_chars]
 
+    def _truncate_public_chat_message(self, message: str | None) -> str | None:
+        if message is None:
+            return None
+        stripped = message.strip()
+        if not stripped:
+            return None
+        return stripped[: self.public_chat_message_chars]
+
+    def _normalize_public_chat_target(
+        self,
+        *,
+        target_player_id: object,
+        speaker_player_id: str,
+    ) -> str | None:
+        if not isinstance(target_player_id, str):
+            return None
+        normalized = target_player_id.strip().upper()
+        if not normalized or normalized == speaker_player_id:
+            return None
+        if normalized not in self.engine.player_ids:
+            return None
+        return normalized
+
     def _append_player_prompt_traces(self, player: Player) -> None:
         take_prompt_traces = getattr(player, "take_prompt_traces", None)
         if callable(take_prompt_traces):
@@ -2320,6 +2459,7 @@ class GameOrchestrator:
                 "no_deals",
             )
         }
+        public_chat_metrics = {"messages": 0, "targeted_messages": 0}
         for event in self.event_log.public_events:
             if event.kind == "trade_offered":
                 trade_metrics["offers"] += 1
@@ -2339,10 +2479,15 @@ class GameOrchestrator:
                 trade_metrics["quotes_selected"] += 1
             elif event.kind == "trade_chat_no_deal":
                 trade_metrics["no_deals"] += 1
+            elif event.kind == "public_chat_message":
+                public_chat_metrics["messages"] += 1
+                if isinstance(event.payload.get("target_player_id"), str):
+                    public_chat_metrics["targeted_messages"] += 1
         return {
             "history_window": self.observation_builder.recent_event_window,
             "run_directory": None if self.run_dir is None else str(self.run_dir),
             "decision_phase_counts": dict(sorted(self._decision_phase_counts.items())),
+            "public_chat_metrics": public_chat_metrics,
             "trade_metrics": trade_metrics,
             "trade_event_share": (
                 0.0

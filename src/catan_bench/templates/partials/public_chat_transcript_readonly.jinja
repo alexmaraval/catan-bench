@@ -1,0 +1,8 @@
+### Main public chat
+{% if payload.public_chat_transcript %}
+{% for event in payload.public_chat_transcript %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(no recent public chat)
+{% endif %}

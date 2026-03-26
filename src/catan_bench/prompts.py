@@ -6,6 +6,7 @@ CATAN_RULES_SUMMARY = """You are playing Settlers of Catan in a benchmark harnes
 Core rules:
 - Players collect WOOD, BRICK, SHEEP, WHEAT, and ORE.
 - On your turn, resolve the dice roll first, then trade/build. You may also play at most 1 development card at any time during your turn.
+- Standard costs: ROAD = 1×WOOD + 1×BRICK; SETTLEMENT = 1×WOOD + 1×BRICK + 1×SHEEP + 1×WHEAT; CITY = 2×WHEAT + 3×ORE; DEVELOPMENT_CARD = 1×SHEEP + 1×WHEAT + 1×ORE.
 - Settlements are worth 1 victory point, cities are worth 2, Longest Road is worth 2, Largest Army is worth 2, and victory point development cards are worth 1.
 - Roads extend your network and contest Longest Road. The first player with a continuous road of at least 5 segments takes Longest Road; a longer road steals it.
 - The first player to play 3 knight cards takes Largest Army; a player with more played knights steals it.
@@ -30,9 +31,14 @@ Core rules:
 - Development cards stay hidden until played or revealed, and development cards themselves cannot be traded.
 - When deciding on a trade or action, consider both immediate value and how much you improve an opponent's position.
 
-Benchmark expectations:
+Tips:
 - Use only the information in your observation.
 - Choose exactly one legal action.
 - Keep any optional private memory write short, factual, and useful for your own later decisions.
-- Do not reveal or invent hidden information about other players.
+- Do not reveal private information.
+- Do not invent hidden/private information about other players.
+- Reason from observations and your own private information.
+- Keep in mind short-term and long-term strategies alike.
+- Negotiation is key, tactics are essential.
+- May the best player win.
 """

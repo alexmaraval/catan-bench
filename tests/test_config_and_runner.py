@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from catan_bench import GameResult
 from catan_bench.config import load_game_config, load_player_configs
+from catan_bench.orchestrator import _resolve_run_dir
 from catan_bench.reporter import DebugTerminalReporter
 from catan_bench.runner import (
     _find_dotenv,
@@ -32,6 +33,8 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(game_config.engine, "catanatron")
         self.assertEqual(game_config.seed, 24)
         self.assertEqual(game_config.prompt_history_limit, 30)
+        self.assertEqual(game_config.run_dir, Path("runs"))
+        self.assertEqual(game_config.run_tags, ("0.4.0", "dev"))
         self.assertTrue(game_config.trading_chat_enabled)
         self.assertEqual(game_config.trading_chat_max_rooms_per_turn, 5)
         self.assertEqual(len(player_configs), 4)
@@ -48,6 +51,22 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config = load_game_config(game_toml)
 
             self.assertEqual(config.prompt_history_limit, 10)
+
+    def test_load_game_config_with_run_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            game_toml.write_text(
+                (
+                    '[game]\nengine = "catanatron"\nrun_dir = "runs/"\n'
+                    'run_tags = ["0.4.0", "experiment-a"]\n'
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_game_config(game_toml)
+
+            self.assertEqual(config.run_dir, Path("runs"))
+            self.assertEqual(config.run_tags, ("0.4.0", "experiment-a"))
 
     def test_load_player_config_rejects_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -117,6 +136,65 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
             self.assertEqual(result.winner_ids, ("RED",))
             run_mock.assert_called_once()
+
+    def test_runner_passes_run_tags_to_orchestrator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    'engine = "catanatron"\n'
+                    'run_dir = "runs/"\n'
+                    'run_tags = ["0.4.0", "dev"]\n'
+                ),
+                encoding="utf-8",
+            )
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
+                with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
+                    orchestrator_cls.return_value.run.return_value = GameResult(
+                        game_id="mock-game",
+                        winner_ids=("RED",),
+                        total_decisions=1,
+                        public_event_count=0,
+                        memory_writes=0,
+                        metadata={},
+                    )
+                    run_from_config_files(
+                        game_config_path=game_toml,
+                        players_config_path=players_toml,
+                    )
+
+            self.assertEqual(
+                orchestrator_cls.call_args.kwargs["run_tags"], ("0.4.0", "dev")
+            )
+
+    def test_resolve_run_dir_prefixes_tags_into_flat_run_name(self) -> None:
+        resolved = _resolve_run_dir(
+            Path("runs"),
+            game_id="mock-game",
+            run_tags=("0.4.0", "dev"),
+        )
+
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.parent, Path("runs"))
+        self.assertRegex(
+            resolved.name,
+            r"^0\.4\.0-dev-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+        )
 
     def test_runner_uses_debug_reporter_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -47,9 +47,30 @@ _PLAYER_ANSI: dict[str, str] = {
     "TEAL": "\033[36m",
 }
 
+RUN_MARKER_FILES = ("metadata.json", "public_history.jsonl", "public_state_trace.jsonl")
+
 
 def _c(text: str, code: str) -> str:
     return f"{code}{text}{_RESET}"
+
+
+def _is_run_directory(path: Path) -> bool:
+    return path.is_dir() and all((path / file_name).exists() for file_name in RUN_MARKER_FILES)
+
+
+def _is_completed_run_directory(path: Path) -> bool:
+    return _is_run_directory(path) and (path / "result.json").exists()
+
+
+def discover_completed_run_directories(target: str | Path) -> tuple[Path, ...]:
+    path = Path(target)
+    if _is_completed_run_directory(path):
+        return (path,)
+    if not path.is_dir():
+        return ()
+    candidates = [child for child in path.iterdir() if _is_completed_run_directory(child)]
+    candidates.sort(key=lambda child: child.stat().st_mtime, reverse=True)
+    return tuple(candidates)
 
 
 # ── Data loading ─────────────────────────────────────────────────────────────
@@ -213,6 +234,11 @@ def compute_game_summary(
         for e in events
         if e.kind == "trade_chat_closed" and e.payload.get("outcome") == "selected"
     )
+    chat_rooms_no_deal = sum(
+        1
+        for e in events
+        if e.kind == "trade_chat_closed" and e.payload.get("outcome") == "no_deal"
+    )
 
     return {
         "winner_ids": list(result.get("winner_ids", [])),
@@ -226,8 +252,14 @@ def compute_game_summary(
         if trade_offered
         else 0.0,
         "trade_chat_rooms": chat_rooms_opened,
+        "trade_chat_no_deals": chat_rooms_no_deal,
         "trade_chat_success_rate": (
             round(chat_rooms_selected / max(chat_rooms_opened, 1), 4)
+            if chat_rooms_opened
+            else 0.0
+        ),
+        "trade_chat_no_deal_rate": (
+            round(chat_rooms_no_deal / max(chat_rooms_opened, 1), 4)
             if chat_rooms_opened
             else 0.0
         ),
@@ -1057,7 +1089,12 @@ def compute_vp_progression(
     player_id: str,
     state_snapshots: list[PublicStateSnapshot],
 ) -> list[dict[str, Any]]:
-    """Extract VP at each turn boundary, deduplicated to max VP per turn."""
+    """Extract total VP at each turn boundary, deduplicated to max VP per turn.
+
+    Public snapshots generally expose visible VP plus hidden dev-card VP separately,
+    so we reconstruct total VP as `visible_victory_points + dev_victory_points`.
+    If `actual_victory_points` is present, prefer that directly.
+    """
     turn_max_vp: dict[int, int] = {}
     for snap in state_snapshots:
         players = snap.public_state.get("players")
@@ -1066,7 +1103,12 @@ def compute_vp_progression(
         player_data = players.get(player_id)
         if not isinstance(player_data, dict):
             continue
-        vp = int(player_data.get("visible_victory_points", 0))
+        if "actual_victory_points" in player_data:
+            vp = int(player_data.get("actual_victory_points", 0))
+        else:
+            vp = int(player_data.get("visible_victory_points", 0)) + int(
+                player_data.get("dev_victory_points", 0)
+            )
         turn = snap.turn_index
         if turn not in turn_max_vp or vp > turn_max_vp[turn]:
             turn_max_vp[turn] = vp
@@ -1181,6 +1223,117 @@ def compute_phase_analysis(
     }
 
 
+_DURABLE_PROGRESS_EVENT_KINDS = {
+    "settlement_built",
+    "city_built",
+    "road_built",
+    "development_card_played",
+}
+_DURABLE_PROGRESS_ACTION_TYPES = {
+    "BUY_DEVELOPMENT_CARD",
+}
+
+
+def _vp_at_or_before_turn(
+    vp_progression: list[dict[str, Any]],
+    turn_index: int,
+) -> int:
+    vp = 0
+    for entry in vp_progression:
+        entry_turn = entry.get("turn_index")
+        entry_vp = entry.get("vp")
+        if not isinstance(entry_turn, int) or not isinstance(entry_vp, int):
+            continue
+        if entry_turn > turn_index:
+            break
+        vp = entry_vp
+    return vp
+
+
+def compute_turn_progress_metrics(
+    player_id: str,
+    events: list[Event],
+    vp_progression: list[dict[str, Any]],
+    *,
+    final_vp: int,
+    num_turns: int,
+    vps_to_win: int,
+    is_winner: bool,
+) -> dict[str, Any]:
+    """Compute per-player turn progression and stall metrics.
+
+    A dead turn is an active play turn where the player makes no durable public progress
+    (buildings, buying/playing a development card) and ends the turn without a VP gain.
+    """
+    active_turns: set[int] = set()
+    productive_turns: set[int] = set()
+
+    for event in events:
+        if event.phase != "play_turn":
+            continue
+        owner = event.payload.get("turn_player_id_before")
+        if owner != player_id:
+            continue
+        active_turns.add(event.turn_index)
+        if event.actor_player_id != player_id:
+            continue
+        if event.kind in _DURABLE_PROGRESS_EVENT_KINDS:
+            productive_turns.add(event.turn_index)
+            continue
+        if event.kind != "action_taken":
+            continue
+        action = event.payload.get("action")
+        if not isinstance(action, dict):
+            continue
+        action_type = action.get("action_type")
+        if isinstance(action_type, str) and action_type in _DURABLE_PROGRESS_ACTION_TYPES:
+            productive_turns.add(event.turn_index)
+
+    milestone_progression = list(vp_progression)
+    last_visible_vp = milestone_progression[-1]["vp"] if milestone_progression else 0
+    if is_winner and final_vp > last_visible_vp and num_turns > 0:
+        milestone_progression.append({"turn_index": num_turns, "vp": final_vp})
+        milestone_progression.sort(key=lambda entry: int(entry["turn_index"]))
+
+    milestones: dict[int, int | None] = {}
+    for threshold in (5, 7, vps_to_win):
+        milestones[threshold] = None
+        for entry in milestone_progression:
+            if entry["vp"] >= threshold:
+                milestones[threshold] = entry["turn_index"]
+                break
+
+    dead_turns = 0
+    for turn_index in sorted(active_turns):
+        if turn_index in productive_turns:
+            continue
+        vp_before = _vp_at_or_before_turn(vp_progression, turn_index - 1)
+        vp_after = _vp_at_or_before_turn(vp_progression, turn_index)
+        if vp_after <= vp_before:
+            dead_turns += 1
+
+    active_turn_count = len(active_turns)
+    win_turn = milestones.get(vps_to_win)
+    first_seven_turn = milestones.get(7)
+
+    return {
+        "active_turns": active_turn_count,
+        "productive_turns": len(productive_turns),
+        "dead_turns": dead_turns,
+        "dead_turn_rate": round(dead_turns / max(active_turn_count, 1), 4)
+        if active_turn_count
+        else 0.0,
+        "turns_to_first_5_vp": milestones.get(5),
+        "first_7_vp_turn": first_seven_turn,
+        "win_turn": win_turn,
+        "turns_from_7_vp_to_win": (
+            win_turn - first_seven_turn
+            if isinstance(first_seven_turn, int) and isinstance(win_turn, int)
+            else None
+        ),
+    }
+
+
 # ── Decision quality ─────────────────────────────────────────────────────────
 
 
@@ -1261,6 +1414,9 @@ def analyze_player(
         if isinstance(player_meta, dict)
         else 0
     )
+    num_turns = int(result.get("metadata", {}).get("num_turns", 0))
+    vps_to_win = int(result.get("metadata", {}).get("vps_to_win", 10))
+    is_winner = player_id in winner_ids
 
     vp_progression = compute_vp_progression(player_id, state_snapshots)
     road_progression = compute_road_progression(player_id, state_snapshots)
@@ -1268,6 +1424,15 @@ def analyze_player(
     trade = compute_trade_analysis(player_id, events)
     trade_chat = compute_trade_chat_analysis(player_id, events)
     strategy = compute_strategy_evolution(player_id, memory_snapshots)
+    turn_progress = compute_turn_progress_metrics(
+        player_id,
+        events,
+        vp_progression,
+        final_vp=final_vp,
+        num_turns=num_turns,
+        vps_to_win=vps_to_win,
+        is_winner=is_winner,
+    )
     total_completed_trades = (
         trade["confirmations_as_offerer"] + trade["confirmations_as_acceptee"]
     )
@@ -1293,7 +1458,7 @@ def analyze_player(
 
     return {
         "final_vp": final_vp,
-        "is_winner": player_id in winner_ids,
+        "is_winner": is_winner,
         "vp_progression": vp_progression,
         "road_progression": road_progression,
         "army_progression": army_progression,
@@ -1308,6 +1473,7 @@ def analyze_player(
         "dev_cards": compute_dev_card_analysis(player_id, events, final_snapshot),
         "decision_quality": compute_decision_quality(prompt_traces),
         "achievements": compute_achievements(player_id, final_snapshot),
+        "turn_progress": turn_progress,
         "phase_analysis": compute_phase_analysis(
             player_id, events, state_snapshots, vp_progression
         ),
@@ -1412,7 +1578,10 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
     )
     if gs.get("trade_chat_rooms", 0):
         out.write(
-            f"  Chat rooms: {gs['trade_chat_rooms']}  |  Chat success: {gs.get('trade_chat_success_rate', 0):.1%}\n"
+            "  Chat rooms: "
+            f"{gs['trade_chat_rooms']}  |  "
+            f"Chat success: {gs.get('trade_chat_success_rate', 0):.1%}  |  "
+            f"No-deal: {gs.get('trade_chat_no_deal_rate', 0):.1%}\n"
         )
 
     players = analysis.get("players", {})
@@ -1430,6 +1599,15 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
         if badges:
             out.write(f"  [{', '.join(badges)}]")
         out.write("\n")
+
+        turn_progress = data.get("turn_progress", {})
+        if turn_progress.get("active_turns", 0):
+            out.write(
+                "    Turn progress: "
+                f"{turn_progress.get('dead_turns', 0)} dead / "
+                f"{turn_progress.get('active_turns', 0)} active "
+                f"({turn_progress.get('dead_turn_rate', 0):.1%})\n"
+            )
 
         # Buildings
         buildings = data.get("buildings", {})
@@ -1543,13 +1721,21 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Analyze a completed catan-bench game run.",
+        description="Analyze one completed catan-bench run or all completed runs under a base directory.",
     )
-    parser.add_argument("run_dir", help="Path to the completed run directory.")
+    parser.add_argument(
+        "run_dir",
+        nargs="?",
+        default="runs",
+        help=(
+            "Path to a completed run directory or to a base directory containing completed child runs. "
+            "Defaults to ./runs."
+        ),
+    )
     parser.add_argument(
         "--json-only",
         action="store_true",
-        help="Print JSON to stdout, skip terminal summary.",
+        help="Print JSON to stdout and skip the terminal summary.",
     )
     parser.add_argument(
         "--no-write",
@@ -1558,19 +1744,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    run_dir = Path(args.run_dir)
-    if not run_dir.is_dir():
-        print(f"Error: {run_dir} is not a directory.", file=sys.stderr)
+    target = Path(args.run_dir)
+    if not target.is_dir():
+        print(f"Error: {target} is not a directory.", file=sys.stderr)
         return 1
 
-    analysis = analyze_game(run_dir, write=not args.no_write)
+    run_dirs = discover_completed_run_directories(target)
+    if not run_dirs:
+        print(f"No completed runs found under {target}.", file=sys.stderr)
+        return 1
+
+    analyses = [
+        {"run_dir": str(run_dir), "analysis": analyze_game(run_dir, write=not args.no_write)}
+        for run_dir in run_dirs
+    ]
 
     if args.json_only:
-        print(json.dumps(analysis, indent=2, sort_keys=True))
+        if len(analyses) == 1:
+            print(json.dumps(analyses[0]["analysis"], indent=2, sort_keys=True))
+        else:
+            print(json.dumps(analyses, indent=2, sort_keys=True))
     else:
-        print_terminal_summary(analysis)
-        if not args.no_write:
-            print(f"Written to: {run_dir / 'analysis.json'}", file=sys.stderr)
+        for index, item in enumerate(analyses):
+            if index > 0:
+                print()
+            print(f"Run: {item['run_dir']}")
+            print_terminal_summary(item["analysis"])
+            if not args.no_write:
+                print(
+                    f"Written to: {Path(item['run_dir']) / 'analysis.json'}",
+                    file=sys.stderr,
+                )
 
     return 0
 

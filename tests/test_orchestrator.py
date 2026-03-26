@@ -184,6 +184,87 @@ class MockTurnEngine:
         return {"winner_ids": ["RED"], "num_turns": 1}
 
 
+class MockResolveActionValueErrorEngine:
+    def __init__(self) -> None:
+        self._game_id = "mock-resolve-error-game"
+        self._player_ids = ("ORANGE",)
+        self._step = 0
+        self._terminal = False
+
+    @property
+    def game_id(self) -> str:
+        return self._game_id
+
+    @property
+    def player_ids(self) -> tuple[str, ...]:
+        return self._player_ids
+
+    def is_terminal(self) -> bool:
+        return self._terminal
+
+    def current_decision(self) -> DecisionPoint:
+        if self._step == 0:
+            return DecisionPoint(
+                acting_player_id="ORANGE",
+                turn_index=133,
+                phase="play_turn",
+                decision_index=0,
+                prompt="Choose an action.",
+                legal_actions=(
+                    Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"ORE": 1}, "request": {"SHEEP": 2}},
+                    ),
+                    Action("END_TURN"),
+                ),
+            )
+        raise RuntimeError("No more decisions.")
+
+    def resolve_action(
+        self, *, proposed_action: Action, legal_actions: tuple[Action, ...]
+    ) -> Action:
+        del legal_actions
+        if proposed_action.action_type == "OFFER_TRADE":
+            raise ValueError(
+                "Action {'action_type': 'OFFER_TRADE', 'payload': {'offer': {'ORE': 1}, "
+                "'request': {'ORE': 1, 'SHEEP': 1}}} is not currently valid in catanatron."
+            )
+        return proposed_action
+
+    def public_state(self):
+        return {
+            "turn": {"turn_player_id": "ORANGE", "current_player_id": "ORANGE"},
+            "players": {"ORANGE": {"vp": 2}},
+            "board": {"robber_coordinate": [0, 0, 0]},
+            "trade_state": {},
+            "bank": {},
+        }
+
+    def private_state(self, player_id: str):
+        return {"player_id": player_id, "resources": {"ORE": 1, "SHEEP": 2}}
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        self._step = 1
+        self._terminal = True
+        return TransitionResult(
+            public_events=(
+                Event(
+                    kind="turn_ended",
+                    payload={},
+                    turn_index=133,
+                    phase="play_turn",
+                    decision_index=0,
+                    actor_player_id="ORANGE",
+                ),
+            ),
+            terminal=True,
+            result_metadata={"winner_ids": ["ORANGE"], "num_turns": 133},
+        )
+
+    def result(self):
+        return {"winner_ids": ["ORANGE"], "num_turns": 133}
+
+
 class MockTradeChatEngine:
     def __init__(self) -> None:
         self._game_id = "trade-chat-game"
@@ -1806,6 +1887,41 @@ class GameOrchestratorTests(unittest.TestCase):
         self.assertEqual(
             [event.kind for event in orchestrator.event_log.public_events],
             ["dice_rolled", "trade_offered", "trade_rejected", "turn_ended"],
+        )
+
+    def test_engine_resolve_action_value_error_retries_instead_of_crashing(self) -> None:
+        orange = ScriptedPlayer(
+            action_responses=[
+                Action(
+                    "OFFER_TRADE",
+                    payload={"offer": {"ORE": 1}, "request": {"ORE": 1, "SHEEP": 1}},
+                ),
+                Action("END_TURN"),
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockResolveActionValueErrorEngine(),
+            {"ORANGE": orange},
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("ORANGE",))
+        self.assertEqual(len(orange.action_observations), 2)
+        self.assertIsNotNone(orange.action_observations[-1].decision_prompt)
+        assert orange.action_observations[-1].decision_prompt is not None
+        self.assertIn(
+            "Previous action was invalid",
+            orange.action_observations[-1].decision_prompt,
+        )
+        self.assertIn(
+            "is not currently valid in catanatron",
+            orange.action_observations[-1].decision_prompt,
+        )
+        self.assertEqual(
+            [event.kind for event in orchestrator.event_log.public_events],
+            ["turn_ended"],
         )
 
     def test_same_trade_market_can_repeat_after_counteroffer(self) -> None:

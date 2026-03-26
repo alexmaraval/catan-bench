@@ -72,19 +72,25 @@ python -m catan_bench --game configs/game.toml --players configs/openai-players.
 3. Open the dashboard for a run:
 
 ```bash
-streamlit run dashboard.py -- --run-dir runs/0.4.0/dev/<run-name>
+streamlit run dashboard.py -- --run-dir runs
 ```
 
 4. Export a static replay page:
 
 ```bash
-python -m catan_bench.replay runs/0.4.0/dev/<run-name>
+python -m catan_bench.replay runs/<run-name>
 ```
 
 5. Generate post-game analysis:
 
 ```bash
-python -m catan_bench.analysis runs/0.4.0/dev/<run-name>
+python -m catan_bench.analysis runs
+```
+
+6. Generate cross-run ELO rankings and rubric scores:
+
+```bash
+python -m catan_bench.benchmark runs
 ```
 
 ## Configuration
@@ -109,6 +115,13 @@ history_window = 100
 prompt_history_limit = 12
 trading_chat_enabled = true
 run_dir = "runs/"
+run_tags = ["0.4.0", "dev"]
+```
+
+New runs are created directly under `runs/`, with tags prefixed into the run directory name. For example:
+
+```text
+runs/0.4.0-dev-<game-id>-<timestamp>-<token>/
 ```
 
 Minimal player config:
@@ -169,8 +182,9 @@ Useful entry points:
 
 - `python -m catan_bench`
 - `python -m catan_bench.analysis <run-dir>`
+- `python -m catan_bench.benchmark <run-dir-or-runs-base>`
 - `python -m catan_bench.replay <run-dir>`
-- `python -m catan_bench.cleanup_runs runs/0.4.0/dev`
+- `python -m catan_bench.cleanup_runs runs`
 - `streamlit run dashboard.py -- --run-dir <run-dir>`
 
 For more background, see [docs/PROJECT_NOTES.md](docs/PROJECT_NOTES.md) and [plan.md](plan.md).

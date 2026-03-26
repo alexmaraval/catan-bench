@@ -52,16 +52,29 @@ class InvalidActionError(ValueError):
 
 
 def _slugify_path_component(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9.]+", "-", value.lower()).strip("-")
     return slug or "game"
 
 
-def _resolve_run_dir(base_run_dir: str | Path | None, *, game_id: str) -> Path | None:
+def _resolve_run_dir(
+    base_run_dir: str | Path | None,
+    *,
+    game_id: str,
+    run_tags: tuple[str, ...] = (),
+) -> Path | None:
     if base_run_dir is None:
         return None
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     token = secrets.token_hex(4)
-    run_name = f"{_slugify_path_component(game_id)}-{timestamp}-{token}"
+    tag_prefix = "-".join(
+        _slugify_path_component(tag) for tag in run_tags if _slugify_path_component(tag)
+    )
+    if tag_prefix:
+        run_name = (
+            f"{tag_prefix}-{_slugify_path_component(game_id)}-{timestamp}-{token}"
+        )
+    else:
+        run_name = f"{_slugify_path_component(game_id)}-{timestamp}-{token}"
     return Path(base_run_dir) / run_name
 
 
@@ -107,6 +120,7 @@ class GameOrchestrator:
         prompt_trace_store: PromptTraceStore | None = None,
         action_trace_store: ActionTraceStore | None = None,
         run_dir: str | Path | None = None,
+        run_tags: tuple[str, ...] = (),
         resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
         trading_chat_enabled: bool = False,
@@ -123,7 +137,7 @@ class GameOrchestrator:
         resolved_run_dir = (
             Path(resume_run_dir)
             if resume_run_dir is not None
-            else _resolve_run_dir(run_dir, game_id=engine.game_id)
+            else _resolve_run_dir(run_dir, game_id=engine.game_id, run_tags=run_tags)
         )
         self.engine = engine
         self.players = dict(players)
@@ -140,6 +154,7 @@ class GameOrchestrator:
             resolved_run_dir
         )
         self.run_dir = resolved_run_dir
+        self._run_tags = tuple(str(tag) for tag in run_tags)
         self.max_decisions = max_decisions
         self.trading_chat_enabled = trading_chat_enabled
         self.trading_chat_max_failed_attempts_per_turn = (
@@ -304,6 +319,7 @@ class GameOrchestrator:
                     "game_id": self.engine.game_id,
                     "artifact_version": 3,
                     "run_directory": str(self.run_dir),
+                    "run_tags": list(self._run_tags),
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
                         player_id: type(self.players[player_id]).__name__
@@ -559,16 +575,19 @@ class GameOrchestrator:
             decision=decision,
             proposed_action=proposed_action,
         )
-        engine_resolve_action = getattr(self.engine, "resolve_action", None)
-        if callable(engine_resolve_action):
-            return engine_resolve_action(
+        try:
+            engine_resolve_action = getattr(self.engine, "resolve_action", None)
+            if callable(engine_resolve_action):
+                return engine_resolve_action(
+                    proposed_action=proposed_action,
+                    legal_actions=decision.legal_actions,
+                )
+            return self._resolve_action(
                 proposed_action=proposed_action,
                 legal_actions=decision.legal_actions,
             )
-        return self._resolve_action(
-            proposed_action=proposed_action,
-            legal_actions=decision.legal_actions,
-        )
+        except ValueError as exc:
+            raise InvalidActionError(str(exc)) from exc
 
     def _should_auto_roll(self, decision: DecisionPoint) -> bool:
         if decision.phase != "play_turn":

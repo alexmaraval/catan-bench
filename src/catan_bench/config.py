@@ -12,6 +12,7 @@ class GameConfig:
     discard_limit: int = 7
     vps_to_win: int = 10
     run_dir: Path | None = None
+    run_tags: tuple[str, ...] = ()
     history_window: int | None = 40
     prompt_history_limit: int | None = 12
     trading_chat_enabled: bool = False
@@ -52,6 +53,7 @@ def load_game_config(path: str | Path) -> GameConfig:
     discard_limit = int(payload.get("discard_limit", 7))
     vps_to_win = int(payload.get("vps_to_win", 10))
     run_dir = payload.get("run_dir")
+    run_tags = payload.get("run_tags", ())
     history_window = payload.get("history_window", 40)
     prompt_history_limit = payload.get("prompt_history_limit", 12)
     trading_chat_enabled = bool(payload.get("trading_chat_enabled", False))
@@ -78,6 +80,12 @@ def load_game_config(path: str | Path) -> GameConfig:
         trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
         run_dir = Path(run_dir)
+    if run_tags is None:
+        run_tags = ()
+    elif isinstance(run_tags, (list, tuple)):
+        run_tags = tuple(str(tag).strip() for tag in run_tags if str(tag).strip())
+    else:
+        raise ValueError("`run_tags` must be a list of strings when provided.")
 
     return GameConfig(
         engine=engine,
@@ -85,6 +93,7 @@ def load_game_config(path: str | Path) -> GameConfig:
         discard_limit=discard_limit,
         vps_to_win=vps_to_win,
         run_dir=run_dir,
+        run_tags=run_tags,
         history_window=history_window,
         prompt_history_limit=prompt_history_limit,
         trading_chat_enabled=trading_chat_enabled,

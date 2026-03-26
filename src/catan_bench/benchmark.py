@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -486,3 +488,81 @@ def compute_head_to_head(
                 h2h[model_b][model_a]["draws"] += 1
 
     return h2h
+
+
+def _benchmark_summary_payload(
+    games: list[GameRecord], elo: EloState, rubrics: dict[str, RubricScores]
+) -> dict[str, Any]:
+    ranked_models = sorted(elo.ratings.keys(), key=lambda model: elo.ratings[model], reverse=True)
+    leaderboard = []
+    for model in ranked_models:
+        games_played = elo.games_played.get(model, 0)
+        wins = elo.wins.get(model, 0)
+        total_vp = elo.total_vp.get(model, 0)
+        leaderboard.append(
+            {
+                "model": model,
+                "elo": round(elo.ratings[model], 2),
+                "games_played": games_played,
+                "wins": wins,
+                "avg_vp": 0.0 if games_played == 0 else total_vp / games_played,
+                "rubric_overall": rubrics.get(model, RubricScores()).overall,
+            }
+        )
+    return {
+        "games_scanned": len(games),
+        "runs": [str(game.run_dir) for game in games],
+        "leaderboard": leaderboard,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Compute ELO rankings and rubric scores from completed catan-bench runs."
+    )
+    parser.add_argument(
+        "run_dir",
+        nargs="?",
+        default="runs",
+        help=(
+            "Path to a completed run directory or a base directory containing completed child runs. "
+            "Defaults to ./runs."
+        ),
+    )
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        help="Print the benchmark summary as JSON.",
+    )
+    args = parser.parse_args(argv)
+
+    target = Path(args.run_dir)
+    if not target.is_dir():
+        print(f"Error: {target} is not a directory.", file=sys.stderr)
+        return 1
+
+    games = collect_game_records(target)
+    if not games:
+        print(f"No completed runs found under {target}.", file=sys.stderr)
+        return 1
+
+    elo = compute_elo_ratings(games)
+    rubrics = compute_rubric_scores(games)
+    summary = _benchmark_summary_payload(games, elo, rubrics)
+
+    if args.json_only:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
+
+    print(f"Scanned {summary['games_scanned']} completed run(s) under {target}.")
+    for index, row in enumerate(summary["leaderboard"], start=1):
+        print(
+            f"{index}. {row['model']}  ELO {round(row['elo'])}  "
+            f"games {row['games_played']}  wins {row['wins']}  "
+            f"avg VP {row['avg_vp']:.2f}  rubric {row['rubric_overall']:.1f}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

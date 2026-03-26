@@ -125,6 +125,7 @@ def run_from_config_files(
             recent_event_window=game_config.history_window,
         ),
         run_dir=effective_run_dir,
+        run_tags=game_config.run_tags,
         resume_run_dir=resume_run_dir,
         trading_chat_enabled=game_config.trading_chat_enabled,
         trading_chat_max_failed_attempts_per_turn=(

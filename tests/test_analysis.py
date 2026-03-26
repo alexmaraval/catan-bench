@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from catan_bench.analysis import (
@@ -21,7 +23,10 @@ from catan_bench.analysis import (
     compute_strategy_evolution,
     compute_trade_analysis,
     compute_trade_chat_analysis,
+    compute_turn_progress_metrics,
     compute_vp_progression,
+    discover_completed_run_directories,
+    main as analysis_main,
     PIPS,
 )
 from catan_bench.schemas import (
@@ -170,6 +175,23 @@ class TestComputeGameSummary(unittest.TestCase):
             total_decisions=1,
         )
         self.assertEqual(summary["trade_efficiency"], 0.0)
+
+    def test_trade_chat_no_deal_rate(self) -> None:
+        events = [
+            _event("trade_chat_opened"),
+            _event("trade_chat_closed", outcome="selected"),
+            _event("trade_chat_opened"),
+            _event("trade_chat_closed", outcome="no_deal"),
+        ]
+        summary = compute_game_summary(
+            result={"winner_ids": []},
+            events=events,
+            num_turns=4,
+            total_decisions=8,
+        )
+        self.assertEqual(summary["trade_chat_rooms"], 2)
+        self.assertEqual(summary["trade_chat_no_deals"], 1)
+        self.assertAlmostEqual(summary["trade_chat_no_deal_rate"], 0.5)
 
 
 # ── Building timeline tests ───────────────────────────────────────────────────
@@ -510,6 +532,22 @@ class TestComputeVpProgression(unittest.TestCase):
         self.assertEqual(turns[2], 3)
         self.assertEqual(len(result), 2)
 
+    def test_includes_hidden_dev_vp_in_total(self) -> None:
+        snapshots = [
+            _snapshot(
+                4,
+                10,
+                players={
+                    "RED": {
+                        "visible_victory_points": 5,
+                        "dev_victory_points": 2,
+                    }
+                },
+            ),
+        ]
+        result = compute_vp_progression("RED", snapshots)
+        self.assertEqual(result, [{"turn_index": 4, "vp": 7}])
+
     def test_sorted_by_turn(self) -> None:
         snapshots = [
             _snapshot(5, 10, players={"RED": {"visible_victory_points": 8}}),
@@ -612,6 +650,80 @@ class TestComputeDecisionQuality(unittest.TestCase):
         self.assertEqual(result["total_prompts"], 0)
         self.assertEqual(result["retry_rate"], 0.0)
         self.assertEqual(result["max_attempts_on_single_decision"], 0)
+
+
+class TestComputeTurnProgressMetrics(unittest.TestCase):
+    def test_dead_turns_and_progress_milestones(self) -> None:
+        events = [
+            _event(
+                "turn_ended",
+                actor="RED",
+                turn=1,
+                turn_player_id_before="RED",
+            ),
+            _event(
+                "road_built",
+                actor="RED",
+                turn=5,
+                turn_player_id_before="RED",
+                edge=[1, 2],
+            ),
+            _event(
+                "turn_ended",
+                actor="RED",
+                turn=5,
+                turn_player_id_before="RED",
+            ),
+            _event(
+                "action_taken",
+                actor="RED",
+                turn=9,
+                turn_player_id_before="RED",
+                action={"action_type": "BUY_DEVELOPMENT_CARD", "payload": {}},
+            ),
+            _event(
+                "turn_ended",
+                actor="RED",
+                turn=9,
+                turn_player_id_before="RED",
+            ),
+            _event(
+                "turn_ended",
+                actor="RED",
+                turn=13,
+                turn_player_id_before="RED",
+            ),
+            _event(
+                "turn_ended",
+                actor="RED",
+                turn=17,
+                turn_player_id_before="RED",
+            ),
+        ]
+        vp_prog = [
+            {"turn_index": 0, "vp": 2},
+            {"turn_index": 5, "vp": 3},
+            {"turn_index": 9, "vp": 5},
+            {"turn_index": 13, "vp": 7},
+        ]
+
+        result = compute_turn_progress_metrics(
+            "RED",
+            events,
+            vp_prog,
+            final_vp=10,
+            num_turns=17,
+            vps_to_win=10,
+            is_winner=True,
+        )
+
+        self.assertEqual(result["active_turns"], 5)
+        self.assertEqual(result["dead_turns"], 2)
+        self.assertAlmostEqual(result["dead_turn_rate"], 0.4)
+        self.assertEqual(result["turns_to_first_5_vp"], 9)
+        self.assertEqual(result["first_7_vp_turn"], 13)
+        self.assertEqual(result["win_turn"], 17)
+        self.assertEqual(result["turns_from_7_vp_to_win"], 4)
 
 
 # ── Trade chat analysis tests ─────────────────────────────────────────────────
@@ -1194,6 +1306,42 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(FileNotFoundError):
                 analyze_game(Path(tmpdir), write=False)
+
+    def test_discover_completed_run_directories_from_base_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            completed = base_dir / "0.4.0-dev-game-a"
+            other_completed = base_dir / "0.4.0-dev-game-b"
+            incomplete = base_dir / "0.4.0-dev-game-c"
+            self._make_minimal_run(completed)
+            self._make_minimal_run(other_completed)
+            _write_json(
+                incomplete / "metadata.json",
+                {"player_ids": ["RED", "BLUE"]},
+            )
+            _write_jsonl(incomplete / "public_history.jsonl", [])
+            _write_jsonl(incomplete / "public_state_trace.jsonl", [])
+
+            discovered = discover_completed_run_directories(base_dir)
+
+            self.assertEqual({path.name for path in discovered}, {completed.name, other_completed.name})
+
+    def test_analysis_main_accepts_base_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            run_a = base_dir / "0.4.0-dev-game-a"
+            run_b = base_dir / "0.4.0-dev-game-b"
+            self._make_minimal_run(run_a)
+            self._make_minimal_run(run_b)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = analysis_main([str(base_dir), "--json-only", "--no-write"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(len(payload), 2)
+            self.assertEqual({Path(item["run_dir"]).name for item in payload}, {run_a.name, run_b.name})
 
 
 if __name__ == "__main__":

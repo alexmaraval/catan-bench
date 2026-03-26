@@ -2391,23 +2391,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── Game summary metrics ──
     st.subheader("Game Summary")
-    cols = st.columns(5)
+    cols = st.columns(6)
     cols[0].metric("Winner", ", ".join(gs.get("winner_ids", [])) or "—")
     cols[1].metric("Turns", gs.get("num_turns", "?"))
     cols[2].metric("Total Decisions", gs.get("total_decisions", "?"))
     cols[3].metric("Trade Activity", f"{gs.get('trade_activity_rate', 0):.1%}")
-    _chat_rooms_total = sum(
-        p.get("trade_chat", {}).get("rooms_opened", 0) for p in players.values()
-    )
-    if _chat_rooms_total and gs.get("trade_efficiency", 0) == 0.0:
-        _selected = sum(
-            p.get("trade_chat", {}).get("rooms_closed_selected", 0)
-            for p in players.values()
-        )
-        _chat_rate = _selected / _chat_rooms_total
-        cols[4].metric("Chat Success Rate", f"{_chat_rate:.1%}")
-    else:
-        cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
+    cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
+    cols[5].metric("Chat No-Deal Rate", f"{gs.get('trade_chat_no_deal_rate', 0):.1%}")
 
     # ── VP Progression Chart ──
     st.subheader("Victory Point Progression")
@@ -2939,6 +2929,29 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     f"Strategy stability: {strat.get('strategy_stability', 0):.0%}"
                 )
 
+    # ── Turn Progression Metrics ──
+    st.subheader("Turn Progression")
+    progress_rows = []
+    for pid, pdata in players.items():
+        tp = pdata.get("turn_progress", {})
+        progress_rows.append(
+            {
+                "Player": pid,
+                "Active Turns": tp.get("active_turns", 0),
+                "Dead Turns": tp.get("dead_turns", 0),
+                "Dead-Turn Rate": (
+                    f"{tp.get('dead_turn_rate', 0):.0%}"
+                    if tp.get("active_turns", 0)
+                    else "—"
+                ),
+                "Turns to 5 VP": tp.get("turns_to_first_5_vp") or "—",
+                "7 VP Turn": tp.get("first_7_vp_turn") or "—",
+                "Turns from 7 VP to Win": tp.get("turns_from_7_vp_to_win") or "—",
+            }
+        )
+    if progress_rows:
+        st.dataframe(progress_rows, width="stretch")
+
     # ── Trade Negotiation Breakdown ──
     any_chat = any(
         pdata.get("trade_chat", {}).get("rooms_opened", 0)
@@ -2958,6 +2971,11 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     "Player": pid,
                     "Rooms Opened": opened,
                     "Successful Initiated Trades": f"{tc.get('negotiation_success_rate', 0):.0%}",
+                    "No-Deal Rate": (
+                        f"{tc.get('rooms_closed_no_deal', 0) / opened:.0%}"
+                        if opened > 0
+                        else "—"
+                    ),
                     "Proposals Made": tc.get("proposals_made", 0),
                     "Proposals Accepted": tc.get("proposals_accepted", 0),
                     "Counter-Offers Made": tc.get("counter_offers_made", 0),
@@ -3602,7 +3620,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--run-dir",
-        default="runs/0.4.0/dev",
+        default="runs",
         help="Run directory to monitor live.",
     )
     return parser.parse_args(argv)

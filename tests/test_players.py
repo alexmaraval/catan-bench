@@ -9,8 +9,10 @@ from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.schemas import (
     Action,
     ActionObservation,
+    Event,
     OpeningStrategyObservation,
     PlayerMemory,
+    PublicChatDraft,
     ReactiveObservation,
     TradeChatObservation,
     TradeChatProposal,
@@ -192,6 +194,154 @@ class LLMPlayerTests(unittest.TestCase):
             ["turn_start", "choose_action", "turn_end"],
         )
         self.assertEqual([trace.history_index for trace in traces], [2, 2, 3])
+
+    def test_llm_player_parses_optional_public_chat(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "short_term": {"plan": "Apply pressure."},
+                    "public_chat": {
+                        "message": "BLUE, don't feed RED the road.",
+                        "target_player_id": "blue",
+                    },
+                },
+                {
+                    "action_index": 0,
+                    "short_term": {"plan": "Close the turn."},
+                    "public_chat": {"message": "I am ending here."},
+                },
+                {
+                    "long_term": {"focus": "Keep WHITE boxed in."},
+                    "public_chat": {
+                        "message": "WHITE is the real threat.",
+                        "target_player_id": "WHITE",
+                    },
+                },
+            ),
+            model="fake-model",
+        )
+
+        start_response = player.start_turn(
+            TurnStartObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=2,
+                turn_index=3,
+                phase="play_turn",
+                decision_index=5,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1}},
+                public_history_since_last_turn=(),
+                public_chat_enabled=True,
+                public_chat_transcript=(),
+                public_chat_message_char_limit=500,
+                game_rules="Rules",
+                memory=PlayerMemory(),
+            )
+        )
+        action_response = player.choose_action(
+            ActionObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=2,
+                turn_index=3,
+                phase="play_turn",
+                decision_index=5,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1}},
+                public_history=(),
+                turn_public_events=(),
+                public_chat_enabled=True,
+                public_chat_transcript=(),
+                public_chat_message_char_limit=500,
+                legal_actions=(Action("END_TURN"),),
+                decision_prompt="Choose an action.",
+                game_rules="Rules",
+                memory=PlayerMemory(short_term={"plan": "Apply pressure."}),
+            )
+        )
+        end_response = player.end_turn(
+            TurnEndObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=3,
+                turn_index=3,
+                phase="play_turn",
+                decision_index=6,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1}},
+                turn_public_events=(),
+                public_chat_enabled=True,
+                public_chat_transcript=(),
+                public_chat_message_char_limit=500,
+                game_rules="Rules",
+                memory=PlayerMemory(short_term={"plan": "Close the turn."}),
+            )
+        )
+
+        self.assertEqual(
+            start_response.public_chat,
+            PublicChatDraft(
+                message="BLUE, don't feed RED the road.", target_player_id="BLUE"
+            ),
+        )
+        self.assertEqual(
+            action_response.public_chat,
+            PublicChatDraft(message="I am ending here."),
+        )
+        self.assertEqual(
+            end_response.public_chat,
+            PublicChatDraft(
+                message="WHITE is the real threat.", target_player_id="WHITE"
+            ),
+        )
+
+    def test_turn_start_prompt_payload_includes_public_chat_transcript(self) -> None:
+        renderer = CapturingRenderer()
+        player = LLMPlayer(
+            client=FakeLLMClient({"short_term": None}),
+            model="fake-model",
+            renderer=renderer,
+        )
+
+        player.start_turn(
+            TurnStartObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=2,
+                turn_index=3,
+                phase="play_turn",
+                decision_index=5,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1}},
+                public_history_since_last_turn=(),
+                public_chat_enabled=True,
+                public_chat_transcript=(
+                    Event(
+                        kind="public_chat_message",
+                        payload={
+                            "speaker_player_id": "BLUE",
+                            "message": "RED is ahead on road pace.",
+                            "target_player_id": "WHITE",
+                        },
+                        history_index=2,
+                        turn_index=2,
+                        phase="play_turn",
+                        actor_player_id="BLUE",
+                    ),
+                ),
+                public_chat_message_char_limit=500,
+                game_rules="Rules",
+                memory=PlayerMemory(),
+            )
+        )
+
+        assert renderer.last_payload is not None
+        self.assertTrue(renderer.last_payload["public_chat_enabled"])
+        self.assertEqual(renderer.last_payload["public_chat_message_char_limit"], 500)
+        transcript = renderer.last_payload["public_chat_transcript"]
+        self.assertEqual(len(transcript), 1)
+        self.assertEqual(transcript[0]["kind"], "public_chat_message")
 
     def test_llm_player_repairs_illegal_reactive_action(self) -> None:
         player = LLMPlayer(
@@ -539,6 +689,20 @@ class LLMPlayerTests(unittest.TestCase):
             public_state={"turn": {"turn_player_id": "RED"}},
             private_state={"resources": {"WOOD": 1}},
             transcript=(),
+            public_chat_transcript=(
+                Event(
+                    kind="public_chat_message",
+                    payload={
+                        "speaker_player_id": "BLUE",
+                        "message": "RED is pushing for road tempo.",
+                        "target_player_id": "WHITE",
+                    },
+                    history_index=4,
+                    turn_index=3,
+                    phase="play_turn",
+                    actor_player_id="BLUE",
+                ),
+            ),
             requested_resources={"BRICK": 1},
             other_player_ids=("BLUE",),
             proposals=(),
@@ -553,6 +717,10 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIsNotNone(renderer.last_payload)
         assert renderer.last_payload is not None
         self.assertEqual(renderer.last_payload["requested_resources"], {"BRICK": 1})
+        self.assertEqual(
+            renderer.last_payload["public_chat_transcript"][0]["kind"],
+            "public_chat_message",
+        )
 
     def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(
         self,
@@ -867,6 +1035,33 @@ class LLMPlayerTests(unittest.TestCase):
             '"payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}', rendered
         )
         self.assertIn("not as a description of the chosen action", rendered)
+
+    def test_public_chat_context_frames_table_talk_purpose(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/public_chat_context.jinja",
+            payload={
+                "public_chat_enabled": True,
+                "public_chat_message_char_limit": 500,
+                "public_chat_transcript": (),
+            },
+        )
+
+        self.assertIn("Treat it like real table talk", rendered)
+        self.assertIn("influence what other players think or do", rendered)
+        self.assertIn("not as a private notebook", rendered)
+        self.assertIn("Stay silent if you have nothing strategically useful", rendered)
+
+    def test_public_chat_contract_discourages_plan_dumping(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/public_chat_contract.jinja",
+            payload={"public_chat_enabled": True},
+        )
+
+        self.assertIn("Good uses: warnings, promises, requests", rendered)
+        self.assertIn("Avoid using it just to narrate your internal strategy", rendered)
+        self.assertIn("Nobody should feed ORANGE ore right now.", rendered)
 
     def test_start_turn_raises_runtime_error_and_records_failed_attempt(self) -> None:
         player = LLMPlayer(

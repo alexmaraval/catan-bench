@@ -17,6 +17,7 @@ from .schemas import (
     JsonValue,
     OpeningStrategyObservation,
     OpeningStrategyResponse,
+    PublicChatDraft,
     PromptTrace,
     PromptTraceAttempt,
     ReactiveObservation,
@@ -459,7 +460,8 @@ class LLMPlayer:
             )
             raise
         response = TurnStartResponse(
-            short_term=self._coerce_memory_field(response_payload, "short_term")
+            short_term=self._coerce_memory_field(response_payload, "short_term"),
+            public_chat=self._coerce_public_chat_draft(response_payload),
         )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
@@ -572,7 +574,8 @@ class LLMPlayer:
             )
             raise
         response = TurnEndResponse(
-            long_term=self._coerce_memory_field(response_payload, "long_term")
+            long_term=self._coerce_memory_field(response_payload, "long_term"),
+            public_chat=self._coerce_public_chat_draft(response_payload),
         )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
@@ -782,6 +785,14 @@ class LLMPlayer:
                 )
             ],
             "memory": observation.memory.to_dict(),
+            "public_chat_enabled": observation.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_chat_transcript, compact=compact
+                )
+            ],
+            "public_chat_message_char_limit": observation.public_chat_message_char_limit,
             "context_window": {
                 "compact_retry": compact,
                 "history_limit": self._effective_history_limit(compact=compact),
@@ -855,6 +866,14 @@ class LLMPlayer:
                 )
             ],
             "memory": observation.memory.to_dict(),
+            "public_chat_enabled": observation.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_chat_transcript, compact=compact
+                )
+            ],
+            "public_chat_message_char_limit": observation.public_chat_message_char_limit,
             "decision_prompt": observation.decision_prompt,
             "trade_chat_enabled": observation.trade_chat_enabled,
             "trade_chat_attempts_remaining": observation.trade_chat_attempts_remaining,
@@ -899,6 +918,14 @@ class LLMPlayer:
                 )
             ],
             "memory": observation.memory.to_dict(),
+            "public_chat_enabled": observation.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_chat_transcript, compact=compact
+                )
+            ],
+            "public_chat_message_char_limit": observation.public_chat_message_char_limit,
             "context_window": {
                 "compact_retry": compact,
                 "history_limit": self._effective_history_limit(compact=compact),
@@ -933,6 +960,14 @@ class LLMPlayer:
                 )
             ],
             "memory": observation.memory.to_dict(),
+            "public_chat_enabled": observation.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_chat_transcript, compact=compact
+                )
+            ],
+            "public_chat_message_char_limit": observation.public_chat_message_char_limit,
             "decision_prompt": observation.decision_prompt,
             "context_window": {
                 "compact_retry": compact,
@@ -971,6 +1006,9 @@ class LLMPlayer:
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "other_player_ids": list(observation.other_player_ids),
+            "public_chat_transcript": [
+                event.to_dict() for event in observation.public_chat_transcript
+            ],
             "transcript": [
                 event.to_dict()
                 for event in self._tail_events(observation.transcript, compact=False)
@@ -1001,6 +1039,9 @@ class LLMPlayer:
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "proposals": [proposal.to_dict() for proposal in observation.proposals],
+            "public_chat_transcript": [
+                event.to_dict() for event in observation.public_chat_transcript
+            ],
             "transcript": [
                 event.to_dict()
                 for event in self._tail_events(observation.transcript, compact=False)
@@ -1031,6 +1072,9 @@ class LLMPlayer:
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "proposals": [proposal.to_dict() for proposal in observation.proposals],
+            "public_chat_transcript": [
+                event.to_dict() for event in observation.public_chat_transcript
+            ],
             "transcript": [
                 event.to_dict()
                 for event in self._tail_events(observation.transcript, compact=False)
@@ -1052,6 +1096,7 @@ class LLMPlayer:
                 observation.legal_actions, response_payload
             ),
             short_term=self._coerce_memory_field(response_payload, "short_term"),
+            public_chat=self._coerce_public_chat_draft(response_payload),
             reasoning=self._coerce_reasoning(response_payload),
         )
 
@@ -1063,6 +1108,7 @@ class LLMPlayer:
                 observation.legal_actions, response_payload
             ),
             short_term=None,
+            public_chat=self._coerce_public_chat_draft(response_payload),
             reasoning=self._coerce_reasoning(response_payload),
         )
 
@@ -1197,6 +1243,37 @@ class LLMPlayer:
             )
         stripped = value.strip()
         return stripped or None
+
+    @classmethod
+    def _coerce_public_chat_draft(
+        cls, response_payload: dict[str, object]
+    ) -> PublicChatDraft | None:
+        public_chat_payload = response_payload.get("public_chat")
+        if public_chat_payload is None:
+            message = cls._coerce_public_message(response_payload.get("public_message"))
+            target_player_id = response_payload.get("public_target_player_id")
+            if target_player_id is None:
+                target_player_id = response_payload.get("target_player_id")
+        else:
+            if not isinstance(public_chat_payload, dict):
+                raise RuntimeError("`public_chat` must be an object or null.")
+            message = cls._coerce_public_message(public_chat_payload.get("message"))
+            target_player_id = public_chat_payload.get("target_player_id")
+        if message is None:
+            return None
+        if target_player_id is not None and not isinstance(target_player_id, str):
+            raise RuntimeError(
+                "`public_chat.target_player_id` must be a string when present."
+            )
+        normalized_target = (
+            target_player_id.strip().upper()
+            if isinstance(target_player_id, str) and target_player_id.strip()
+            else None
+        )
+        return PublicChatDraft(
+            message=message,
+            target_player_id=normalized_target,
+        )
 
     @staticmethod
     def _coerce_resource_map(value: object) -> dict[str, JsonValue]:

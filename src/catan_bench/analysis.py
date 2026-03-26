@@ -55,7 +55,9 @@ def _c(text: str, code: str) -> str:
 
 
 def _is_run_directory(path: Path) -> bool:
-    return path.is_dir() and all((path / file_name).exists() for file_name in RUN_MARKER_FILES)
+    return path.is_dir() and all(
+        (path / file_name).exists() for file_name in RUN_MARKER_FILES
+    )
 
 
 def _is_completed_run_directory(path: Path) -> bool:
@@ -68,7 +70,9 @@ def discover_completed_run_directories(target: str | Path) -> tuple[Path, ...]:
         return (path,)
     if not path.is_dir():
         return ()
-    candidates = [child for child in path.iterdir() if _is_completed_run_directory(child)]
+    candidates = [
+        child for child in path.iterdir() if _is_completed_run_directory(child)
+    ]
     candidates.sort(key=lambda child: child.stat().st_mtime, reverse=True)
     return tuple(candidates)
 
@@ -226,6 +230,13 @@ def compute_game_summary(
     trade_events = sum(1 for e in events if e.kind in TRADE_EVENT_KINDS)
     trade_offered = sum(1 for e in events if e.kind == "trade_offered")
     trade_confirmed = sum(1 for e in events if e.kind == "trade_confirmed")
+    public_chat_messages = sum(1 for e in events if e.kind == "public_chat_message")
+    public_chat_targeted_messages = sum(
+        1
+        for e in events
+        if e.kind == "public_chat_message"
+        and isinstance(e.payload.get("target_player_id"), str)
+    )
 
     # Trade chat room stats
     chat_rooms_opened = sum(1 for e in events if e.kind == "trade_chat_opened")
@@ -263,6 +274,8 @@ def compute_game_summary(
             if chat_rooms_opened
             else 0.0
         ),
+        "public_chat_messages": public_chat_messages,
+        "public_chat_targeted_messages": public_chat_targeted_messages,
     }
 
 
@@ -549,6 +562,33 @@ TRADE_CHAT_SESSION_KINDS = {
     "trade_chat_no_deal",
     "trade_chat_closed",
 }
+
+
+def compute_public_chat_analysis(player_id: str, events: list[Event]) -> dict[str, Any]:
+    messages_sent = 0
+    targeted_messages_sent = 0
+    messages_targeted_at_player = 0
+    targets: dict[str, int] = {}
+
+    for event in events:
+        if event.kind != "public_chat_message":
+            continue
+        speaker = event.payload.get("speaker_player_id") or event.actor_player_id
+        target = event.payload.get("target_player_id")
+        if speaker == player_id:
+            messages_sent += 1
+            if isinstance(target, str):
+                targeted_messages_sent += 1
+                targets[target] = targets.get(target, 0) + 1
+        if isinstance(target, str) and target == player_id and speaker != player_id:
+            messages_targeted_at_player += 1
+
+    return {
+        "messages_sent": messages_sent,
+        "targeted_messages_sent": targeted_messages_sent,
+        "messages_targeted_at_player": messages_targeted_at_player,
+        "targets": targets,
+    }
 
 
 def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str, Any]:
@@ -1286,7 +1326,10 @@ def compute_turn_progress_metrics(
         if not isinstance(action, dict):
             continue
         action_type = action.get("action_type")
-        if isinstance(action_type, str) and action_type in _DURABLE_PROGRESS_ACTION_TYPES:
+        if (
+            isinstance(action_type, str)
+            and action_type in _DURABLE_PROGRESS_ACTION_TYPES
+        ):
             productive_turns.add(event.turn_index)
 
     milestone_progression = list(vp_progression)
@@ -1422,6 +1465,7 @@ def analyze_player(
     road_progression = compute_road_progression(player_id, state_snapshots)
     army_progression = compute_army_progression(player_id, state_snapshots)
     trade = compute_trade_analysis(player_id, events)
+    public_chat = compute_public_chat_analysis(player_id, events)
     trade_chat = compute_trade_chat_analysis(player_id, events)
     strategy = compute_strategy_evolution(player_id, memory_snapshots)
     turn_progress = compute_turn_progress_metrics(
@@ -1467,6 +1511,7 @@ def analyze_player(
         ),
         "buildings": compute_building_timeline(player_id, events),
         "trade": trade,
+        "public_chat": public_chat,
         "trade_chat": trade_chat,
         "robber": compute_robber_analysis(player_id, events),
         "discard": compute_discard_analysis(player_id, events),
@@ -1582,6 +1627,12 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
             f"{gs['trade_chat_rooms']}  |  "
             f"Chat success: {gs.get('trade_chat_success_rate', 0):.1%}  |  "
             f"No-deal: {gs.get('trade_chat_no_deal_rate', 0):.1%}\n"
+        )
+    if gs.get("public_chat_messages", 0):
+        out.write(
+            "  Public chat: "
+            f"{gs.get('public_chat_messages', 0)} messages  |  "
+            f"Targeted: {gs.get('public_chat_targeted_messages', 0)}\n"
         )
 
     players = analysis.get("players", {})
@@ -1702,6 +1753,16 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
                     for pid, count in sorted(cp.items(), key=lambda x: -x[1])
                 ]
                 out.write(f"    Trade partners: {', '.join(cp_parts)}\n")
+        pc = data.get("public_chat", {})
+        if pc.get("messages_sent", 0) or pc.get("messages_targeted_at_player", 0):
+            parts = [f"{pc.get('messages_sent', 0)} sent"]
+            if pc.get("targeted_messages_sent", 0):
+                parts.append(f"{pc.get('targeted_messages_sent', 0)} targeted")
+            if pc.get("messages_targeted_at_player", 0):
+                parts.append(
+                    f"{pc.get('messages_targeted_at_player', 0)} received as target"
+                )
+            out.write(f"    Public chat: {', '.join(parts)}\n")
 
         # Strategy
         strat = data.get("strategy", {})
@@ -1755,7 +1816,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     analyses = [
-        {"run_dir": str(run_dir), "analysis": analyze_game(run_dir, write=not args.no_write)}
+        {
+            "run_dir": str(run_dir),
+            "analysis": analyze_game(run_dir, write=not args.no_write),
+        }
         for run_dir in run_dirs
     ]
 

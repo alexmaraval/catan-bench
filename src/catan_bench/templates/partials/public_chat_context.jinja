@@ -1,0 +1,19 @@
+{% if payload is defined and payload.public_chat_enabled %}
+### Table chat
+- You may optionally post one message to the persistent public chatroom.
+- Treat it like real table talk: persuasion, alliance signaling, warnings, requests, pressure, reassurance, blame, bluffing, or bait.
+- Use it to influence what other players think or do, not as a private notebook or a neutral recap of your exact plan.
+- Every player can see the full transcript, even if you set `target_player_id`.
+- Stay silent if you have nothing strategically useful to say in public.
+- Message character limit: {{ payload.public_chat_message_char_limit }}
+
+{% if payload.public_chat_transcript %}
+Recent public chat:
+{% for event in payload.public_chat_transcript %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+Recent public chat:
+(no public chat yet)
+{% endif %}
+{% endif %}

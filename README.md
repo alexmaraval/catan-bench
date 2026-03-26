@@ -113,6 +113,7 @@ engine = "catanatron"
 vps_to_win = 10
 history_window = 100
 prompt_history_limit = 12
+public_chat_enabled = true
 trading_chat_enabled = true
 run_dir = "runs/"
 run_tags = ["0.4.0", "dev"]

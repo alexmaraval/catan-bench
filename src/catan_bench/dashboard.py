@@ -66,6 +66,7 @@ EVENT_EMOJIS = {
     "trade_rejected": "❌",
     "trade_confirmed": "🤝",
     "trade_cancelled": "🚫",
+    "public_chat_message": "📣",
     "trade_chat_opened": "💬",
     "trade_chat_message": "🗨️",
     "trade_chat_quote_selected": "📌",
@@ -537,6 +538,11 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
         else:
             st.caption("No public player summary yet.")
         _render_turn_event_digest(st, snapshot, cursor=cursor)
+    _render_public_chat_panel(
+        st,
+        _public_chat_events(snapshot, cursor),
+        current_turn=selected.turn_index,
+    )
 
 
 def _render_player_summary_table(
@@ -871,7 +877,11 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         else ()
     )
     trade_hi_set = {e.history_index for ta in trade_artifacts for e in ta.events}
-    non_trade_events = [e for e in turn_events if e.history_index not in trade_hi_set]
+    non_trade_events = [
+        e
+        for e in turn_events
+        if e.history_index not in trade_hi_set and e.kind != "public_chat_message"
+    ]
 
     # assign trade-related traces to their artifact by history range
     ta_ranges = [
@@ -1045,6 +1055,128 @@ def _render_trade_chat_box(
         memories_for_turn=memories_for_turn,
         expanded=True,
     )
+
+
+def _public_chat_events(
+    snapshot: DashboardSnapshot,
+    cursor: int,
+) -> tuple[Event, ...]:
+    return tuple(
+        event
+        for event in snapshot.public_events
+        if event.kind == "public_chat_message" and event.history_index <= cursor
+    )
+
+
+def _render_public_chat_panel(
+    st,
+    events: tuple[Event, ...],
+    *,
+    current_turn: int | None,
+) -> None:
+    st.markdown(f"**{EVENT_EMOJIS['public_chat_message']} Table Chat**")
+    if not events:
+        st.caption("No public table chat yet.")
+        return
+    st.caption(f"{len(events)} message(s) through history {events[-1].history_index}")
+    st.markdown(
+        _public_chat_panel_html(events, current_turn=current_turn),
+        unsafe_allow_html=True,
+    )
+
+
+def _public_chat_panel_html(
+    events: tuple[Event, ...],
+    *,
+    current_turn: int | None,
+) -> str:
+    html_parts = ["<div class='public-chat-shell'><div class='public-chat-panel'>"]
+    for turn_index, label, turn_events in _public_chat_sections(events):
+        group_class = (
+            "public-chat-group public-chat-group-current"
+            if current_turn is not None and turn_index == current_turn
+            else "public-chat-group"
+        )
+        html_parts.append(f"<section class='{group_class}'>")
+        html_parts.append(
+            f"<div class='public-chat-divider'><span>{_escape_html(label)}</span></div>"
+        )
+        for event in turn_events:
+            html_parts.append(_public_chat_bubble_html(event))
+        html_parts.append("</section>")
+    html_parts.append("</div></div>")
+    return "".join(html_parts)
+
+
+def _public_chat_sections(
+    events: tuple[Event, ...],
+) -> tuple[tuple[int, str, tuple[Event, ...]], ...]:
+    sections: list[tuple[int, str, tuple[Event, ...]]] = []
+    current_turn_index: int | None = None
+    current_events: list[Event] = []
+
+    for event in events:
+        if current_turn_index is None:
+            current_turn_index = event.turn_index
+        if event.turn_index != current_turn_index:
+            grouped_events = tuple(current_events)
+            sections.append(
+                (
+                    current_turn_index,
+                    _turn_event_section_label(current_turn_index, grouped_events),
+                    grouped_events,
+                )
+            )
+            current_turn_index = event.turn_index
+            current_events = []
+        current_events.append(event)
+
+    if current_turn_index is not None and current_events:
+        grouped_events = tuple(current_events)
+        sections.append(
+            (
+                current_turn_index,
+                _turn_event_section_label(current_turn_index, grouped_events),
+                grouped_events,
+            )
+        )
+    return tuple(sections)
+
+
+def _public_chat_bubble_html(event: Event) -> str:
+    speaker = str(
+        event.payload.get("speaker_player_id") or event.actor_player_id or "SYSTEM"
+    )
+    accent, background, _ = _palette_for_player(
+        speaker if speaker != "SYSTEM" else None
+    )
+    target = event.payload.get("target_player_id")
+    header = f"{EVENT_EMOJIS['public_chat_message']} {speaker}"
+    if isinstance(target, str) and target:
+        header += f" → {target}"
+    metadata_bits = [f"h{event.history_index}", f"turn {event.turn_index}"]
+    source_stage = event.payload.get("source_stage") or event.phase
+    if source_stage:
+        metadata_bits.append(str(source_stage))
+    return (
+        "<div class='trade-chat-row' style='justify-content:flex-start;'>"
+        "<div class='trade-chat-bubble' "
+        f"style='border-color:{accent}; background:{background};'>"
+        "<div class='trade-chat-header'>"
+        f"<span class='trade-chat-speaker' style='color:{accent}'><strong>{_escape_html(header)}</strong></span>"
+        "<span class='trade-chat-kind'>public</span>"
+        "</div>"
+        f"<div class='trade-chat-body'>{_colorize_player_mentions_html(_public_chat_message_text(event))}</div>"
+        f"<div class='trade-chat-meta'>{_escape_html(' · '.join(metadata_bits))}</div>"
+        "</div></div>"
+    )
+
+
+def _public_chat_message_text(event: Event) -> str:
+    message = event.payload.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return "Public table talk."
 
 
 def _render_trade_transcript(
@@ -1549,6 +1681,7 @@ def _event_title(event: Event) -> str:
         "trade_rejected": "Trade rejected",
         "trade_confirmed": "Trade confirmed",
         "trade_cancelled": "Trade cancelled",
+        "public_chat_message": "Public chat message",
         "trade_chat_opened": "Trade chat opened",
         "trade_chat_message": "Trade chat message",
         "trade_chat_quote_selected": "Trade proposal selected",
@@ -1579,6 +1712,14 @@ def _event_body(event: Event) -> str:
         )
     if event.kind == "trade_cancelled":
         return "The trade was cancelled."
+    if event.kind == "public_chat_message":
+        message = payload.get("message")
+        target = payload.get("target_player_id")
+        if isinstance(message, str) and message:
+            if isinstance(target, str) and target:
+                return f"To {target} (public): {message}"
+            return message
+        return "Public table talk."
     if event.kind == "trade_chat_opened":
         requested = _resource_map(payload.get("requested_resources"))
         message = payload.get("message")
@@ -3553,10 +3694,30 @@ def _inject_styles(st) -> None:
           overflow-y: auto;
           padding-right: 0.2rem;
         }
+        .public-chat-shell {
+          border: 1px solid #374151;
+          border-radius: 0.95rem;
+          background: rgba(15, 23, 42, 0.16);
+          padding: 0.7rem 0.8rem;
+          margin-bottom: 1rem;
+        }
+        .public-chat-panel {
+          max-height: 36rem;
+          overflow-y: auto;
+          padding-right: 0.2rem;
+        }
         .turn-events-group {
           margin-bottom: 0.85rem;
         }
+        .public-chat-group {
+          margin-bottom: 0.85rem;
+        }
         .turn-events-group-current {
+          background: rgba(148, 163, 184, 0.08);
+          border-radius: 0.9rem;
+          padding: 0.5rem 0.55rem 0.35rem;
+        }
+        .public-chat-group-current {
           background: rgba(148, 163, 184, 0.08);
           border-radius: 0.9rem;
           padding: 0.5rem 0.55rem 0.35rem;
@@ -3572,8 +3733,26 @@ def _inject_styles(st) -> None:
           letter-spacing: 0.05em;
           text-transform: uppercase;
         }
+        .public-chat-divider {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+          margin: 0.05rem 0 0.55rem;
+          color: #cbd5e1;
+          font-size: 0.74rem;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
         .turn-events-divider::before,
         .turn-events-divider::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: rgba(148, 163, 184, 0.65);
+        }
+        .public-chat-divider::before,
+        .public-chat-divider::after {
           content: "";
           flex: 1;
           height: 1px;

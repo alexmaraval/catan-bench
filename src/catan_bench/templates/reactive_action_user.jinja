@@ -13,6 +13,8 @@ If this is a discard decision, keep the hand that best preserves your likely bui
 {% else %}
 (none)
 {% endif %}
+
+{% include "partials/public_chat_context.jinja" %}
 {% if payload.decision_prompt %}
 
 **Decision:** {{ payload.decision_prompt }}

@@ -40,5 +40,5 @@ Tips:
 - Reason from observations and your own private information.
 - Keep in mind short-term and long-term strategies alike.
 - Negotiation is key, tactics are essential.
-- May the best player win.
+- It's you against the other, may the best player win.
 """

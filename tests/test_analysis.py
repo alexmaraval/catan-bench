@@ -18,6 +18,7 @@ from catan_bench.analysis import (
     compute_discard_analysis,
     compute_game_summary,
     compute_phase_analysis,
+    compute_public_chat_analysis,
     compute_resource_production,
     compute_robber_analysis,
     compute_strategy_evolution,
@@ -135,6 +136,8 @@ class TestComputeGameSummary(unittest.TestCase):
         self.assertEqual(summary["total_decisions"], 20)
         self.assertAlmostEqual(summary["events_per_turn"], 0.5)
         self.assertAlmostEqual(summary["decisions_per_turn"], 2.0)
+        self.assertEqual(summary["public_chat_messages"], 0)
+        self.assertEqual(summary["public_chat_targeted_messages"], 0)
 
     def test_trade_activity_rate(self) -> None:
         events = [
@@ -192,6 +195,25 @@ class TestComputeGameSummary(unittest.TestCase):
         self.assertEqual(summary["trade_chat_rooms"], 2)
         self.assertEqual(summary["trade_chat_no_deals"], 1)
         self.assertAlmostEqual(summary["trade_chat_no_deal_rate"], 0.5)
+
+    def test_public_chat_counts(self) -> None:
+        summary = compute_game_summary(
+            result={"winner_ids": ["RED"]},
+            events=[
+                _event("public_chat_message", actor="RED", message="Hello."),
+                _event(
+                    "public_chat_message",
+                    actor="BLUE",
+                    message="RED, no deal.",
+                    target_player_id="RED",
+                ),
+            ],
+            num_turns=1,
+            total_decisions=2,
+        )
+
+        self.assertEqual(summary["public_chat_messages"], 2)
+        self.assertEqual(summary["public_chat_targeted_messages"], 1)
 
 
 # ── Building timeline tests ───────────────────────────────────────────────────
@@ -938,6 +960,40 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
         self.assertEqual(result["negotiation_success_rate"], 0.0)
 
 
+class TestPublicChatAnalysis(unittest.TestCase):
+    def test_counts_sent_targeted_and_received_messages(self) -> None:
+        result = compute_public_chat_analysis(
+            "RED",
+            [
+                _event(
+                    "public_chat_message",
+                    actor="RED",
+                    speaker_player_id="RED",
+                    message="BLUE, watch WHITE.",
+                    target_player_id="BLUE",
+                ),
+                _event(
+                    "public_chat_message",
+                    actor="BLUE",
+                    speaker_player_id="BLUE",
+                    message="RED, no brick from me.",
+                    target_player_id="RED",
+                ),
+                _event(
+                    "public_chat_message",
+                    actor="RED",
+                    speaker_player_id="RED",
+                    message="General table talk.",
+                ),
+            ],
+        )
+
+        self.assertEqual(result["messages_sent"], 2)
+        self.assertEqual(result["targeted_messages_sent"], 1)
+        self.assertEqual(result["messages_targeted_at_player"], 1)
+        self.assertEqual(result["targets"], {"BLUE": 1})
+
+
 # ── Strategy evolution tests ──────────────────────────────────────────────────
 
 
@@ -1324,7 +1380,10 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
 
             discovered = discover_completed_run_directories(base_dir)
 
-            self.assertEqual({path.name for path in discovered}, {completed.name, other_completed.name})
+            self.assertEqual(
+                {path.name for path in discovered},
+                {completed.name, other_completed.name},
+            )
 
     def test_analysis_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1341,7 +1400,10 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(len(payload), 2)
-            self.assertEqual({Path(item["run_dir"]).name for item in payload}, {run_a.name, run_b.name})
+            self.assertEqual(
+                {Path(item["run_dir"]).name for item in payload},
+                {run_a.name, run_b.name},
+            )
 
 
 if __name__ == "__main__":

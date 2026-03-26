@@ -9,7 +9,9 @@ from pathlib import Path
 from catan_bench.dashboard import (
     DashboardSnapshot,
     _colorize_player_mentions_html,
+    _event_body,
     _infer_turn_owner_player_id,
+    _public_chat_panel_html,
     _render_player_summary_table,
     build_board_svg,
     build_player_timelines,
@@ -25,6 +27,64 @@ from catan_bench.schemas import Event, PromptTrace, PublicStateSnapshot
 
 
 class DashboardTests(unittest.TestCase):
+    def test_event_body_formats_public_chat_message(self) -> None:
+        body = _event_body(
+            Event(
+                kind="public_chat_message",
+                payload={
+                    "speaker_player_id": "RED",
+                    "message": "BLUE, don't trade them ore.",
+                    "target_player_id": "BLUE",
+                },
+                history_index=10,
+                turn_index=2,
+                phase="play_turn",
+                decision_index=3,
+                actor_player_id="RED",
+            )
+        )
+
+        self.assertEqual(body, "To BLUE (public): BLUE, don't trade them ore.")
+
+    def test_public_chat_panel_html_groups_messages_by_turn(self) -> None:
+        html = _public_chat_panel_html(
+            (
+                Event(
+                    kind="public_chat_message",
+                    payload={
+                        "speaker_player_id": "RED",
+                        "message": "I can help on this roll.",
+                    },
+                    history_index=5,
+                    turn_index=2,
+                    phase="play_turn",
+                    decision_index=1,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="public_chat_message",
+                    payload={
+                        "speaker_player_id": "BLUE",
+                        "target_player_id": "RED",
+                        "message": "Hold your wheat for me.",
+                    },
+                    history_index=8,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=2,
+                    actor_player_id="BLUE",
+                ),
+            ),
+            current_turn=3,
+        )
+
+        self.assertIn("Turn 2", html)
+        self.assertIn("Turn 3", html)
+        self.assertIn("public-chat-group-current", html)
+        self.assertIn("BLUE \u2192 RED", html)
+        self.assertIn("Hold your wheat for me.", html)
+        self.assertNotIn("To RED (public):", html)
+
     def test_infer_turn_owner_prefers_earliest_turn_event_actor(self) -> None:
         snapshot = DashboardSnapshot(
             run_dir=Path("/tmp/fake-run"),

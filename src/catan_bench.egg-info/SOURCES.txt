@@ -4,6 +4,8 @@ pyproject.toml
 src/catan_bench/__init__.py
 src/catan_bench/__main__.py
 src/catan_bench/analysis.py
+src/catan_bench/benchmark.py
+src/catan_bench/benchmark_dashboard.py
 src/catan_bench/catanatron_adapter.py
 src/catan_bench/cleanup_runs.py
 src/catan_bench/config.py

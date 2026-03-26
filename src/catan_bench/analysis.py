@@ -495,12 +495,13 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                 "turn_index": event.turn_index,
                 "attempt_index": attempt,
                 "rounds": 0,
-                "proposals": [],       # list of {player_id, proposal_id, offer, request}
+                "proposals": [],       # list of {player_id, proposal_id, offer, request, round_index}
                 "speakers": set(),     # player_ids who sent messages
                 "outcome": None,
                 "selected_player_id": None,
                 "selected_offer": None,
                 "selected_request": None,
+                "requested_resources": event.payload.get("requested_resources", {}),
             }
 
         session = sessions.get(key)
@@ -520,6 +521,7 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     "proposal_id": proposal_id,
                     "offer": event.payload.get("offer", {}),
                     "request": event.payload.get("request", {}),
+                    "round_index": round_idx,
                 })
 
         elif event.kind == "trade_chat_quote_selected":
@@ -554,6 +556,13 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
     rooms_participated_by_turn: dict[int, int] = {}
     proposals_made_by_turn: dict[int, int] = {}
     proposals_accepted_by_turn: dict[int, int] = {}
+    counter_offers_made = 0          # proposals that differ from owner's ask
+    counter_offers_received = 0      # when player is owner and receives a counter-offer
+    # Negotiation outcome tracking (owner perspective only)
+    precise_rooms_opened = 0         # rooms where owner specified requested_resources
+    open_market_rooms_opened = 0     # rooms where requested_resources was empty
+    deals_matched_original = 0       # final deal matched the owner's original request
+    deals_negotiated_away = 0        # final deal differed from the owner's original request
 
     for session in sessions.values():
         owner = session["owner_player_id"]
@@ -565,6 +574,12 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
             rooms_opened += 1
             rooms_opened_by_turn[turn] = rooms_opened_by_turn.get(turn, 0) + 1
             total_rounds_as_owner += session["rounds"]
+            # Classify room type: precise ask vs open market
+            req_res = session.get("requested_resources") or {}
+            if req_res:
+                precise_rooms_opened += 1
+            else:
+                open_market_rooms_opened += 1
             if session["outcome"] == "no_deal":
                 rooms_no_deal += 1
             elif session["outcome"] == "selected":
@@ -585,16 +600,36 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                         flow[res] = flow.get(res, 0) + cnt
                     for res, cnt in (request if isinstance(request, dict) else {}).items():
                         flow[res] = flow.get(res, 0) + cnt
+                # Check if the final deal matched the original ask
+                # Compare selected_request (what owner got) vs requested_resources
+                if req_res and isinstance(request, dict):
+                    if request == req_res:
+                        deals_matched_original += 1
+                    else:
+                        deals_negotiated_away += 1
 
         if participated and not is_owner:
             rooms_participated_in += 1
             rooms_participated_by_turn[turn] = rooms_participated_by_turn.get(turn, 0) + 1
 
-        # Count proposals made by this player
+        # Count proposals made by this player and detect counter-offers
+        requested_res = session.get("requested_resources") or {}
         for proposal in session.get("proposals", []):
-            if proposal.get("player_id") == player_id:
+            p_player = proposal.get("player_id")
+            p_request = proposal.get("request") or {}  # what the owner would receive
+
+            # Counter-offer: what the responder offers the owner to receive
+            # differs from what the owner originally asked for
+            is_counter = bool(requested_res and p_request and p_request != requested_res)
+
+            if p_player == player_id:
                 proposals_made += 1
                 proposals_made_by_turn[turn] = proposals_made_by_turn.get(turn, 0) + 1
+                if is_counter:
+                    counter_offers_made += 1
+
+            if is_owner and is_counter:
+                counter_offers_received += 1
 
         # Count proposals from this player that were accepted
         if session["outcome"] == "selected":
@@ -649,6 +684,12 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
         "rooms_participated_by_turn": rooms_participated_by_turn,
         "proposals_made_by_turn": proposals_made_by_turn,
         "proposals_accepted_by_turn": proposals_accepted_by_turn,
+        "counter_offers_made": counter_offers_made,
+        "counter_offers_received": counter_offers_received,
+        "precise_rooms_opened": precise_rooms_opened,
+        "open_market_rooms_opened": open_market_rooms_opened,
+        "deals_matched_original": deals_matched_original,
+        "deals_negotiated_away": deals_negotiated_away,
     }
 
 
@@ -955,6 +996,46 @@ def compute_vp_progression(
     return [{"turn_index": t, "vp": v} for t, v in sorted(turn_max_vp.items())]
 
 
+def compute_road_progression(
+    player_id: str,
+    state_snapshots: list[PublicStateSnapshot],
+) -> list[dict[str, Any]]:
+    """Extract longest road length at each turn boundary."""
+    turn_max: dict[int, int] = {}
+    for snap in state_snapshots:
+        players = snap.public_state.get("players")
+        if not isinstance(players, dict):
+            continue
+        player_data = players.get(player_id)
+        if not isinstance(player_data, dict):
+            continue
+        road_len = int(player_data.get("longest_road_length", 0))
+        turn = snap.turn_index
+        if turn not in turn_max or road_len > turn_max[turn]:
+            turn_max[turn] = road_len
+    return [{"turn_index": t, "road_length": v} for t, v in sorted(turn_max.items())]
+
+
+def compute_army_progression(
+    player_id: str,
+    state_snapshots: list[PublicStateSnapshot],
+) -> list[dict[str, Any]]:
+    """Extract played knights count at each turn boundary."""
+    turn_max: dict[int, int] = {}
+    for snap in state_snapshots:
+        players = snap.public_state.get("players")
+        if not isinstance(players, dict):
+            continue
+        player_data = players.get(player_id)
+        if not isinstance(player_data, dict):
+            continue
+        knights = int(player_data.get("played_knights", 0))
+        turn = snap.turn_index
+        if turn not in turn_max or knights > turn_max[turn]:
+            turn_max[turn] = knights
+    return [{"turn_index": t, "knights": v} for t, v in sorted(turn_max.items())]
+
+
 # ── Phase analysis ───────────────────────────────────────────────────────────
 
 def compute_phase_analysis(
@@ -1092,6 +1173,8 @@ def analyze_player(
     final_vp = int(player_meta.get("actual_victory_points", 0)) if isinstance(player_meta, dict) else 0
 
     vp_progression = compute_vp_progression(player_id, state_snapshots)
+    road_progression = compute_road_progression(player_id, state_snapshots)
+    army_progression = compute_army_progression(player_id, state_snapshots)
     trade = compute_trade_analysis(player_id, events)
     trade_chat = compute_trade_chat_analysis(player_id, events)
     strategy = compute_strategy_evolution(player_id, memory_snapshots)
@@ -1118,6 +1201,8 @@ def analyze_player(
         "final_vp": final_vp,
         "is_winner": player_id in winner_ids,
         "vp_progression": vp_progression,
+        "road_progression": road_progression,
+        "army_progression": army_progression,
         "resource_production": compute_resource_production(player_id, events, state_snapshots),
         "buildings": compute_building_timeline(player_id, events),
         "trade": trade,

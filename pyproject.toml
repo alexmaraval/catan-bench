@@ -27,8 +27,13 @@ where = ["src"]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.3.0",
     "pytest>=9.0.2",
+    "ruff>=0.13.1",
 ]
 dashboard = [
     "streamlit>=1.44.0",
 ]
+
+[tool.ruff]
+target-version = "py311"

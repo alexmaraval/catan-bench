@@ -1,4 +1,5 @@
 """Post-game analysis: compute structured metrics from completed game artifacts."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from .schemas import Event, JsonValue, MemorySnapshot, PromptTrace, PublicStateSnapshot
+from .schemas import Event, MemorySnapshot, PromptTrace, PublicStateSnapshot
 from .storage import read_json, read_jsonl, write_json
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -19,10 +20,16 @@ RESOURCES = ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
 PIPS: dict[int, int] = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
 
 TRADE_EVENT_KINDS = {
-    "trade_offered", "trade_accepted", "trade_rejected",
-    "trade_confirmed", "trade_cancelled",
-    "trade_chat_opened", "trade_chat_message",
-    "trade_chat_quote_selected", "trade_chat_no_deal", "trade_chat_closed",
+    "trade_offered",
+    "trade_accepted",
+    "trade_rejected",
+    "trade_confirmed",
+    "trade_cancelled",
+    "trade_chat_opened",
+    "trade_chat_message",
+    "trade_chat_quote_selected",
+    "trade_chat_no_deal",
+    "trade_chat_closed",
 }
 
 # ── ANSI helpers (mirroring reporter.py) ─────────────────────────────────────
@@ -47,17 +54,19 @@ def _c(text: str, code: str) -> str:
 
 # ── Data loading ─────────────────────────────────────────────────────────────
 
+
 def load_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
     """Load all artifacts needed for analysis from a completed run directory."""
     result = read_json(run_dir / "result.json")
     if result is None:
-        raise FileNotFoundError(f"No result.json found in {run_dir} — game may not have ended.")
+        raise FileNotFoundError(
+            f"No result.json found in {run_dir} — game may not have ended."
+        )
 
     metadata = read_json(run_dir / "metadata.json") or {}
 
     events = [
-        Event.from_dict(entry)
-        for entry in read_jsonl(run_dir / "public_history.jsonl")
+        Event.from_dict(entry) for entry in read_jsonl(run_dir / "public_history.jsonl")
     ]
 
     state_snapshots = [
@@ -76,11 +85,15 @@ def load_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
     for player_id in player_ids:
         trace_path = run_dir / "players" / player_id / "prompt_trace.jsonl"
         raw = read_jsonl(trace_path)
-        prompt_traces_by_player[player_id] = [PromptTrace.from_dict(entry) for entry in raw]
+        prompt_traces_by_player[player_id] = [
+            PromptTrace.from_dict(entry) for entry in raw
+        ]
 
         mem_path = run_dir / "players" / player_id / "memory_trace.jsonl"
         mem_raw = read_jsonl(mem_path)
-        memory_traces_by_player[player_id] = [MemorySnapshot.from_dict(entry) for entry in mem_raw]
+        memory_traces_by_player[player_id] = [
+            MemorySnapshot.from_dict(entry) for entry in mem_raw
+        ]
 
     return {
         "result": result,
@@ -95,7 +108,10 @@ def load_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
 
 # ── Board helpers ────────────────────────────────────────────────────────────
 
-def _build_tile_map(state_snapshots: list[PublicStateSnapshot]) -> dict[str, dict[str, Any]]:
+
+def _build_tile_map(
+    state_snapshots: list[PublicStateSnapshot],
+) -> dict[str, dict[str, Any]]:
     """Build tile_id -> {resource, number, coordinate} from the first snapshot's board.tiles."""
     if not state_snapshots:
         return {}
@@ -118,7 +134,9 @@ def _build_tile_map(state_snapshots: list[PublicStateSnapshot]) -> dict[str, dic
     return tile_map
 
 
-def _build_node_adjacent_tiles(state_snapshots: list[PublicStateSnapshot]) -> dict[int, list[dict[str, Any]]]:
+def _build_node_adjacent_tiles(
+    state_snapshots: list[PublicStateSnapshot],
+) -> dict[int, list[dict[str, Any]]]:
     """Build node_id -> list of adjacent tile dicts from the first snapshot."""
     if not state_snapshots:
         return {}
@@ -147,7 +165,9 @@ def _get_robber_coordinate(snapshot: PublicStateSnapshot) -> tuple[int, ...] | N
     return None
 
 
-def _get_player_buildings(snapshot: PublicStateSnapshot, player_id: str) -> tuple[set[int], set[int]]:
+def _get_player_buildings(
+    snapshot: PublicStateSnapshot, player_id: str
+) -> tuple[set[int], set[int]]:
     """Return (settlement_node_ids, city_node_ids) for a player from a state snapshot."""
     settlements: set[int] = set()
     cities: set[int] = set()
@@ -172,6 +192,7 @@ def _get_player_buildings(snapshot: PublicStateSnapshot, player_id: str) -> tupl
 
 # ── Game-level metrics ───────────────────────────────────────────────────────
 
+
 def compute_game_summary(
     *,
     result: dict[str, Any],
@@ -188,9 +209,9 @@ def compute_game_summary(
     # Trade chat room stats
     chat_rooms_opened = sum(1 for e in events if e.kind == "trade_chat_opened")
     chat_rooms_selected = sum(
-        1 for e in events
-        if e.kind == "trade_chat_closed"
-        and e.payload.get("outcome") == "selected"
+        1
+        for e in events
+        if e.kind == "trade_chat_closed" and e.payload.get("outcome") == "selected"
     )
 
     return {
@@ -201,16 +222,20 @@ def compute_game_summary(
         "events_per_turn": round(total_events / max(num_turns, 1), 2),
         "decisions_per_turn": round(total_decisions / max(num_turns, 1), 2),
         "trade_activity_rate": round(trade_events / max(total_events, 1), 4),
-        "trade_efficiency": round(trade_confirmed / max(trade_offered, 1), 4) if trade_offered else 0.0,
+        "trade_efficiency": round(trade_confirmed / max(trade_offered, 1), 4)
+        if trade_offered
+        else 0.0,
         "trade_chat_rooms": chat_rooms_opened,
         "trade_chat_success_rate": (
             round(chat_rooms_selected / max(chat_rooms_opened, 1), 4)
-            if chat_rooms_opened else 0.0
+            if chat_rooms_opened
+            else 0.0
         ),
     }
 
 
 # ── Building timeline ────────────────────────────────────────────────────────
+
 
 def compute_building_timeline(player_id: str, events: list[Event]) -> dict[str, Any]:
     """Extract building events for a player, grouped by type."""
@@ -222,23 +247,29 @@ def compute_building_timeline(player_id: str, events: list[Event]) -> dict[str, 
         if event.actor_player_id != player_id:
             continue
         if event.kind == "settlement_built":
-            settlements.append({
-                "turn_index": event.turn_index,
-                "node_id": event.payload.get("node_id"),
-                "history_index": event.history_index,
-            })
+            settlements.append(
+                {
+                    "turn_index": event.turn_index,
+                    "node_id": event.payload.get("node_id"),
+                    "history_index": event.history_index,
+                }
+            )
         elif event.kind == "city_built":
-            cities.append({
-                "turn_index": event.turn_index,
-                "node_id": event.payload.get("node_id"),
-                "history_index": event.history_index,
-            })
+            cities.append(
+                {
+                    "turn_index": event.turn_index,
+                    "node_id": event.payload.get("node_id"),
+                    "history_index": event.history_index,
+                }
+            )
         elif event.kind == "road_built":
-            roads.append({
-                "turn_index": event.turn_index,
-                "edge": event.payload.get("edge"),
-                "history_index": event.history_index,
-            })
+            roads.append(
+                {
+                    "turn_index": event.turn_index,
+                    "edge": event.payload.get("edge"),
+                    "history_index": event.history_index,
+                }
+            )
 
     return {
         "settlements": settlements,
@@ -253,6 +284,7 @@ def compute_building_timeline(player_id: str, events: list[Event]) -> dict[str, 
 
 
 # ── Robber analysis ──────────────────────────────────────────────────────────
+
 
 def compute_robber_analysis(player_id: str, events: list[Event]) -> dict[str, Any]:
     """Count robber interactions for a player."""
@@ -275,6 +307,7 @@ def compute_robber_analysis(player_id: str, events: list[Event]) -> dict[str, An
 
 # ── Discard phase ────────────────────────────────────────────────────────────
 
+
 def compute_discard_analysis(player_id: str, events: list[Event]) -> dict[str, Any]:
     """Analyze discard events for a player (triggered when a 7 is rolled)."""
     times_discarded = 0
@@ -296,6 +329,7 @@ def compute_discard_analysis(player_id: str, events: list[Event]) -> dict[str, A
 
 # ── Development cards ────────────────────────────────────────────────────────
 
+
 def compute_dev_card_analysis(
     player_id: str,
     events: list[Event],
@@ -304,7 +338,10 @@ def compute_dev_card_analysis(
     """Analyze development card usage for a player."""
     cards_played_by_type: dict[str, int] = {}
     for event in events:
-        if event.kind != "development_card_played" or event.actor_player_id != player_id:
+        if (
+            event.kind != "development_card_played"
+            or event.actor_player_id != player_id
+        ):
             continue
         action = event.payload.get("action")
         if isinstance(action, dict):
@@ -330,6 +367,7 @@ def compute_dev_card_analysis(
 
 
 # ── Trade analysis ───────────────────────────────────────────────────────────
+
 
 def _add_resources(target: dict[str, int], source: dict[str, Any]) -> None:
     """Add resource counts from source into target accumulator."""
@@ -405,7 +443,9 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
         if event.kind == "trade_offered":
             if event.actor_player_id == player_id:
                 offers_made += 1
-                offers_made_by_turn[event.turn_index] = offers_made_by_turn.get(event.turn_index, 0) + 1
+                offers_made_by_turn[event.turn_index] = (
+                    offers_made_by_turn.get(event.turn_index, 0) + 1
+                )
             else:
                 offers_received += 1
 
@@ -429,12 +469,16 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
 
             if offering_id == player_id:
                 confirmations_as_offerer += 1
-                completed_by_turn[event.turn_index] = completed_by_turn.get(event.turn_index, 0) + 1
+                completed_by_turn[event.turn_index] = (
+                    completed_by_turn.get(event.turn_index, 0) + 1
+                )
                 _add_resources(resources_given, offer)
                 _add_resources(resources_received, request)
             elif accepting_id == player_id:
                 confirmations_as_acceptee += 1
-                completed_by_turn[event.turn_index] = completed_by_turn.get(event.turn_index, 0) + 1
+                completed_by_turn[event.turn_index] = (
+                    completed_by_turn.get(event.turn_index, 0) + 1
+                )
                 # Acceptee gives what offerer requested, receives what offerer offered
                 _add_resources(resources_given, request)
                 _add_resources(resources_received, offer)
@@ -451,7 +495,9 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
         "offers_received": offers_received,
         "acceptances": acceptances,
         "rejections": rejections,
-        "acceptance_rate": round(acceptances / max(total_responses, 1), 4) if total_responses else 0.0,
+        "acceptance_rate": round(acceptances / max(total_responses, 1), 4)
+        if total_responses
+        else 0.0,
         "confirmations_as_offerer": confirmations_as_offerer,
         "confirmations_as_acceptee": confirmations_as_acceptee,
         "resources_given": resources_given,
@@ -465,8 +511,11 @@ def compute_trade_analysis(player_id: str, events: list[Event]) -> dict[str, Any
 # ── Trade chat negotiation analysis ──────────────────────────────────────────
 
 TRADE_CHAT_SESSION_KINDS = {
-    "trade_chat_opened", "trade_chat_message", "trade_chat_quote_selected",
-    "trade_chat_no_deal", "trade_chat_closed",
+    "trade_chat_opened",
+    "trade_chat_message",
+    "trade_chat_quote_selected",
+    "trade_chat_no_deal",
+    "trade_chat_closed",
 }
 
 
@@ -495,8 +544,8 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                 "turn_index": event.turn_index,
                 "attempt_index": attempt,
                 "rounds": 0,
-                "proposals": [],       # list of {player_id, proposal_id, offer, request, round_index}
-                "speakers": set(),     # player_ids who sent messages
+                "proposals": [],  # list of {player_id, proposal_id, offer, request, round_index}
+                "speakers": set(),  # player_ids who sent messages
                 "outcome": None,
                 "selected_player_id": None,
                 "selected_offer": None,
@@ -516,13 +565,15 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                 session["speakers"].add(speaker)
             proposal_id = event.payload.get("proposal_id")
             if proposal_id is not None:
-                session["proposals"].append({
-                    "player_id": speaker,
-                    "proposal_id": proposal_id,
-                    "offer": event.payload.get("offer", {}),
-                    "request": event.payload.get("request", {}),
-                    "round_index": round_idx,
-                })
+                session["proposals"].append(
+                    {
+                        "player_id": speaker,
+                        "proposal_id": proposal_id,
+                        "offer": event.payload.get("offer", {}),
+                        "request": event.payload.get("request", {}),
+                        "round_index": round_idx,
+                    }
+                )
 
         elif event.kind == "trade_chat_quote_selected":
             session["selected_player_id"] = event.payload.get("selected_player_id")
@@ -549,25 +600,27 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
     rooms_selected = 0
     total_rounds_as_owner = 0
     counterparty_freq: dict[str, int] = {}
-    counterparty_resource_flow: dict[str, dict[str, int]] = {}  # {partner: {resource: units exchanged}}
+    counterparty_resource_flow: dict[
+        str, dict[str, int]
+    ] = {}  # {partner: {resource: units exchanged}}
     resources_gained: dict[str, int] = {}
     resources_given: dict[str, int] = {}
     rooms_opened_by_turn: dict[int, int] = {}
     rooms_participated_by_turn: dict[int, int] = {}
     proposals_made_by_turn: dict[int, int] = {}
     proposals_accepted_by_turn: dict[int, int] = {}
-    counter_offers_made = 0          # proposals that differ from owner's ask
-    counter_offers_received = 0      # when player is owner and receives a counter-offer
+    counter_offers_made = 0  # proposals that differ from owner's ask
+    counter_offers_received = 0  # when player is owner and receives a counter-offer
     # Negotiation outcome tracking (owner perspective only)
-    precise_rooms_opened = 0         # rooms where owner specified requested_resources
-    open_market_rooms_opened = 0     # rooms where requested_resources was empty
-    deals_matched_original = 0       # final deal matched the owner's original request
-    deals_negotiated_away = 0        # final deal differed from the owner's original request
+    precise_rooms_opened = 0  # rooms where owner specified requested_resources
+    open_market_rooms_opened = 0  # rooms where requested_resources was empty
+    deals_matched_original = 0  # final deal matched the owner's original request
+    deals_negotiated_away = 0  # final deal differed from the owner's original request
 
     for session in sessions.values():
         owner = session["owner_player_id"]
         turn = session["turn_index"]
-        is_owner = (owner == player_id)
+        is_owner = owner == player_id
         participated = player_id in session.get("speakers", set()) or is_owner
 
         if is_owner:
@@ -586,7 +639,9 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                 rooms_selected += 1
                 counterparty = session.get("selected_player_id")
                 if isinstance(counterparty, str):
-                    counterparty_freq[counterparty] = counterparty_freq.get(counterparty, 0) + 1
+                    counterparty_freq[counterparty] = (
+                        counterparty_freq.get(counterparty, 0) + 1
+                    )
                 # Owner gives offer, gets request
                 offer = session.get("selected_offer") or {}
                 request = session.get("selected_request") or {}
@@ -598,7 +653,9 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     flow = counterparty_resource_flow.setdefault(counterparty, {})
                     for res, cnt in (offer if isinstance(offer, dict) else {}).items():
                         flow[res] = flow.get(res, 0) + cnt
-                    for res, cnt in (request if isinstance(request, dict) else {}).items():
+                    for res, cnt in (
+                        request if isinstance(request, dict) else {}
+                    ).items():
                         flow[res] = flow.get(res, 0) + cnt
                 # Check if the final deal matched the original ask
                 # Compare selected_request (what owner got) vs requested_resources
@@ -610,7 +667,9 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
 
         if participated and not is_owner:
             rooms_participated_in += 1
-            rooms_participated_by_turn[turn] = rooms_participated_by_turn.get(turn, 0) + 1
+            rooms_participated_by_turn[turn] = (
+                rooms_participated_by_turn.get(turn, 0) + 1
+            )
 
         # Count proposals made by this player and detect counter-offers
         requested_res = session.get("requested_resources") or {}
@@ -620,7 +679,9 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
 
             # Counter-offer: what the responder offers the owner to receive
             # differs from what the owner originally asked for
-            is_counter = bool(requested_res and p_request and p_request != requested_res)
+            is_counter = bool(
+                requested_res and p_request and p_request != requested_res
+            )
 
             if p_player == player_id:
                 proposals_made += 1
@@ -634,14 +695,11 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
         # Count proposals from this player that were accepted
         if session["outcome"] == "selected":
             selected_pid = session.get("selected_player_id")
-            selected_proposal_id = None
-            # Find which proposal was selected by matching selected_player_id
-            for proposal in session.get("proposals", []):
-                if proposal.get("player_id") == selected_pid:
-                    selected_proposal_id = proposal.get("proposal_id")
             if selected_pid == player_id:
                 proposals_accepted += 1
-                proposals_accepted_by_turn[turn] = proposals_accepted_by_turn.get(turn, 0) + 1
+                proposals_accepted_by_turn[turn] = (
+                    proposals_accepted_by_turn.get(turn, 0) + 1
+                )
                 if not is_owner:
                     # As acceptee: gain what owner offered, give what owner requested
                     offer = session.get("selected_offer") or {}
@@ -654,7 +712,9 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
                     flow = counterparty_resource_flow.setdefault(owner, {})
                     for res, cnt in (offer if isinstance(offer, dict) else {}).items():
                         flow[res] = flow.get(res, 0) + cnt
-                    for res, cnt in (request if isinstance(request, dict) else {}).items():
+                    for res, cnt in (
+                        request if isinstance(request, dict) else {}
+                    ).items():
                         flow[res] = flow.get(res, 0) + cnt
 
     return {
@@ -664,17 +724,18 @@ def compute_trade_chat_analysis(player_id: str, events: list[Event]) -> dict[str
         "proposals_accepted": proposals_accepted,
         "proposal_acceptance_rate": (
             round(proposals_accepted / max(proposals_made, 1), 4)
-            if proposals_made else 0.0
+            if proposals_made
+            else 0.0
         ),
         "rooms_closed_no_deal": rooms_no_deal,
         "rooms_closed_selected": rooms_selected,
         "negotiation_success_rate": (
-            round(rooms_selected / max(rooms_opened, 1), 4)
-            if rooms_opened else 0.0
+            round(rooms_selected / max(rooms_opened, 1), 4) if rooms_opened else 0.0
         ),
         "avg_rounds_per_room": (
             round(total_rounds_as_owner / max(rooms_opened, 1), 2)
-            if rooms_opened else 0.0
+            if rooms_opened
+            else 0.0
         ),
         "counterparty_frequency": counterparty_freq,
         "counterparty_resource_flow": counterparty_resource_flow,
@@ -726,11 +787,13 @@ def compute_strategy_evolution(
 
             # Only record if the long-term memory actually changed
             if lt != last_long_term:
-                strategy_updates.append({
-                    "turn_index": snap.turn_index,
-                    "stage": snap.stage,
-                    "long_term": lt,
-                })
+                strategy_updates.append(
+                    {
+                        "turn_index": snap.turn_index,
+                        "stage": snap.stage,
+                        "long_term": lt,
+                    }
+                )
                 last_long_term = lt
 
         if snap.stage in _SHORT_TERM_STAGES:
@@ -745,7 +808,9 @@ def compute_strategy_evolution(
         similarities.append(
             _strategy_similarity(previous.get("long_term"), current.get("long_term"))
         )
-    strategy_stability = round(sum(similarities) / len(similarities), 4) if similarities else 1.0
+    strategy_stability = (
+        round(sum(similarities) / len(similarities), 4) if similarities else 1.0
+    )
 
     return {
         "opening_strategy": opening_strategy,
@@ -792,7 +857,9 @@ def compute_market_analysis(
             actor_stats[taker]["deal_volume_by_resource"][resource] = (
                 actor_stats[taker]["deal_volume_by_resource"].get(resource, 0) + amount
             )
-            resource_involvement_totals[resource] = resource_involvement_totals.get(resource, 0) + amount * 2
+            resource_involvement_totals[resource] = (
+                resource_involvement_totals.get(resource, 0) + amount * 2
+            )
 
     for event in events:
         if event.kind == "trade_confirmed":
@@ -813,7 +880,10 @@ def compute_market_analysis(
         if event.kind != "action_taken":
             continue
         action = event.payload.get("action", {})
-        if not isinstance(action, dict) or action.get("action_type") != "MARITIME_TRADE":
+        if (
+            not isinstance(action, dict)
+            or action.get("action_type") != "MARITIME_TRADE"
+        ):
             continue
         maker = event.actor_player_id
         if not isinstance(maker, str):
@@ -847,7 +917,9 @@ def compute_market_analysis(
         maker_deals = int(stats["maker_deals"])
         taker_deals = int(stats["taker_deals"])
         total_deals = maker_deals + taker_deals
-        initiation_rate = round(_safe_div(maker_deals, total_deals), 4) if total_deals else 0.0
+        initiation_rate = (
+            round(_safe_div(maker_deals, total_deals), 4) if total_deals else 0.0
+        )
         share_by_resource = {
             resource: resource_market_share.get(resource, {}).get(actor, 0.0)
             for resource in RESOURCES
@@ -881,6 +953,7 @@ def compute_market_analysis(
 
 
 # ── Resource production estimation ───────────────────────────────────────────
+
 
 def compute_resource_production(
     player_id: str,
@@ -964,16 +1037,21 @@ def compute_resource_production(
                         continue
                 resource = tile.get("resource")
                 if isinstance(resource, str) and resource in RESOURCES:
-                    turn_production[resource] = turn_production.get(resource, 0) + multiplier
+                    turn_production[resource] = (
+                        turn_production.get(resource, 0) + multiplier
+                    )
                     total[resource] = total.get(resource, 0) + multiplier
 
         if turn_production:
-            by_turn.append({"turn_index": event.turn_index, "resources": turn_production})
+            by_turn.append(
+                {"turn_index": event.turn_index, "resources": turn_production}
+            )
 
     return {"total": total, "by_turn": by_turn}
 
 
 # ── VP progression ───────────────────────────────────────────────────────────
+
 
 def compute_vp_progression(
     player_id: str,
@@ -1037,6 +1115,7 @@ def compute_army_progression(
 
 
 # ── Phase analysis ───────────────────────────────────────────────────────────
+
 
 def compute_phase_analysis(
     player_id: str,
@@ -1104,6 +1183,7 @@ def compute_phase_analysis(
 
 # ── Decision quality ─────────────────────────────────────────────────────────
 
+
 def compute_decision_quality(prompt_traces: list[PromptTrace]) -> dict[str, Any]:
     """Analyze prompt retry counts as a decision quality proxy."""
     total_prompts = len(prompt_traces)
@@ -1113,12 +1193,15 @@ def compute_decision_quality(prompt_traces: list[PromptTrace]) -> dict[str, Any]
     return {
         "total_prompts": total_prompts,
         "retries": retries,
-        "retry_rate": round(retries / max(total_prompts, 1), 4) if total_prompts else 0.0,
+        "retry_rate": round(retries / max(total_prompts, 1), 4)
+        if total_prompts
+        else 0.0,
         "max_attempts_on_single_decision": max_attempts,
     }
 
 
 # ── Achievements (from final state) ─────────────────────────────────────────
+
 
 def compute_achievements(
     player_id: str,
@@ -1154,6 +1237,7 @@ def compute_achievements(
 
 # ── Per-player orchestration ─────────────────────────────────────────────────
 
+
 def analyze_player(
     player_id: str,
     *,
@@ -1169,8 +1253,14 @@ def analyze_player(
 
     # Get final VP from result metadata
     players_meta = result.get("metadata", {}).get("players", {})
-    player_meta = players_meta.get(player_id, {}) if isinstance(players_meta, dict) else {}
-    final_vp = int(player_meta.get("actual_victory_points", 0)) if isinstance(player_meta, dict) else 0
+    player_meta = (
+        players_meta.get(player_id, {}) if isinstance(players_meta, dict) else {}
+    )
+    final_vp = (
+        int(player_meta.get("actual_victory_points", 0))
+        if isinstance(player_meta, dict)
+        else 0
+    )
 
     vp_progression = compute_vp_progression(player_id, state_snapshots)
     road_progression = compute_road_progression(player_id, state_snapshots)
@@ -1178,7 +1268,9 @@ def analyze_player(
     trade = compute_trade_analysis(player_id, events)
     trade_chat = compute_trade_chat_analysis(player_id, events)
     strategy = compute_strategy_evolution(player_id, memory_snapshots)
-    total_completed_trades = trade["confirmations_as_offerer"] + trade["confirmations_as_acceptee"]
+    total_completed_trades = (
+        trade["confirmations_as_offerer"] + trade["confirmations_as_acceptee"]
+    )
     market_profile = {
         "market_initiation_rate": round(
             _safe_div(
@@ -1193,7 +1285,9 @@ def analyze_player(
         "offerer_share": round(
             _safe_div(trade["confirmations_as_offerer"], total_completed_trades),
             4,
-        ) if total_completed_trades else 0.0,
+        )
+        if total_completed_trades
+        else 0.0,
         "strategy_stability": strategy["strategy_stability"],
     }
 
@@ -1203,7 +1297,9 @@ def analyze_player(
         "vp_progression": vp_progression,
         "road_progression": road_progression,
         "army_progression": army_progression,
-        "resource_production": compute_resource_production(player_id, events, state_snapshots),
+        "resource_production": compute_resource_production(
+            player_id, events, state_snapshots
+        ),
         "buildings": compute_building_timeline(player_id, events),
         "trade": trade,
         "trade_chat": trade_chat,
@@ -1212,13 +1308,16 @@ def analyze_player(
         "dev_cards": compute_dev_card_analysis(player_id, events, final_snapshot),
         "decision_quality": compute_decision_quality(prompt_traces),
         "achievements": compute_achievements(player_id, final_snapshot),
-        "phase_analysis": compute_phase_analysis(player_id, events, state_snapshots, vp_progression),
+        "phase_analysis": compute_phase_analysis(
+            player_id, events, state_snapshots, vp_progression
+        ),
         "strategy": strategy,
         "market_profile": market_profile,
     }
 
 
 # ── Top-level orchestration ──────────────────────────────────────────────────
+
 
 def analyze_game(run_dir: str | Path, *, write: bool = True) -> dict[str, Any]:
     """Main entry point: load artifacts, compute all metrics, optionally write analysis.json."""
@@ -1276,6 +1375,7 @@ def analyze_game(run_dir: str | Path, *, write: bool = True) -> dict[str, Any]:
 
 # ── Terminal summary ─────────────────────────────────────────────────────────
 
+
 def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> None:
     """Print a colored terminal summary of the analysis."""
     out = file or sys.stderr
@@ -1297,13 +1397,23 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
     out.write(f"\n{bold('=== Post-Game Analysis ===')}\n\n")
 
     winner_ids = gs.get("winner_ids", [])
-    winner_str = ", ".join(player_color(w, w) for w in winner_ids) if winner_ids else "None"
+    winner_str = (
+        ", ".join(player_color(w, w) for w in winner_ids) if winner_ids else "None"
+    )
     out.write(f"  Winner: {winner_str}\n")
-    out.write(f"  Turns: {gs.get('num_turns', '?')}  |  Events: {gs.get('total_events', '?')}  |  Decisions: {gs.get('total_decisions', '?')}\n")
-    out.write(f"  Events/turn: {gs.get('events_per_turn', '?')}  |  Decisions/turn: {gs.get('decisions_per_turn', '?')}\n")
-    out.write(f"  Trade activity: {gs.get('trade_activity_rate', 0):.1%}  |  Trade efficiency: {gs.get('trade_efficiency', 0):.1%}\n")
+    out.write(
+        f"  Turns: {gs.get('num_turns', '?')}  |  Events: {gs.get('total_events', '?')}  |  Decisions: {gs.get('total_decisions', '?')}\n"
+    )
+    out.write(
+        f"  Events/turn: {gs.get('events_per_turn', '?')}  |  Decisions/turn: {gs.get('decisions_per_turn', '?')}\n"
+    )
+    out.write(
+        f"  Trade activity: {gs.get('trade_activity_rate', 0):.1%}  |  Trade efficiency: {gs.get('trade_efficiency', 0):.1%}\n"
+    )
     if gs.get("trade_chat_rooms", 0):
-        out.write(f"  Chat rooms: {gs['trade_chat_rooms']}  |  Chat success: {gs.get('trade_chat_success_rate', 0):.1%}\n")
+        out.write(
+            f"  Chat rooms: {gs['trade_chat_rooms']}  |  Chat success: {gs.get('trade_chat_success_rate', 0):.1%}\n"
+        )
 
     players = analysis.get("players", {})
     for player_id, data in players.items():
@@ -1324,64 +1434,95 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
         # Buildings
         buildings = data.get("buildings", {})
         counts = buildings.get("counts", {})
-        out.write(f"    Buildings: {counts.get('settlements', 0)}S  {counts.get('cities', 0)}C  {counts.get('roads', 0)}R\n")
+        out.write(
+            f"    Buildings: {counts.get('settlements', 0)}S  {counts.get('cities', 0)}C  {counts.get('roads', 0)}R\n"
+        )
 
         # Resource production
         production = data.get("resource_production", {}).get("total", {})
         if production:
-            res_parts = [f"{r}: {production.get(r, 0)}" for r in RESOURCES if production.get(r, 0)]
+            res_parts = [
+                f"{r}: {production.get(r, 0)}"
+                for r in RESOURCES
+                if production.get(r, 0)
+            ]
             out.write(f"    Production: {', '.join(res_parts)}\n")
 
         # Trade
         trade = data.get("trade", {})
-        completed = trade.get("confirmations_as_offerer", 0) + trade.get("confirmations_as_acceptee", 0)
+        completed = trade.get("confirmations_as_offerer", 0) + trade.get(
+            "confirmations_as_acceptee", 0
+        )
         offers = trade.get("offers_made", 0)
         if offers or completed:
             if offers:
-                out.write(f"    Trades: {offers} offered, {completed} completed "
-                          f"({trade.get('acceptance_rate', 0):.0%} accept rate)\n")
+                out.write(
+                    f"    Trades: {offers} offered, {completed} completed "
+                    f"({trade.get('acceptance_rate', 0):.0%} accept rate)\n"
+                )
             else:
                 out.write(f"    Trades: {completed} completed (via chat)\n")
 
         # Robber
         robber = data.get("robber", {})
         if robber.get("times_moved_robber", 0) or robber.get("times_targeted", 0):
-            out.write(f"    Robber: moved {robber.get('times_moved_robber', 0)}x, targeted {robber.get('times_targeted', 0)}x\n")
+            out.write(
+                f"    Robber: moved {robber.get('times_moved_robber', 0)}x, targeted {robber.get('times_targeted', 0)}x\n"
+            )
 
         # Discard
         discard = data.get("discard", {})
         if discard.get("times_discarded", 0):
-            out.write(f"    Discard: {discard['times_discarded']}x, {discard.get('total_cards_discarded', 0)} cards total\n")
+            out.write(
+                f"    Discard: {discard['times_discarded']}x, {discard.get('total_cards_discarded', 0)} cards total\n"
+            )
 
         # Dev cards
         dev = data.get("dev_cards", {})
         if dev.get("cards_played", 0) or dev.get("cards_held_at_end", 0):
-            out.write(f"    Dev cards: {dev.get('cards_played', 0)} played, {dev.get('cards_held_at_end', 0)} held\n")
+            out.write(
+                f"    Dev cards: {dev.get('cards_played', 0)} played, {dev.get('cards_held_at_end', 0)} held\n"
+            )
 
         # Decision quality
         dq = data.get("decision_quality", {})
         if dq.get("retries", 0):
-            out.write(f"    Retries: {dq['retries']}/{dq.get('total_prompts', 0)} ({dq.get('retry_rate', 0):.1%})\n")
+            out.write(
+                f"    Retries: {dq['retries']}/{dq.get('total_prompts', 0)} ({dq.get('retry_rate', 0):.1%})\n"
+            )
 
         # Opening
         phase = data.get("phase_analysis", {}).get("opening", {})
         if phase.get("pip_count", 0):
-            out.write(f"    Opening: {phase.get('resource_diversity', 0)} resource types, {phase.get('pip_count', 0)} pips\n")
+            out.write(
+                f"    Opening: {phase.get('resource_diversity', 0)} resource types, {phase.get('pip_count', 0)} pips\n"
+            )
 
         # Trade chat negotiation
         tc = data.get("trade_chat", {})
-        if tc.get("rooms_opened", 0) or tc.get("rooms_participated_in", 0) or tc.get("proposals_made", 0):
+        if (
+            tc.get("rooms_opened", 0)
+            or tc.get("rooms_participated_in", 0)
+            or tc.get("proposals_made", 0)
+        ):
             parts = []
             if tc.get("rooms_opened"):
-                parts.append(f"{tc['rooms_opened']} rooms opened ({tc.get('negotiation_success_rate', 0):.0%} success)")
+                parts.append(
+                    f"{tc['rooms_opened']} rooms opened ({tc.get('negotiation_success_rate', 0):.0%} success)"
+                )
             if tc.get("proposals_made"):
-                parts.append(f"{tc['proposals_made']} proposals ({tc.get('proposals_accepted', 0)} accepted)")
+                parts.append(
+                    f"{tc['proposals_made']} proposals ({tc.get('proposals_accepted', 0)} accepted)"
+                )
             if tc.get("rooms_participated_in"):
                 parts.append(f"joined {tc['rooms_participated_in']} rooms")
             out.write(f"    Chat trades: {', '.join(parts)}\n")
             cp = tc.get("counterparty_frequency", {})
             if cp:
-                cp_parts = [f"{pid}: {count}x" for pid, count in sorted(cp.items(), key=lambda x: -x[1])]
+                cp_parts = [
+                    f"{pid}: {count}x"
+                    for pid, count in sorted(cp.items(), key=lambda x: -x[1])
+                ]
                 out.write(f"    Trade partners: {', '.join(cp_parts)}\n")
 
         # Strategy
@@ -1399,13 +1540,22 @@ def print_terminal_summary(analysis: dict[str, Any], *, file: Any = None) -> Non
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Analyze a completed catan-bench game run.",
     )
     parser.add_argument("run_dir", help="Path to the completed run directory.")
-    parser.add_argument("--json-only", action="store_true", help="Print JSON to stdout, skip terminal summary.")
-    parser.add_argument("--no-write", action="store_true", help="Do not write analysis.json to the run directory.")
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        help="Print JSON to stdout, skip terminal summary.",
+    )
+    parser.add_argument(
+        "--no-write",
+        action="store_true",
+        help="Do not write analysis.json to the run directory.",
+    )
     args = parser.parse_args(argv)
 
     run_dir = Path(args.run_dir)

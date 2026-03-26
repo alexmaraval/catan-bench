@@ -12,6 +12,7 @@ from typing import Any
 # Data collection
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GameRecord:
     """A completed game's key data for benchmark evaluation."""
@@ -56,7 +57,11 @@ def _is_run_directory(path: Path) -> bool:
         return False
     return any(
         (path / name).exists()
-        for name in ("metadata.json", "public_history.jsonl", "public_state_trace.jsonl")
+        for name in (
+            "metadata.json",
+            "public_history.jsonl",
+            "public_state_trace.jsonl",
+        )
     )
 
 
@@ -295,8 +300,8 @@ def _score_trading(player_data: dict, num_turns: int) -> float:
     counterparty_count = len(tc.get("counterparty_frequency", {}))
     counterparty_div = min(counterparty_count / 3.0, 1.0)
 
-    confirmations = (
-        tr.get("confirmations_as_offerer", 0) + tr.get("confirmations_as_acceptee", 0)
+    confirmations = tr.get("confirmations_as_offerer", 0) + tr.get(
+        "confirmations_as_acceptee", 0
     )
     volume_per_turn = confirmations / max(num_turns, 1) if num_turns else 0.0
 

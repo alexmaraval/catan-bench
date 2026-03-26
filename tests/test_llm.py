@@ -71,7 +71,9 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertEqual(captured_body["include_reasoning"], False)
         self.assertNotIn("reasoning", captured_body)
 
-    def test_complete_uses_reasoning_effort_none_for_supported_google_models(self) -> None:
+    def test_complete_uses_reasoning_effort_none_for_supported_google_models(
+        self,
+    ) -> None:
         captured_body: dict[str, object] = {}
 
         def fake_urlopen(req, timeout):
@@ -149,7 +151,9 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", captured_body)
         self.assertNotIn("include_reasoning", captured_body)
 
-    def test_complete_uses_reasoning_effort_none_for_openrouter_when_disabled(self) -> None:
+    def test_complete_uses_reasoning_effort_none_for_openrouter_when_disabled(
+        self,
+    ) -> None:
         captured_body: dict[str, object] = {}
 
         def fake_urlopen(req, timeout):

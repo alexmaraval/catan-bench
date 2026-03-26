@@ -124,6 +124,13 @@ If you use `uv`, the repo already includes a lockfile:
 uv sync --group dev --group dashboard
 ```
 
+To install local pre-commit hooks for Ruff and pytest:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
 ## Quick start
 
 1. Put your API key in the environment or in a nearby `.env` file:

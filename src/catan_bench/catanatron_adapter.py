@@ -24,13 +24,18 @@ TOTAL_CITIES = 4
 
 try:
     from catanatron import Game
-    from catanatron.game import TURNS_LIMIT, is_valid_action as catanatron_is_valid_action
+    from catanatron.game import (
+        TURNS_LIMIT,
+        is_valid_action as catanatron_is_valid_action,
+    )
     from catanatron.json import GameEncoder
     from catanatron.models.enums import Action as NativeAction
     from catanatron.models.enums import ActionPrompt, ActionType
     from catanatron.models.player import Color, Player as CatanatronPlayer
     from catanatron.state_functions import player_has_rolled, player_key
-except ImportError as exc:  # pragma: no cover - exercised only when dependency is missing.
+except (
+    ImportError
+) as exc:  # pragma: no cover - exercised only when dependency is missing.
     raise RuntimeError(
         "catanatron is required to use CatanatronEngineAdapter. "
         "Install the GitHub version of catanatron before importing this module."
@@ -71,7 +76,9 @@ class CatanatronEngineAdapter:
                         f"Unsupported player id {pid!r}. "
                         f"Catanatron supports: {VALID_PLAYER_IDS}."
                     )
-            players = [PassiveCatanatronPlayer(Color[player_id]) for player_id in player_ids]
+            players = [
+                PassiveCatanatronPlayer(Color[player_id]) for player_id in player_ids
+            ]
             game = Game(
                 players,
                 seed=seed,
@@ -84,10 +91,15 @@ class CatanatronEngineAdapter:
             try:
                 game.id = game_id
             except Exception:  # pragma: no cover - depends on catanatron internals.
-                logger.debug("Unable to override catanatron game id during resume.", exc_info=True)
+                logger.debug(
+                    "Unable to override catanatron game id during resume.",
+                    exc_info=True,
+                )
 
         self.game = game
-        logger.debug("CatanatronEngineAdapter initialized with %d players", len(self.player_ids))
+        logger.debug(
+            "CatanatronEngineAdapter initialized with %d players", len(self.player_ids)
+        )
 
     @property
     def game_id(self) -> str:
@@ -127,7 +139,9 @@ class CatanatronEngineAdapter:
             phase=self._phase_name(state.current_prompt),
             legal_actions=legal_actions,
             decision_index=len(state.action_records),
-            prompt=self._decision_prompt(state.current_prompt, legal_actions=legal_actions),
+            prompt=self._decision_prompt(
+                state.current_prompt, legal_actions=legal_actions
+            ),
         )
 
     def _advance_past_self_trade_response(self) -> None:
@@ -208,10 +222,14 @@ class CatanatronEngineAdapter:
             "player_id": player_id,
             "resources": self._resource_counts(key),
             "development_cards": self._development_card_counts(key),
-            "ports": self._serialize_ports(state.board.get_player_port_resources(color)),
+            "ports": self._serialize_ports(
+                state.board.get_player_port_resources(color)
+            ),
             "pieces": {
                 "roads_available": state.player_state[f"{key}_ROADS_AVAILABLE"],
-                "settlements_available": state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"],
+                "settlements_available": state.player_state[
+                    f"{key}_SETTLEMENTS_AVAILABLE"
+                ],
                 "cities_available": state.player_state[f"{key}_CITIES_AVAILABLE"],
             },
             "victory_points": {
@@ -306,7 +324,9 @@ class CatanatronEngineAdapter:
             and proposed_action.payload.get("accepting_player_id")
             == self._trade_offering_player_id(game.state)
         ):
-            raise ValueError("CONFIRM_TRADE cannot select the offering player as the counterparty.")
+            raise ValueError(
+                "CONFIRM_TRADE cannot select the offering player as the counterparty."
+            )
         for legal_action in legal_actions:
             if self._is_trade_template(legal_action):
                 continue
@@ -329,7 +349,9 @@ class CatanatronEngineAdapter:
 
         if proposed_action.action_type == "OFFER_TRADE" and self._can_offer_trade():
             offer = proposed_action.payload.get("offer", {})
-            if isinstance(offer, Mapping) and not self._current_player_has_resources(offer):
+            if isinstance(offer, Mapping) and not self._current_player_has_resources(
+                offer
+            ):
                 raise ValueError(
                     "Action "
                     f"{proposed_action.to_dict()} is not currently valid in catanatron: "
@@ -413,7 +435,11 @@ class CatanatronEngineAdapter:
         return None
 
     def apply_action(self, action: Action) -> TransitionResult:
-        logger.debug("Applying action %s for %s", action.action_type, self.game.state.current_color().value)
+        logger.debug(
+            "Applying action %s for %s",
+            action.action_type,
+            self.game.state.current_color().value,
+        )
         state_before = self.game.state.copy()
 
         native_action = self._action_to_native(action)
@@ -489,8 +515,7 @@ class CatanatronEngineAdapter:
         state = self.game.state
         board = state.board
         lengths = {
-            color: self._longest_road_length_for_color(color)
-            for color in state.colors
+            color: self._longest_road_length_for_color(color) for color in state.colors
         }
 
         previous_holder = next(
@@ -653,7 +678,8 @@ class CatanatronEngineAdapter:
             ),
             "roads": TOTAL_ROADS - int(state.player_state[f"{key}_ROADS_AVAILABLE"]),
             "settlements": (
-                TOTAL_SETTLEMENTS - int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
+                TOTAL_SETTLEMENTS
+                - int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
             ),
             "cities": TOTAL_CITIES - int(state.player_state[f"{key}_CITIES_AVAILABLE"]),
             "longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),
@@ -666,7 +692,9 @@ class CatanatronEngineAdapter:
             for resource in RESOURCE_ORDER
         }
 
-    def _current_player_has_resources(self, resource_map: Mapping[str, JsonValue]) -> bool:
+    def _current_player_has_resources(
+        self, resource_map: Mapping[str, JsonValue]
+    ) -> bool:
         color = self.game.state.current_color()
         key = player_key(self.game.state, color)
         for resource, amount in resource_map.items():
@@ -693,7 +721,9 @@ class CatanatronEngineAdapter:
     def _trade_state_public(self) -> dict[str, JsonValue]:
         state = self.game.state
         acceptees = [
-            color.value for color, accepted in zip(state.colors, state.acceptees) if accepted
+            color.value
+            for color, accepted in zip(state.colors, state.acceptees)
+            if accepted
         ]
 
         trade_summary: dict[str, JsonValue] = {
@@ -706,7 +736,9 @@ class CatanatronEngineAdapter:
             offering_player_index = int(state.current_trade[10])
             trade_summary["offer"] = offering
             trade_summary["request"] = asking
-            trade_summary["offering_player_id"] = state.colors[offering_player_index].value
+            trade_summary["offering_player_id"] = state.colors[
+                offering_player_index
+            ].value
 
         return trade_summary
 
@@ -756,9 +788,7 @@ class CatanatronEngineAdapter:
             if node.get("color") == player_id and node.get("building") is not None
         ]
         owned_buildings.sort(key=lambda node: int(node["id"]))
-        owned_roads = [
-            edge for edge in edges if edge.get("color") == player_id
-        ]
+        owned_roads = [edge for edge in edges if edge.get("color") == player_id]
         owned_roads.sort(key=lambda edge: tuple(int(node_id) for node_id in edge["id"]))
 
         network_tiles: dict[str, None] = {}
@@ -786,7 +816,9 @@ class CatanatronEngineAdapter:
         }
 
     @staticmethod
-    def _robber_targets_view(legal_actions: Sequence[Action]) -> list[dict[str, JsonValue]]:
+    def _robber_targets_view(
+        legal_actions: Sequence[Action],
+    ) -> list[dict[str, JsonValue]]:
         targets: dict[tuple[int, int, int], set[str]] = {}
         for action in legal_actions:
             if action.action_type != "MOVE_ROBBER":
@@ -902,7 +934,10 @@ class CatanatronEngineAdapter:
         for node_id in edge:
             for tile in game_json["adjacent_tiles"].get(str(node_id), []):
                 summary = self._tile_prompt_value(tile)
-                if not summary.startswith("PORT:") and summary not in ("WATER", "DESERT"):
+                if not summary.startswith("PORT:") and summary not in (
+                    "WATER",
+                    "DESERT",
+                ):
                     adjacent.setdefault(summary, None)
         result: dict[str, JsonValue] = {
             "action_index": action_index,
@@ -940,7 +975,7 @@ class CatanatronEngineAdapter:
             description=(
                 "Offer a domestic trade by specifying non-overlapping resource-count "
                 "maps in `offer` and `request`, for example "
-                "`{\"offer\": {\"WOOD\": 1}, \"request\": {\"BRICK\": 1}}`."
+                '`{"offer": {"WOOD": 1}, "request": {"BRICK": 1}}`.'
             ),
         )
 
@@ -952,15 +987,14 @@ class CatanatronEngineAdapter:
                 "Reject the current trade and propose a different exchange by "
                 "specifying what you would give in `offer` and what you want from "
                 "the active player in `request`, for example "
-                "`{\"offer\": {\"BRICK\": 1}, \"request\": {\"WOOD\": 1}}`."
+                '`{"offer": {"BRICK": 1}, "request": {"WOOD": 1}}`.'
             ),
         )
 
     def _can_offer_trade(self) -> bool:
         state = self.game.state
-        return (
-            state.current_prompt == ActionPrompt.PLAY_TURN
-            and player_has_rolled(state, state.current_color())
+        return state.current_prompt == ActionPrompt.PLAY_TURN and player_has_rolled(
+            state, state.current_color()
         )
 
     def _can_counter_offer(self, legal_actions: Sequence[Action]) -> bool:
@@ -1048,7 +1082,9 @@ class CatanatronEngineAdapter:
 
         return {"value": self._json_safe(value)}
 
-    def _payload_to_native_value(self, action_type: str, payload: Mapping[str, JsonValue]) -> Any:
+    def _payload_to_native_value(
+        self, action_type: str, payload: Mapping[str, JsonValue]
+    ) -> Any:
         if action_type in {
             "ROLL",
             "BUY_DEVELOPMENT_CARD",
@@ -1080,7 +1116,9 @@ class CatanatronEngineAdapter:
         if action_type == "MOVE_ROBBER":
             coordinate = payload["coordinate"]
             if not isinstance(coordinate, list) or len(coordinate) != 3:
-                raise ValueError("MOVE_ROBBER requires payload.coordinate as a 3-item list.")
+                raise ValueError(
+                    "MOVE_ROBBER requires payload.coordinate as a 3-item list."
+                )
             victim = payload.get("victim")
             return (
                 tuple(int(axis) for axis in coordinate),
@@ -1113,10 +1151,12 @@ class CatanatronEngineAdapter:
             offer = payload.get("offer", {})
             request = payload.get("request", {})
             if not isinstance(offer, Mapping) or not isinstance(request, Mapping):
-                raise ValueError("OFFER_TRADE requires mapping payloads for offer and request.")
-            return self._resource_map_to_freqdeck(offer) + self._resource_map_to_freqdeck(
-                request
-            )
+                raise ValueError(
+                    "OFFER_TRADE requires mapping payloads for offer and request."
+                )
+            return self._resource_map_to_freqdeck(
+                offer
+            ) + self._resource_map_to_freqdeck(request)
 
         if action_type in {"ACCEPT_TRADE", "REJECT_TRADE"}:
             return self.game.state.current_trade
@@ -1131,7 +1171,9 @@ class CatanatronEngineAdapter:
         return value
 
     @staticmethod
-    def _resource_map_to_freqdeck(resource_map: Mapping[str, JsonValue]) -> tuple[int, ...]:
+    def _resource_map_to_freqdeck(
+        resource_map: Mapping[str, JsonValue],
+    ) -> tuple[int, ...]:
         result = []
         for resource in RESOURCE_ORDER:
             amount = resource_map.get(resource, 0)
@@ -1192,8 +1234,12 @@ class CatanatronEngineAdapter:
     def _discard_resource_map_from_value(cls, value: Any) -> dict[str, int] | None:
         if isinstance(value, Mapping):
             return cls._normalize_resource_map(value)
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-            if len(value) == len(RESOURCE_ORDER) and all(isinstance(item, int) for item in value):
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            if len(value) == len(RESOURCE_ORDER) and all(
+                isinstance(item, int) for item in value
+            ):
                 return cls._freqdeck_to_dict(value)
             counts: dict[str, int] = {}
             for item in value:
@@ -1218,7 +1264,9 @@ class CatanatronEngineAdapter:
     def _discard_prompt_summary(
         cls, legal_actions: Sequence[Action]
     ) -> dict[str, JsonValue] | None:
-        if not legal_actions or any(action.action_type != "DISCARD" for action in legal_actions):
+        if not legal_actions or any(
+            action.action_type != "DISCARD" for action in legal_actions
+        ):
             return None
         resource_map = cls._discard_resource_map_from_payload(legal_actions[0].payload)
         if resource_map is None:
@@ -1325,13 +1373,17 @@ class CatanatronEngineAdapter:
             payload["offer"] = dict(action.payload.get("offer", {}))
             payload["request"] = dict(action.payload.get("request", {}))
         elif action_type in {"ACCEPT_TRADE", "REJECT_TRADE"}:
-            payload["offering_player_id"] = str(action.payload.get("offering_player_id"))
+            payload["offering_player_id"] = str(
+                action.payload.get("offering_player_id")
+            )
             payload["offer"] = dict(action.payload.get("offer", {}))
             payload["request"] = dict(action.payload.get("request", {}))
             payload["responding_player_id"] = actor_player_id
         elif action_type == "CONFIRM_TRADE":
             payload["offering_player_id"] = self._trade_offering_player_id(state_before)
-            payload["accepting_player_id"] = str(action.payload.get("accepting_player_id"))
+            payload["accepting_player_id"] = str(
+                action.payload.get("accepting_player_id")
+            )
             payload["offer"] = dict(action.payload.get("offer", {}))
             payload["request"] = dict(action.payload.get("request", {}))
         elif action_type == "CANCEL_TRADE":
@@ -1431,9 +1483,7 @@ class CatanatronEngineAdapter:
         if action_type == "REJECT_TRADE":
             return f"Reject the trade offered by {payload.get('offering_player_id')}."
         if action_type == "CONFIRM_TRADE":
-            return (
-                f"Confirm the trade with {payload.get('accepting_player_id')}."
-            )
+            return f"Confirm the trade with {payload.get('accepting_player_id')}."
         if action_type == "CANCEL_TRADE":
             return "Cancel the current trade offer."
         return None
@@ -1444,7 +1494,9 @@ class CatanatronEngineAdapter:
 
     def _trade_state_summary(self, state) -> dict[str, JsonValue]:
         acceptees = [
-            color.value for color, accepted in zip(state.colors, state.acceptees) if accepted
+            color.value
+            for color, accepted in zip(state.colors, state.acceptees)
+            if accepted
         ]
         summary: dict[str, JsonValue] = {
             "is_resolving_trade": state.is_resolving_trade,

@@ -23,7 +23,9 @@ class FakeLLMClient:
     def __init__(self, *payloads: dict[str, object]) -> None:
         self._payloads = list(payloads)
 
-    def complete(self, *, model, messages, temperature, top_p=None, reasoning_enabled=None):
+    def complete(
+        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+    ):
         payload = self._payloads.pop(0)
         return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
@@ -32,7 +34,9 @@ class FailingLLMClient:
     def __init__(self, error: RuntimeError) -> None:
         self._error = error
 
-    def complete(self, *, model, messages, temperature, top_p=None, reasoning_enabled=None):
+    def complete(
+        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+    ):
         raise self._error
 
 
@@ -40,7 +44,9 @@ class RawCompletionClient:
     def __init__(self, *contents: str) -> None:
         self._contents = list(contents)
 
-    def complete(self, *, model, messages, temperature, top_p=None, reasoning_enabled=None):
+    def complete(
+        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+    ):
         content = self._contents.pop(0)
         return {"choices": [{"message": {"content": content}}]}
 
@@ -49,7 +55,9 @@ class StructuredCompletionClient:
     def __init__(self, *completions: dict[str, object]) -> None:
         self._completions = list(completions)
 
-    def complete(self, *, model, messages, temperature, top_p=None, reasoning_enabled=None):
+    def complete(
+        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+    ):
         return self._completions.pop(0)
 
 
@@ -69,7 +77,9 @@ class LLMPlayerTests(unittest.TestCase):
     def test_llm_player_plan_opening_strategy_records_trace(self) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
-                {"long_term": "Prioritize expansion from the brick-wheat side, then look for a city line."}
+                {
+                    "long_term": "Prioritize expansion from the brick-wheat side, then look for a city line."
+                }
             ),
             model="fake-model",
         )
@@ -104,7 +114,11 @@ class LLMPlayerTests(unittest.TestCase):
         player = LLMPlayer(
             client=FakeLLMClient(
                 {"short_term": {"plan": "Trade first."}},
-                {"action_index": 0, "short_term": {"plan": "End now."}, "private_reasoning": "Done."},
+                {
+                    "action_index": 0,
+                    "short_term": {"plan": "End now."},
+                    "private_reasoning": "Done.",
+                },
                 {"long_term": {"focus": "Watch BLUE's brick demand."}},
             ),
             model="fake-model",
@@ -168,10 +182,15 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(start_response.short_term, {"plan": "Trade first."})
         self.assertEqual(action_response.action.action_type, "END_TURN")
         self.assertEqual(action_response.short_term, {"plan": "End now."})
-        self.assertEqual(end_response.long_term, {"focus": "Watch BLUE's brick demand."})
+        self.assertEqual(
+            end_response.long_term, {"focus": "Watch BLUE's brick demand."}
+        )
 
         traces = player.take_prompt_traces()
-        self.assertEqual([trace.stage for trace in traces], ["turn_start", "choose_action", "turn_end"])
+        self.assertEqual(
+            [trace.stage for trace in traces],
+            ["turn_start", "choose_action", "turn_end"],
+        )
         self.assertEqual([trace.history_index for trace in traces], [2, 2, 3])
 
     def test_llm_player_repairs_illegal_reactive_action(self) -> None:
@@ -243,7 +262,9 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(trace.stage, "reactive_action")
         self.assertEqual(len(trace.attempts), 2)
 
-    def test_llm_player_reactive_discard_selection_preserves_chosen_payload(self) -> None:
+    def test_llm_player_reactive_discard_selection_preserves_chosen_payload(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
                 {
@@ -262,7 +283,12 @@ class LLMPlayerTests(unittest.TestCase):
                 turn_index=4,
                 phase="discard",
                 decision_index=12,
-                public_state={"turn": {"turn_player_id": "BLUE"}, "players": {}, "board": {}, "bank": {}},
+                public_state={
+                    "turn": {"turn_player_id": "BLUE"},
+                    "players": {},
+                    "board": {},
+                    "bank": {},
+                },
                 private_state={
                     "resources": {"WOOD": 2, "BRICK": 1, "SHEEP": 1, "ORE": 2},
                     "development_cards": {},
@@ -285,7 +311,9 @@ class LLMPlayerTests(unittest.TestCase):
                 ),
                 decision_prompt="Choose which 2 resource cards to discard for the robber event.",
                 game_rules="Rules",
-                memory=PlayerMemory(long_term={"goal": "Keep ore and wheat for a city."}),
+                memory=PlayerMemory(
+                    long_term={"goal": "Keep ore and wheat for a city."}
+                ),
             )
         )
 
@@ -296,7 +324,9 @@ class LLMPlayerTests(unittest.TestCase):
         )
         self.assertEqual(response.reasoning, "Keep ore for the city race.")
 
-    def test_llm_player_falls_back_when_choose_action_repair_is_still_invalid(self) -> None:
+    def test_llm_player_falls_back_when_choose_action_repair_is_still_invalid(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
                 {"action_index": 7, "private_reasoning": "Bad index."},
@@ -396,7 +426,9 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(reply_response.owner_gives, {"WOOD": 1})
         self.assertEqual(reply_response.owner_gets, {"BRICK": 1})
         self.assertEqual(select_response.decision, "select")
-        self.assertEqual(select_response.selected_proposal_id, "attempt-1-round-1-proposal-1")
+        self.assertEqual(
+            select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
+        )
 
     def test_llm_player_trade_chat_select_recovers_invalid_proposal_hint(self) -> None:
         player = LLMPlayer(
@@ -442,9 +474,13 @@ class LLMPlayerTests(unittest.TestCase):
         select_response = player.decide_trade_chat(observation)
 
         self.assertEqual(select_response.decision, "select")
-        self.assertEqual(select_response.selected_proposal_id, "attempt-1-round-1-proposal-1")
+        self.assertEqual(
+            select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
+        )
 
-    def test_trade_chat_reply_falls_back_to_responder_relative_offer_request_when_needed(self) -> None:
+    def test_trade_chat_reply_falls_back_to_responder_relative_offer_request_when_needed(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
                 {
@@ -518,7 +554,9 @@ class LLMPlayerTests(unittest.TestCase):
         assert renderer.last_payload is not None
         self.assertEqual(renderer.last_payload["requested_resources"], {"BRICK": 1})
 
-    def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(self) -> None:
+    def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient({"action_index": 1, "short_term": None}),
             model="fake-model",
@@ -530,7 +568,12 @@ class LLMPlayerTests(unittest.TestCase):
             turn_index=3,
             phase="play_turn",
             decision_index=5,
-            public_state={"turn": {"turn_player_id": "RED"}, "board": {}, "players": {}, "bank": {}},
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "board": {},
+                "players": {},
+                "bank": {},
+            },
             private_state={
                 "resources": {"WOOD": 1},
                 "development_cards": {},
@@ -561,9 +604,14 @@ class LLMPlayerTests(unittest.TestCase):
 
         self.assertIn("[0] OFFER_TRADE", user_prompt)
         self.assertIn('payload: `{"offer": {}, "request": {}}`', user_prompt)
-        self.assertIn("requires full `action` object; do not use `action_index` alone", user_prompt)
+        self.assertIn(
+            "requires full `action` object; do not use `action_index` alone",
+            user_prompt,
+        )
         self.assertIn("[1] MOVE_ROBBER", user_prompt)
-        self.assertIn('payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt)
+        self.assertIn(
+            'payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt
+        )
 
     def test_choose_action_system_prompt_warns_against_circular_trades(self) -> None:
         player = LLMPlayer(
@@ -577,7 +625,12 @@ class LLMPlayerTests(unittest.TestCase):
             turn_index=3,
             phase="play_turn",
             decision_index=5,
-            public_state={"turn": {"turn_player_id": "RED"}, "board": {}, "players": {}, "bank": {}},
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "board": {},
+                "players": {},
+                "bank": {},
+            },
             private_state={
                 "resources": {"WOOD": 1, "SHEEP": 1},
                 "development_cards": {},
@@ -605,7 +658,9 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("Avoid circular same-turn trades", system_prompt)
         self.assertIn("unless you intentionally want that reversal", system_prompt)
 
-    def test_reactive_discard_prompt_surfaces_requirement_and_strategy_hint(self) -> None:
+    def test_reactive_discard_prompt_surfaces_requirement_and_strategy_hint(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient({"action_index": 0}),
             model="fake-model",
@@ -617,7 +672,12 @@ class LLMPlayerTests(unittest.TestCase):
             turn_index=4,
             phase="discard",
             decision_index=12,
-            public_state={"turn": {"turn_player_id": "BLUE"}, "players": {}, "board": {}, "bank": {}},
+            public_state={
+                "turn": {"turn_player_id": "BLUE"},
+                "players": {},
+                "board": {},
+                "bank": {},
+            },
             private_state={
                 "resources": {"WOOD": 2, "BRICK": 1, "SHEEP": 1, "ORE": 2},
                 "development_cards": {},
@@ -652,7 +712,9 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("[0] DISCARD", user_prompt)
         self.assertIn('payload: `{"resources": {"ORE": 2}}`', user_prompt)
 
-    def test_llm_player_accepts_common_trade_action_shape_without_payload_wrapper(self) -> None:
+    def test_llm_player_accepts_common_trade_action_shape_without_payload_wrapper(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
                 {
@@ -677,7 +739,9 @@ class LLMPlayerTests(unittest.TestCase):
                 phase="play_turn",
                 decision_index=20,
                 public_state={"turn": {"turn_player_id": "BLUE"}},
-                private_state={"resources": {"WOOD": 1, "SHEEP": 1, "WHEAT": 1, "ORE": 2}},
+                private_state={
+                    "resources": {"WOOD": 1, "SHEEP": 1, "WHEAT": 1, "ORE": 2}
+                },
                 public_history=(),
                 turn_public_events=(),
                 legal_actions=(
@@ -696,7 +760,9 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.action.action_type, "OFFER_TRADE")
-        self.assertEqual(response.action.payload, {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}})
+        self.assertEqual(
+            response.action.payload, {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}
+        )
         trace = player.take_last_prompt_trace()
         self.assertIsNotNone(trace)
         assert trace is not None
@@ -738,7 +804,9 @@ class LLMPlayerTests(unittest.TestCase):
                 ),
                 decision_prompt="Respond to the trade.",
                 game_rules="Rules",
-                memory=PlayerMemory(long_term={"belief": "WHITE may still want a deal"}),
+                memory=PlayerMemory(
+                    long_term={"belief": "WHITE may still want a deal"}
+                ),
             )
         )
 
@@ -795,7 +863,9 @@ class LLMPlayerTests(unittest.TestCase):
         renderer = PromptRenderer()
         rendered = renderer.render("partials/action_contract.jinja")
         self.assertIn('"action_type": "OFFER_TRADE"', rendered)
-        self.assertIn('"payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}', rendered)
+        self.assertIn(
+            '"payload": {"offer": {"SHEEP": 1}, "request": {"BRICK": 1}}', rendered
+        )
         self.assertIn("not as a description of the chosen action", rendered)
 
     def test_start_turn_raises_runtime_error_and_records_failed_attempt(self) -> None:
@@ -828,12 +898,19 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(len(trace.attempts), 1)
         self.assertEqual(
             trace.attempts[0].response,
-            {"error": {"type": "llm_request_failed", "message": "local model request failed"}},
+            {
+                "error": {
+                    "type": "llm_request_failed",
+                    "message": "local model request failed",
+                }
+            },
         )
 
     def test_start_turn_retries_once_after_invalid_json_response(self) -> None:
         player = LLMPlayer(
-            client=RawCompletionClient('{"short_term":"unterminated', '{"short_term":"Trade first."}'),
+            client=RawCompletionClient(
+                '{"short_term":"unterminated', '{"short_term":"Trade first."}'
+            ),
             model="fake-model",
         )
 
@@ -901,7 +978,10 @@ class LLMPlayerTests(unittest.TestCase):
                 {
                     "choices": [
                         {
-                            "message": {"content": "", "reasoning": "Thinking through setup."},
+                            "message": {
+                                "content": "",
+                                "reasoning": "Thinking through setup.",
+                            },
                             "finish_reason": "length",
                         }
                     ]
@@ -917,7 +997,9 @@ class LLMPlayerTests(unittest.TestCase):
                 {
                     "choices": [
                         {
-                            "message": {"content": '{"action_index": 0, "private_reasoning": "Recovered."}'},
+                            "message": {
+                                "content": '{"action_index": 0, "private_reasoning": "Recovered."}'
+                            },
                             "finish_reason": "stop",
                         }
                     ]
@@ -937,7 +1019,9 @@ class LLMPlayerTests(unittest.TestCase):
                 public_state={"turn": {"turn_player_id": "BLUE"}},
                 private_state={"resources": {}},
                 public_history=(),
-                legal_actions=(Action("BUILD_INITIAL_SETTLEMENT", payload={"node_id": 4}),),
+                legal_actions=(
+                    Action("BUILD_INITIAL_SETTLEMENT", payload={"node_id": 4}),
+                ),
                 decision_prompt="Place your opening settlement.",
                 game_rules="Rules",
                 memory=PlayerMemory(),

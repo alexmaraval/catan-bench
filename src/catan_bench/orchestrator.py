@@ -129,10 +129,16 @@ class GameOrchestrator:
         self.players = dict(players)
         self.observation_builder = observation_builder or ObservationBuilder()
         self.event_log = event_log or EventLog(resolved_run_dir)
-        self.public_state_store = public_state_store or PublicStateStore(resolved_run_dir)
+        self.public_state_store = public_state_store or PublicStateStore(
+            resolved_run_dir
+        )
         self.memory_store = memory_store or MemoryStore(resolved_run_dir)
-        self.prompt_trace_store = prompt_trace_store or PromptTraceStore(resolved_run_dir)
-        self.action_trace_store = action_trace_store or ActionTraceStore(resolved_run_dir)
+        self.prompt_trace_store = prompt_trace_store or PromptTraceStore(
+            resolved_run_dir
+        )
+        self.action_trace_store = action_trace_store or ActionTraceStore(
+            resolved_run_dir
+        )
         self.run_dir = resolved_run_dir
         self.max_decisions = max_decisions
         self.trading_chat_enabled = trading_chat_enabled
@@ -140,7 +146,9 @@ class GameOrchestrator:
             trading_chat_max_failed_attempts_per_turn
         )
         self.trading_chat_max_rooms_per_turn = max(1, trading_chat_max_rooms_per_turn)
-        self.trading_chat_max_rounds_per_attempt = max(1, trading_chat_max_rounds_per_attempt)
+        self.trading_chat_max_rounds_per_attempt = max(
+            1, trading_chat_max_rounds_per_attempt
+        )
         self.trading_chat_message_chars = trading_chat_message_chars
         self.trading_chat_history_limit = trading_chat_history_limit
         self.reporter = reporter
@@ -151,14 +159,20 @@ class GameOrchestrator:
         self._pending_trade_chat_selection: _PendingTradeChatSelection | None = None
         self._opening_strategy_done = False
         self._completed_decisions = 0
-        self._resume_run_dir = Path(resume_run_dir) if resume_run_dir is not None else None
+        self._resume_run_dir = (
+            Path(resume_run_dir) if resume_run_dir is not None else None
+        )
         self._prepared = False
 
     def run(self) -> GameResult:
         self._ensure_ready_for_play()
-        logger.info("Starting game %s with players %s", self.engine.game_id, list(self.players))
+        logger.info(
+            "Starting game %s with players %s", self.engine.game_id, list(self.players)
+        )
         if self.reporter is not None:
-            self.reporter.on_game_start(self.engine.game_id, list(self.engine.player_ids))
+            self.reporter.on_game_start(
+                self.engine.game_id, list(self.engine.player_ids)
+            )
 
         while not self.engine.is_terminal():
             if self._completed_decisions >= self.max_decisions:
@@ -194,7 +208,9 @@ class GameOrchestrator:
 
         decision = self.engine.current_decision()
         turn_owner_id = self._turn_owner_id(decision)
-        self._refresh_trade_chat_turn_state(turn_owner_id=turn_owner_id, decision=decision)
+        self._refresh_trade_chat_turn_state(
+            turn_owner_id=turn_owner_id, decision=decision
+        )
         self._decision_phase_counts[decision.phase] = (
             self._decision_phase_counts.get(decision.phase, 0) + 1
         )
@@ -249,7 +265,9 @@ class GameOrchestrator:
 
     def _prepare_run(self) -> None:
         missing_player_ids = [
-            player_id for player_id in self.engine.player_ids if player_id not in self.players
+            player_id
+            for player_id in self.engine.player_ids
+            if player_id not in self.players
         ]
         if missing_player_ids:
             raise MissingPlayerError(
@@ -311,7 +329,9 @@ class GameOrchestrator:
 
     def _prepare_resume(self) -> None:
         missing_player_ids = [
-            player_id for player_id in self.engine.player_ids if player_id not in self.players
+            player_id
+            for player_id in self.engine.player_ids
+            if player_id not in self.players
         ]
         if missing_player_ids:
             raise MissingPlayerError(
@@ -361,7 +381,9 @@ class GameOrchestrator:
                 f"acting_player_id expected {entry.acting_player_id} got {decision.acting_player_id}"
             )
         if decision.turn_index != entry.turn_index:
-            mismatches.append(f"turn_index expected {entry.turn_index} got {decision.turn_index}")
+            mismatches.append(
+                f"turn_index expected {entry.turn_index} got {decision.turn_index}"
+            )
         if decision.phase != entry.phase:
             mismatches.append(f"phase expected {entry.phase} got {decision.phase}")
         if decision.decision_index != entry.decision_index:
@@ -377,7 +399,9 @@ class GameOrchestrator:
     def _restore_checkpoint_state(self, checkpoint: dict[str, JsonValue]) -> None:
         self._decision_phase_counts = {
             str(phase): int(count)
-            for phase, count in dict(checkpoint.get("decision_phase_counts") or {}).items()
+            for phase, count in dict(
+                checkpoint.get("decision_phase_counts") or {}
+            ).items()
             if isinstance(phase, str)
         }
         self._last_turn_history_index_by_player = {
@@ -413,7 +437,9 @@ class GameOrchestrator:
                 failed_attempts=int(trade_chat_turn_state.get("failed_attempts", 0)),
                 opened_room_signatures={
                     str(signature)
-                    for signature in trade_chat_turn_state.get("opened_room_signatures", [])
+                    for signature in trade_chat_turn_state.get(
+                        "opened_room_signatures", []
+                    )
                     if isinstance(signature, str)
                 },
             )
@@ -555,7 +581,10 @@ class GameOrchestrator:
         decision: DecisionPoint,
         proposed_action: Action,
     ) -> None:
-        if proposed_action.action_type != "OFFER_TRADE" or decision.phase != "play_turn":
+        if (
+            proposed_action.action_type != "OFFER_TRADE"
+            or decision.phase != "play_turn"
+        ):
             return
         signature = self._trade_market_signature(proposed_action.payload)
         if signature is None:
@@ -580,13 +609,16 @@ class GameOrchestrator:
         turn_events = [
             event
             for event in self.event_log.public_events
-            if event.turn_index == turn_index and event.history_index > start_history_index
+            if event.turn_index == turn_index
+            and event.history_index > start_history_index
         ]
         blocked: set[str] = set()
         current_attempt: dict[str, bool | str] | None = None
         for event in turn_events:
             if event.kind == "trade_offered" and event.actor_player_id == player_id:
-                if current_attempt is not None and self._is_blocked_trade_attempt(current_attempt):
+                if current_attempt is not None and self._is_blocked_trade_attempt(
+                    current_attempt
+                ):
                     blocked.add(str(current_attempt["signature"]))
                 current_attempt = {
                     "signature": self._trade_market_signature(event.payload) or "",
@@ -598,15 +630,29 @@ class GameOrchestrator:
                 continue
             if current_attempt is None:
                 continue
-            if event.kind == "trade_rejected" and event.payload.get("offering_player_id") == player_id:
+            if (
+                event.kind == "trade_rejected"
+                and event.payload.get("offering_player_id") == player_id
+            ):
                 current_attempt["had_rejected"] = True
-            elif event.kind == "trade_counter_offered" and event.payload.get("owner_player_id") == player_id:
+            elif (
+                event.kind == "trade_counter_offered"
+                and event.payload.get("owner_player_id") == player_id
+            ):
                 current_attempt["had_counter"] = True
-            elif event.kind == "trade_accepted" and event.payload.get("offering_player_id") == player_id:
+            elif (
+                event.kind == "trade_accepted"
+                and event.payload.get("offering_player_id") == player_id
+            ):
                 current_attempt["had_accepted"] = True
-            elif event.kind == "trade_confirmed" and event.payload.get("offering_player_id") == player_id:
+            elif (
+                event.kind == "trade_confirmed"
+                and event.payload.get("offering_player_id") == player_id
+            ):
                 current_attempt["had_confirmed"] = True
-        if current_attempt is not None and self._is_blocked_trade_attempt(current_attempt):
+        if current_attempt is not None and self._is_blocked_trade_attempt(
+            current_attempt
+        ):
             blocked.add(str(current_attempt["signature"]))
         blocked.discard("")
         return blocked
@@ -642,8 +688,7 @@ class GameOrchestrator:
         if not normalized:
             return None
         return ",".join(
-            f"{resource}:{normalized[resource]}"
-            for resource in sorted(normalized)
+            f"{resource}:{normalized[resource]}" for resource in sorted(normalized)
         )
 
     @staticmethod
@@ -713,7 +758,9 @@ class GameOrchestrator:
             return True
         return any(event.phase == "play_turn" for event in self.event_log.public_events)
 
-    def _is_turn_owner_choice(self, decision: DecisionPoint, turn_owner_id: str) -> bool:
+    def _is_turn_owner_choice(
+        self, decision: DecisionPoint, turn_owner_id: str
+    ) -> bool:
         return (
             decision.phase == "play_turn"
             and decision.acting_player_id == turn_owner_id
@@ -735,7 +782,9 @@ class GameOrchestrator:
             decision=decision,
             event_log=self.event_log,
             memory_store=self.memory_store,
-            last_turn_history_index=self._last_turn_history_index_by_player.get(player_id, 0),
+            last_turn_history_index=self._last_turn_history_index_by_player.get(
+                player_id, 0
+            ),
         )
         response = player.start_turn(observation)
         self._append_player_prompt_traces(player)
@@ -756,7 +805,9 @@ class GameOrchestrator:
             start_decision_index=decision.decision_index,
         )
 
-    def _turn_owner_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
+    def _turn_owner_response(
+        self, *, player: Player, decision: DecisionPoint
+    ) -> ActionDecision:
         pending_response: ActionDecision | None = None
         consecutive_invalid_trade_chat_attempts = 0
         while True:
@@ -767,15 +818,21 @@ class GameOrchestrator:
                     event_log=self.event_log,
                     memory_store=self.memory_store,
                     turn_start_history_index=self._turn_start_history_index(),
-                    trade_chat_enabled=self._trade_chat_available_for_decision(decision),
-                    trade_chat_attempts_remaining=self._trade_chat_attempts_remaining(decision),
+                    trade_chat_enabled=self._trade_chat_available_for_decision(
+                        decision
+                    ),
+                    trade_chat_attempts_remaining=self._trade_chat_attempts_remaining(
+                        decision
+                    ),
                 )
                 response = player.choose_action(observation)
                 self._append_player_prompt_traces(player)
             else:
                 response = pending_response
                 pending_response = None
-            if not self._should_route_trade_action_to_chat(decision=decision, action=response.action):
+            if not self._should_route_trade_action_to_chat(
+                decision=decision, action=response.action
+            ):
                 return response
             if not self._can_offer_trade_chat(decision):
                 pending_response = self._retry_after_invalid_action(
@@ -841,7 +898,9 @@ class GameOrchestrator:
                     reasoning=response.reasoning,
                 )
 
-    def _reactive_response(self, *, player: Player, decision: DecisionPoint) -> ActionDecision:
+    def _reactive_response(
+        self, *, player: Player, decision: DecisionPoint
+    ) -> ActionDecision:
         forced = self._forced_trade_response(decision)
         if forced is not None:
             return forced
@@ -1008,7 +1067,9 @@ class GameOrchestrator:
                     event_log=self.event_log,
                     memory_store=self.memory_store,
                     turn_start_history_index=self._turn_start_history_index(),
-                    trade_chat_enabled=self._trade_chat_available_for_decision(retry_decision),
+                    trade_chat_enabled=self._trade_chat_available_for_decision(
+                        retry_decision
+                    ),
                     trade_chat_attempts_remaining=self._trade_chat_attempts_remaining(
                         retry_decision
                     ),
@@ -1104,7 +1165,9 @@ class GameOrchestrator:
             )
         return transition
 
-    def _store_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
+    def _store_events(
+        self, events: tuple[Event, ...] | list[Event]
+    ) -> tuple[Event, ...]:
         """Append events to the log and write the resulting public-state snapshot once.
 
         We snapshot only after the full transition has been applied. If one engine
@@ -1187,13 +1250,22 @@ class GameOrchestrator:
         proposed_action: Action,
     ) -> Action:
         matching_actions = [
-            action for action in decision.legal_actions if action.action_type == "COUNTER_OFFER"
+            action
+            for action in decision.legal_actions
+            if action.action_type == "COUNTER_OFFER"
         ]
         if not matching_actions:
-            raise InvalidActionError("COUNTER_OFFER is not legal for the current decision.")
+            raise InvalidActionError(
+                "COUNTER_OFFER is not legal for the current decision."
+            )
         offer = proposed_action.payload.get("offer")
         request = proposed_action.payload.get("request")
-        if not isinstance(offer, dict) or not offer or not isinstance(request, dict) or not request:
+        if (
+            not isinstance(offer, dict)
+            or not offer
+            or not isinstance(request, dict)
+            or not request
+        ):
             raise InvalidActionError(
                 "COUNTER_OFFER requires non-empty `offer` and `request` resource maps."
             )
@@ -1212,7 +1284,9 @@ class GameOrchestrator:
         normalized: dict[str, int] = {}
         for resource, amount in resource_map.items():
             if not isinstance(resource, str):
-                raise InvalidActionError("COUNTER_OFFER resource names must be strings.")
+                raise InvalidActionError(
+                    "COUNTER_OFFER resource names must be strings."
+                )
             if not isinstance(amount, int) or amount <= 0:
                 raise InvalidActionError(
                     "COUNTER_OFFER resource amounts must be positive integers."
@@ -1240,7 +1314,9 @@ class GameOrchestrator:
         if active is None:
             return
         if transition.terminal:
-            self._end_turn_session(active, phase=decision.phase, decision_index=decision.decision_index)
+            self._end_turn_session(
+                active, phase=decision.phase, decision_index=decision.decision_index
+            )
             return
         next_decision = self.engine.current_decision()
         next_turn_owner_id = self._turn_owner_id(next_decision)
@@ -1330,7 +1406,12 @@ class GameOrchestrator:
             return False
         if decision.phase != "play_turn":
             return False
-        if any(action.action_type == "OFFER_TRADE" for action in decision.legal_actions) is False:
+        if (
+            any(
+                action.action_type == "OFFER_TRADE" for action in decision.legal_actions
+            )
+            is False
+        ):
             return False
         state = self._trade_chat_turn_state
         if state is None:
@@ -1514,7 +1595,9 @@ class GameOrchestrator:
 
         proposals: list[TradeChatProposal] = []
         for round_index in range(1, self.trading_chat_max_rounds_per_attempt + 1):
-            for other_player_id in self._trade_chat_participants(decision.acting_player_id):
+            for other_player_id in self._trade_chat_participants(
+                decision.acting_player_id
+            ):
                 reply = self._reply_trade_chat(
                     player_id=other_player_id,
                     decision=decision,
@@ -1696,10 +1779,12 @@ class GameOrchestrator:
                 owner_player_id=decision.acting_player_id,
                 counterparty_player_id=selected_proposal.player_id,
                 owner_gives={
-                    key: int(value) for key, value in selected_proposal.owner_gives.items()
+                    key: int(value)
+                    for key, value in selected_proposal.owner_gives.items()
                 },
                 owner_gets={
-                    key: int(value) for key, value in selected_proposal.owner_gets.items()
+                    key: int(value)
+                    for key, value in selected_proposal.owner_gets.items()
                 },
                 turn_index=decision.turn_index,
             )
@@ -1754,7 +1839,9 @@ class GameOrchestrator:
     ) -> TradeChatOpenResponse:
         open_trade_chat = getattr(player, "open_trade_chat", None)
         if not callable(open_trade_chat):
-            return TradeChatOpenResponse(open_chat=True, requested_resources=requested_resources)
+            return TradeChatOpenResponse(
+                open_chat=True, requested_resources=requested_resources
+            )
         observation = self.observation_builder.build_trade_chat(
             engine=self.engine,
             player_id=decision.acting_player_id,
@@ -1881,12 +1968,16 @@ class GameOrchestrator:
             reasoning=getattr(response, "reasoning", None),
         )
 
-    def _record_public_events(self, events: tuple[Event, ...] | list[Event]) -> tuple[Event, ...]:
+    def _record_public_events(
+        self, events: tuple[Event, ...] | list[Event]
+    ) -> tuple[Event, ...]:
         return self._store_events(events)
 
     def _trade_chat_participants(self, owner_player_id: str) -> tuple[str, ...]:
         return tuple(
-            player_id for player_id in self.engine.player_ids if player_id != owner_player_id
+            player_id
+            for player_id in self.engine.player_ids
+            if player_id != owner_player_id
         )
 
     def _trade_chat_message_event(
@@ -1973,10 +2064,14 @@ class GameOrchestrator:
                     return selected_proposal_id
 
             hint_tokens = {
-                token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+                token
+                for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper())
+                if token
             }
             matching_players = {
-                proposal.player_id for proposal in proposals if proposal.player_id in hint_tokens
+                proposal.player_id
+                for proposal in proposals
+                if proposal.player_id in hint_tokens
             }
             if len(matching_players) == 1:
                 matching_player_id = next(iter(matching_players))
@@ -2028,7 +2123,9 @@ class GameOrchestrator:
                 turn_index=decision.turn_index,
             )
 
-    def _player_has_resources(self, player_id: str, resources: dict[str, JsonValue]) -> bool:
+    def _player_has_resources(
+        self, player_id: str, resources: dict[str, JsonValue]
+    ) -> bool:
         """Return True if player_id holds at least the given resource amounts."""
         try:
             private = dict(self.engine.private_state(player_id))
@@ -2042,7 +2139,9 @@ class GameOrchestrator:
         except Exception:
             return True
 
-    def _normalize_resource_map(self, value: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    def _normalize_resource_map(
+        self, value: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
         result: dict[str, JsonValue] = {}
         for resource, amount in value.items():
             if not isinstance(resource, str):
@@ -2093,9 +2192,15 @@ class GameOrchestrator:
         ):
             return proposed_action
         matching_actions = [
-            action for action in legal_actions if action.action_type == proposed_action.action_type
+            action
+            for action in legal_actions
+            if action.action_type == proposed_action.action_type
         ]
-        if proposed_action.action_type in {"ACCEPT_TRADE", "REJECT_TRADE", "CANCEL_TRADE"}:
+        if proposed_action.action_type in {
+            "ACCEPT_TRADE",
+            "REJECT_TRADE",
+            "CANCEL_TRADE",
+        }:
             if len(matching_actions) == 1:
                 return matching_actions[0]
         if proposed_action.action_type == "CONFIRM_TRADE":
@@ -2104,7 +2209,10 @@ class GameOrchestrator:
                 return matching_actions[0]
             if isinstance(accepting_player_id, str):
                 for legal_action in matching_actions:
-                    if legal_action.payload.get("accepting_player_id") == accepting_player_id:
+                    if (
+                        legal_action.payload.get("accepting_player_id")
+                        == accepting_player_id
+                    ):
                         return legal_action
         raise InvalidActionError(
             f"Action {proposed_action.to_dict()} is not in the current legal action set."
@@ -2125,7 +2233,9 @@ class GameOrchestrator:
     @staticmethod
     def _winner_ids_from_metadata(metadata) -> tuple[str, ...]:
         winner_ids = metadata.get("winner_ids")
-        if isinstance(winner_ids, list) and all(isinstance(player_id, str) for player_id in winner_ids):
+        if isinstance(winner_ids, list) and all(
+            isinstance(player_id, str) for player_id in winner_ids
+        ):
             return tuple(winner_ids)
         winner_id = metadata.get("winner_id")
         if isinstance(winner_id, str):

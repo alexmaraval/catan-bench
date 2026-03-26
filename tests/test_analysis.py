@@ -1,4 +1,5 @@
 """Tests for the post-game analysis module."""
+
 from __future__ import annotations
 
 import json
@@ -24,14 +25,27 @@ from catan_bench.analysis import (
     PIPS,
 )
 from catan_bench.schemas import (
-    Event, MemorySnapshot, PlayerMemory, PromptTrace, PromptTraceAttempt, PublicStateSnapshot,
+    Event,
+    MemorySnapshot,
+    PlayerMemory,
+    PromptTrace,
+    PromptTraceAttempt,
+    PublicStateSnapshot,
 )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _event(kind: str, *, actor: str | None = None, turn: int = 0, history: int = 1,
-           phase: str = "play_turn", **payload) -> Event:
+
+def _event(
+    kind: str,
+    *,
+    actor: str | None = None,
+    turn: int = 0,
+    history: int = 1,
+    phase: str = "play_turn",
+    **payload,
+) -> Event:
     return Event(
         kind=kind,
         actor_player_id=actor,
@@ -90,6 +104,7 @@ def _write_jsonl(path: Path, records: list) -> None:
 
 
 # ── Game summary tests ────────────────────────────────────────────────────────
+
 
 class TestComputeGameSummary(unittest.TestCase):
     def test_basic_counts(self) -> None:
@@ -159,6 +174,7 @@ class TestComputeGameSummary(unittest.TestCase):
 
 # ── Building timeline tests ───────────────────────────────────────────────────
 
+
 class TestComputeBuildingTimeline(unittest.TestCase):
     def test_filters_by_player(self) -> None:
         events = [
@@ -183,6 +199,7 @@ class TestComputeBuildingTimeline(unittest.TestCase):
 
 # ── Robber analysis tests ─────────────────────────────────────────────────────
 
+
 class TestComputeRobberAnalysis(unittest.TestCase):
     def test_times_moved_and_targeted(self) -> None:
         events = [
@@ -201,6 +218,7 @@ class TestComputeRobberAnalysis(unittest.TestCase):
 
 
 # ── Discard analysis tests ────────────────────────────────────────────────────
+
 
 class TestComputeDiscardAnalysis(unittest.TestCase):
     def test_counts_discards_for_player(self) -> None:
@@ -227,17 +245,30 @@ class TestComputeDiscardAnalysis(unittest.TestCase):
 
 # ── Dev card analysis tests ───────────────────────────────────────────────────
 
+
 class TestComputeDevCardAnalysis(unittest.TestCase):
     def test_groups_cards_by_type(self) -> None:
         events = [
-            _event("development_card_played", actor="RED",
-                   action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}}),
-            _event("development_card_played", actor="RED",
-                   action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}}),
-            _event("development_card_played", actor="RED",
-                   action={"action_type": "PLAY_MONOPOLY", "payload": {}}),
-            _event("development_card_played", actor="BLUE",
-                   action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}}),
+            _event(
+                "development_card_played",
+                actor="RED",
+                action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}},
+            ),
+            _event(
+                "development_card_played",
+                actor="RED",
+                action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}},
+            ),
+            _event(
+                "development_card_played",
+                actor="RED",
+                action={"action_type": "PLAY_MONOPOLY", "payload": {}},
+            ),
+            _event(
+                "development_card_played",
+                actor="BLUE",
+                action={"action_type": "PLAY_KNIGHT_CARD", "payload": {}},
+            ),
         ]
         result = compute_dev_card_analysis("RED", events, None)
         self.assertEqual(result["cards_played"], 3)
@@ -248,7 +279,8 @@ class TestComputeDevCardAnalysis(unittest.TestCase):
 
     def test_cards_held_from_final_snapshot(self) -> None:
         final = _snapshot(
-            10, 100,
+            10,
+            100,
             players={"RED": {"development_card_count": 2, "visible_victory_points": 5}},
         )
         result = compute_dev_card_analysis("RED", [], final)
@@ -262,13 +294,24 @@ class TestComputeDevCardAnalysis(unittest.TestCase):
 
 # ── Trade analysis tests ──────────────────────────────────────────────────────
 
+
 class TestComputeTradeAnalysis(unittest.TestCase):
     def test_offers_made_and_received(self) -> None:
         events = [
-            _event("trade_offered", actor="RED", offering_player_id="RED",
-                   offer={"WOOD": 1}, request={"BRICK": 1}),
-            _event("trade_offered", actor="BLUE", offering_player_id="BLUE",
-                   offer={"ORE": 1}, request={"WHEAT": 1}),
+            _event(
+                "trade_offered",
+                actor="RED",
+                offering_player_id="RED",
+                offer={"WOOD": 1},
+                request={"BRICK": 1},
+            ),
+            _event(
+                "trade_offered",
+                actor="BLUE",
+                offering_player_id="BLUE",
+                offer={"ORE": 1},
+                request={"WHEAT": 1},
+            ),
         ]
         result = compute_trade_analysis("RED", events)
         self.assertEqual(result["offers_made"], 1)
@@ -276,12 +319,27 @@ class TestComputeTradeAnalysis(unittest.TestCase):
 
     def test_accepted_and_rejected_count(self) -> None:
         events = [
-            _event("trade_accepted", responding_player_id="RED",
-                   offering_player_id="BLUE", offer={}, request={}),
-            _event("trade_rejected", responding_player_id="RED",
-                   offering_player_id="BLUE", offer={}, request={}),
-            _event("trade_rejected", responding_player_id="RED",
-                   offering_player_id="BLUE", offer={}, request={}),
+            _event(
+                "trade_accepted",
+                responding_player_id="RED",
+                offering_player_id="BLUE",
+                offer={},
+                request={},
+            ),
+            _event(
+                "trade_rejected",
+                responding_player_id="RED",
+                offering_player_id="BLUE",
+                offer={},
+                request={},
+            ),
+            _event(
+                "trade_rejected",
+                responding_player_id="RED",
+                offering_player_id="BLUE",
+                offer={},
+                request={},
+            ),
         ]
         result = compute_trade_analysis("RED", events)
         self.assertEqual(result["acceptances"], 1)
@@ -290,11 +348,13 @@ class TestComputeTradeAnalysis(unittest.TestCase):
 
     def test_confirmed_trade_resources_as_offerer(self) -> None:
         events = [
-            _event("trade_confirmed",
-                   offering_player_id="RED",
-                   accepting_player_id="BLUE",
-                   offer={"WOOD": 2},
-                   request={"ORE": 1}),
+            _event(
+                "trade_confirmed",
+                offering_player_id="RED",
+                accepting_player_id="BLUE",
+                offer={"WOOD": 2},
+                request={"ORE": 1},
+            ),
         ]
         result = compute_trade_analysis("RED", events)
         self.assertEqual(result["confirmations_as_offerer"], 1)
@@ -303,11 +363,13 @@ class TestComputeTradeAnalysis(unittest.TestCase):
 
     def test_confirmed_trade_resources_as_acceptee(self) -> None:
         events = [
-            _event("trade_confirmed",
-                   offering_player_id="BLUE",
-                   accepting_player_id="RED",
-                   offer={"WOOD": 1},
-                   request={"BRICK": 2}),
+            _event(
+                "trade_confirmed",
+                offering_player_id="BLUE",
+                accepting_player_id="RED",
+                offer={"WOOD": 1},
+                request={"BRICK": 2},
+            ),
         ]
         result = compute_trade_analysis("RED", events)
         self.assertEqual(result["confirmations_as_acceptee"], 1)
@@ -317,11 +379,13 @@ class TestComputeTradeAnalysis(unittest.TestCase):
 
     def test_net_trade_balance(self) -> None:
         events = [
-            _event("trade_confirmed",
-                   offering_player_id="RED",
-                   accepting_player_id="BLUE",
-                   offer={"WOOD": 3},
-                   request={"ORE": 2}),
+            _event(
+                "trade_confirmed",
+                offering_player_id="RED",
+                accepting_player_id="BLUE",
+                offer={"WOOD": 3},
+                request={"ORE": 2},
+            ),
         ]
         result = compute_trade_analysis("RED", events)
         self.assertEqual(result["net_trade_balance"].get("ORE"), 2)
@@ -334,6 +398,7 @@ class TestComputeTradeAnalysis(unittest.TestCase):
 
 
 # ── Resource production tests ─────────────────────────────────────────────────
+
 
 def _board_with_tile(
     node_id: int = 1,
@@ -377,8 +442,9 @@ def _board_with_tile(
 class TestComputeResourceProduction(unittest.TestCase):
     def test_settlement_produces_one(self) -> None:
         board = _board_with_tile(node_id=1, resource="WOOD", number=6)
-        snap = _snapshot(0, 0, board=board,
-                         players={"RED": {"visible_victory_points": 1}})
+        snap = _snapshot(
+            0, 0, board=board, players={"RED": {"visible_victory_points": 1}}
+        )
         events = [_event("dice_rolled", turn=1, history=2, dice=[3, 3])]
         result = compute_resource_production("RED", events, [snap])
         self.assertEqual(result["total"].get("WOOD"), 1)
@@ -386,8 +452,9 @@ class TestComputeResourceProduction(unittest.TestCase):
     def test_city_produces_two(self) -> None:
         board = _board_with_tile(node_id=1, resource="ORE", number=6)
         board["nodes"]["1"]["building"] = "CITY"
-        snap = _snapshot(0, 0, board=board,
-                         players={"RED": {"visible_victory_points": 2}})
+        snap = _snapshot(
+            0, 0, board=board, players={"RED": {"visible_victory_points": 2}}
+        )
         events = [_event("dice_rolled", turn=1, history=2, dice=[3, 3])]
         result = compute_resource_production("RED", events, [snap])
         self.assertEqual(result["total"].get("ORE"), 2)
@@ -401,17 +468,21 @@ class TestComputeResourceProduction(unittest.TestCase):
 
     def test_robber_blocks_production(self) -> None:
         # Robber sitting on the tile coordinate [0, 0, 0]
-        board = _board_with_tile(node_id=1, resource="BRICK", number=6, robber=[0, 0, 0])
-        snap = _snapshot(0, 0, board=board,
-                         players={"RED": {"visible_victory_points": 1}})
+        board = _board_with_tile(
+            node_id=1, resource="BRICK", number=6, robber=[0, 0, 0]
+        )
+        snap = _snapshot(
+            0, 0, board=board, players={"RED": {"visible_victory_points": 1}}
+        )
         events = [_event("dice_rolled", turn=1, history=2, dice=[3, 3])]
         result = compute_resource_production("RED", events, [snap])
         self.assertEqual(result["total"].get("BRICK", 0), 0)
 
     def test_number_mismatch_no_production(self) -> None:
         board = _board_with_tile(node_id=1, resource="SHEEP", number=8)
-        snap = _snapshot(0, 0, board=board,
-                         players={"RED": {"visible_victory_points": 1}})
+        snap = _snapshot(
+            0, 0, board=board, players={"RED": {"visible_victory_points": 1}}
+        )
         events = [_event("dice_rolled", turn=1, history=2, dice=[3, 3])]  # roll 6 != 8
         result = compute_resource_production("RED", events, [snap])
         self.assertEqual(result["total"].get("SHEEP", 0), 0)
@@ -424,6 +495,7 @@ class TestComputeResourceProduction(unittest.TestCase):
 
 
 # ── VP progression tests ──────────────────────────────────────────────────────
+
 
 class TestComputeVpProgression(unittest.TestCase):
     def test_deduplicates_to_max_vp_per_turn(self) -> None:
@@ -457,6 +529,7 @@ class TestComputeVpProgression(unittest.TestCase):
 
 # ── Phase analysis tests ──────────────────────────────────────────────────────
 
+
 class TestComputePhaseAnalysis(unittest.TestCase):
     def test_opening_pip_count(self) -> None:
         board = {
@@ -473,8 +546,13 @@ class TestComputePhaseAnalysis(unittest.TestCase):
         }
         snaps = [_snapshot(0, 0, board=board)]
         events = [
-            _event("settlement_built", actor="RED", phase="build_initial_settlement",
-                   turn=0, node_id=5),
+            _event(
+                "settlement_built",
+                actor="RED",
+                phase="build_initial_settlement",
+                turn=0,
+                node_id=5,
+            ),
         ]
         vp_prog = [{"turn_index": 0, "vp": 1}]
         result = compute_phase_analysis("RED", events, snaps, vp_prog)
@@ -508,6 +586,7 @@ class TestComputePhaseAnalysis(unittest.TestCase):
 
 # ── Decision quality tests ────────────────────────────────────────────────────
 
+
 class TestComputeDecisionQuality(unittest.TestCase):
     def test_retry_rate(self) -> None:
         traces = [
@@ -537,21 +616,34 @@ class TestComputeDecisionQuality(unittest.TestCase):
 
 # ── Trade chat analysis tests ─────────────────────────────────────────────────
 
+
 class TestComputeTradeChatAnalysis(unittest.TestCase):
-    def _chat_event(self, kind: str, owner: str = "RED", turn: int = 1,
-                    attempt: int = 0, **extra) -> Event:
+    def _chat_event(
+        self, kind: str, owner: str = "RED", turn: int = 1, attempt: int = 0, **extra
+    ) -> Event:
         payload: dict = {"owner_player_id": owner, "attempt_index": attempt, **extra}
         return Event(
-            kind=kind, payload=payload, turn_index=turn,
-            history_index=0, phase="play_turn",
+            kind=kind,
+            payload=payload,
+            turn_index=turn,
+            history_index=0,
+            phase="play_turn",
         )
 
     def test_rooms_opened_and_success_rate(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED", attempt=0),
-            self._chat_event("trade_chat_closed", owner="RED", attempt=0, outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                attempt=0,
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
             self._chat_event("trade_chat_opened", owner="RED", attempt=1),
-            self._chat_event("trade_chat_closed", owner="RED", attempt=1, outcome="no_deal"),
+            self._chat_event(
+                "trade_chat_closed", owner="RED", attempt=1, outcome="no_deal"
+            ),
         ]
         result = compute_trade_chat_analysis("RED", events)
         self.assertEqual(result["rooms_opened"], 2)
@@ -562,17 +654,37 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_proposals_made_and_accepted(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED"),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="BLUE", proposal_id="A0.0.1",
-                             offer={"WOOD": 1}, request={"ORE": 1}, round_index=0),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="ORANGE", proposal_id="A0.0.2",
-                             offer={"BRICK": 1}, request={"ORE": 1}, round_index=0),
-            self._chat_event("trade_chat_quote_selected", owner="RED",
-                             selected_player_id="BLUE",
-                             offer={"WOOD": 1}, request={"ORE": 1}),
-            self._chat_event("trade_chat_closed", owner="RED",
-                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="BLUE",
+                proposal_id="A0.0.1",
+                offer={"WOOD": 1},
+                request={"ORE": 1},
+                round_index=0,
+            ),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="ORANGE",
+                proposal_id="A0.0.2",
+                offer={"BRICK": 1},
+                request={"ORE": 1},
+                round_index=0,
+            ),
+            self._chat_event(
+                "trade_chat_quote_selected",
+                owner="RED",
+                selected_player_id="BLUE",
+                offer={"WOOD": 1},
+                request={"ORE": 1},
+            ),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
         ]
         blue_result = compute_trade_chat_analysis("BLUE", events)
         self.assertEqual(blue_result["proposals_made"], 1)
@@ -585,8 +697,12 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_rooms_participated_in(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED"),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="BLUE", round_index=0),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="BLUE",
+                round_index=0,
+            ),
             self._chat_event("trade_chat_closed", owner="RED", outcome="no_deal"),
         ]
         blue_result = compute_trade_chat_analysis("BLUE", events)
@@ -596,15 +712,37 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_counterparty_frequency(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED", attempt=0),
-            self._chat_event("trade_chat_quote_selected", owner="RED", attempt=0,
-                             selected_player_id="BLUE", offer={"WOOD": 1}, request={"ORE": 1}),
-            self._chat_event("trade_chat_closed", owner="RED", attempt=0,
-                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_quote_selected",
+                owner="RED",
+                attempt=0,
+                selected_player_id="BLUE",
+                offer={"WOOD": 1},
+                request={"ORE": 1},
+            ),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                attempt=0,
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
             self._chat_event("trade_chat_opened", owner="RED", attempt=1),
-            self._chat_event("trade_chat_quote_selected", owner="RED", attempt=1,
-                             selected_player_id="BLUE", offer={"BRICK": 1}, request={"SHEEP": 1}),
-            self._chat_event("trade_chat_closed", owner="RED", attempt=1,
-                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_quote_selected",
+                owner="RED",
+                attempt=1,
+                selected_player_id="BLUE",
+                offer={"BRICK": 1},
+                request={"SHEEP": 1},
+            ),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                attempt=1,
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
         ]
         result = compute_trade_chat_analysis("RED", events)
         self.assertEqual(result["counterparty_frequency"].get("BLUE"), 2)
@@ -612,11 +750,19 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_resource_flow_as_owner(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED"),
-            self._chat_event("trade_chat_quote_selected", owner="RED",
-                             selected_player_id="BLUE",
-                             offer={"WOOD": 2}, request={"ORE": 3}),
-            self._chat_event("trade_chat_closed", owner="RED",
-                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_quote_selected",
+                owner="RED",
+                selected_player_id="BLUE",
+                offer={"WOOD": 2},
+                request={"ORE": 3},
+            ),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
         ]
         result = compute_trade_chat_analysis("RED", events)
         self.assertEqual(result["resources_given_via_chat"].get("WOOD"), 2)
@@ -625,14 +771,28 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_resource_flow_as_acceptee(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED"),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="BLUE", proposal_id="A0.0.1",
-                             offer={"WOOD": 1}, request={"ORE": 1}, round_index=0),
-            self._chat_event("trade_chat_quote_selected", owner="RED",
-                             selected_player_id="BLUE",
-                             offer={"WOOD": 1}, request={"ORE": 1}),
-            self._chat_event("trade_chat_closed", owner="RED",
-                             outcome="selected", selected_player_id="BLUE"),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="BLUE",
+                proposal_id="A0.0.1",
+                offer={"WOOD": 1},
+                request={"ORE": 1},
+                round_index=0,
+            ),
+            self._chat_event(
+                "trade_chat_quote_selected",
+                owner="RED",
+                selected_player_id="BLUE",
+                offer={"WOOD": 1},
+                request={"ORE": 1},
+            ),
+            self._chat_event(
+                "trade_chat_closed",
+                owner="RED",
+                outcome="selected",
+                selected_player_id="BLUE",
+            ),
         ]
         # BLUE is acceptee: gains what owner offered (WOOD), gives what owner requested (ORE)
         result = compute_trade_chat_analysis("BLUE", events)
@@ -642,10 +802,18 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
     def test_avg_rounds(self) -> None:
         events = [
             self._chat_event("trade_chat_opened", owner="RED"),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="BLUE", round_index=0),
-            self._chat_event("trade_chat_message", owner="RED",
-                             speaker_player_id="BLUE", round_index=1),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="BLUE",
+                round_index=0,
+            ),
+            self._chat_event(
+                "trade_chat_message",
+                owner="RED",
+                speaker_player_id="BLUE",
+                round_index=1,
+            ),
             self._chat_event("trade_chat_closed", owner="RED", outcome="no_deal"),
         ]
         result = compute_trade_chat_analysis("RED", events)
@@ -659,6 +827,7 @@ class TestComputeTradeChatAnalysis(unittest.TestCase):
 
 
 # ── Strategy evolution tests ──────────────────────────────────────────────────
+
 
 def _mem_snapshot(
     player_id: str,
@@ -681,7 +850,9 @@ def _mem_snapshot(
 class TestComputeStrategyEvolution(unittest.TestCase):
     def test_opening_strategy_extracted(self) -> None:
         snapshots = [
-            _mem_snapshot("RED", 1, "opening_strategy", long_term="Focus on ore and wheat"),
+            _mem_snapshot(
+                "RED", 1, "opening_strategy", long_term="Focus on ore and wheat"
+            ),
         ]
         result = compute_strategy_evolution("RED", snapshots)
         self.assertEqual(result["opening_strategy"], "Focus on ore and wheat")
@@ -690,7 +861,9 @@ class TestComputeStrategyEvolution(unittest.TestCase):
     def test_deduplicates_unchanged_rewrites(self) -> None:
         snapshots = [
             _mem_snapshot("RED", 1, "opening_strategy", long_term="Plan A"),
-            _mem_snapshot("RED", 3, "turn_end", long_term="Plan A"),  # Same — should be skipped
+            _mem_snapshot(
+                "RED", 3, "turn_end", long_term="Plan A"
+            ),  # Same — should be skipped
             _mem_snapshot("RED", 5, "turn_end", long_term="Plan B"),  # Changed
         ]
         result = compute_strategy_evolution("RED", snapshots)
@@ -772,11 +945,14 @@ class TestComputeMarketAnalysis(unittest.TestCase):
         self.assertEqual(result["actors"]["BANK"]["market_role"], "Market taker")
         self.assertEqual(result["actors"]["BANK"]["taker_deals"], 1)
         self.assertAlmostEqual(result["actors"]["RED"]["market_initiation_rate"], 1.0)
-        self.assertGreater(result["actors"]["WHITE"]["resource_market_share"]["WOOD"], 0.0)
+        self.assertGreater(
+            result["actors"]["WHITE"]["resource_market_share"]["WOOD"], 0.0
+        )
         self.assertGreater(result["resource_involvement_totals"]["WOOD"], 0)
 
 
 # ── PIPS constant test ────────────────────────────────────────────────────────
+
 
 class TestPipsConstant(unittest.TestCase):
     def test_six_and_eight_have_most_pips(self) -> None:
@@ -793,99 +969,158 @@ class TestPipsConstant(unittest.TestCase):
 
 # ── Integration test ──────────────────────────────────────────────────────────
 
+
 class TestAnalyzeGameIntegration(unittest.TestCase):
     def _make_minimal_run(self, run_dir: Path) -> None:
-        _write_json(run_dir / "metadata.json", {
-            "player_ids": ["RED", "BLUE"],
-            "player_adapter_types": {"RED": "LLMPlayer", "BLUE": "RandomLegalPlayer"},
-        })
-        _write_json(run_dir / "result.json", {
-            "game_id": "test-game",
-            "winner_ids": ["RED"],
-            "total_decisions": 10,
-            "public_event_count": 8,
-            "memory_writes": 2,
-            "metadata": {
-                "num_turns": 5,
-                "players": {
-                    "RED": {"actual_victory_points": 5, "visible_victory_points": 5},
-                    "BLUE": {"actual_victory_points": 2, "visible_victory_points": 2},
+        _write_json(
+            run_dir / "metadata.json",
+            {
+                "player_ids": ["RED", "BLUE"],
+                "player_adapter_types": {
+                    "RED": "LLMPlayer",
+                    "BLUE": "RandomLegalPlayer",
                 },
             },
-        })
-        _write_jsonl(run_dir / "public_history.jsonl", [
-            {"kind": "dice_rolled", "payload": {"dice": [3, 3]},
-             "turn_index": 1, "history_index": 1, "phase": "play_turn",
-             "actor_player_id": "RED"},
-            {"kind": "settlement_built", "payload": {"node_id": 1},
-             "turn_index": 0, "history_index": 2, "phase": "build_initial_settlement",
-             "actor_player_id": "RED"},
-            {"kind": "turn_ended", "payload": {},
-             "turn_index": 1, "history_index": 3, "phase": "play_turn",
-             "actor_player_id": "RED"},
-        ])
-        _write_jsonl(run_dir / "public_state_trace.jsonl", [
+        )
+        _write_json(
+            run_dir / "result.json",
             {
-                "history_index": 0,
-                "turn_index": 0,
-                "phase": "initial",
-                "decision_index": None,
-                "public_state": {
+                "game_id": "test-game",
+                "winner_ids": ["RED"],
+                "total_decisions": 10,
+                "public_event_count": 8,
+                "memory_writes": 2,
+                "metadata": {
+                    "num_turns": 5,
                     "players": {
-                        "RED": {"visible_victory_points": 1, "longest_road_length": 2,
-                                "has_longest_road": False, "has_largest_army": False,
-                                "resource_card_count": 0, "development_card_count": 0},
-                        "BLUE": {"visible_victory_points": 0, "longest_road_length": 0,
-                                 "has_longest_road": False, "has_largest_army": False,
-                                 "resource_card_count": 0, "development_card_count": 0},
-                    },
-                    "board": {
-                        "tiles": {},
-                        "nodes": {},
-                        "edges": [],
-                        "adjacent_tiles": {},
-                        "robber_coordinate": [0, 0, 0],
+                        "RED": {
+                            "actual_victory_points": 5,
+                            "visible_victory_points": 5,
+                        },
+                        "BLUE": {
+                            "actual_victory_points": 2,
+                            "visible_victory_points": 2,
+                        },
                     },
                 },
             },
-        ])
-        _write_jsonl(run_dir / "players" / "RED" / "prompt_trace.jsonl", [
-            {
-                "player_id": "RED",
-                "history_index": 1,
-                "turn_index": 1,
-                "phase": "play_turn",
-                "decision_index": 0,
-                "stage": "choose_action",
-                "model": "gpt-4o",
-                "temperature": 0.5,
-                "attempts": [
-                    {"messages": [], "response_text": "ok", "response": {}},
-                    {"messages": [], "response_text": "ok2", "response": {}},
-                ],
-            }
-        ])
+        )
+        _write_jsonl(
+            run_dir / "public_history.jsonl",
+            [
+                {
+                    "kind": "dice_rolled",
+                    "payload": {"dice": [3, 3]},
+                    "turn_index": 1,
+                    "history_index": 1,
+                    "phase": "play_turn",
+                    "actor_player_id": "RED",
+                },
+                {
+                    "kind": "settlement_built",
+                    "payload": {"node_id": 1},
+                    "turn_index": 0,
+                    "history_index": 2,
+                    "phase": "build_initial_settlement",
+                    "actor_player_id": "RED",
+                },
+                {
+                    "kind": "turn_ended",
+                    "payload": {},
+                    "turn_index": 1,
+                    "history_index": 3,
+                    "phase": "play_turn",
+                    "actor_player_id": "RED",
+                },
+            ],
+        )
+        _write_jsonl(
+            run_dir / "public_state_trace.jsonl",
+            [
+                {
+                    "history_index": 0,
+                    "turn_index": 0,
+                    "phase": "initial",
+                    "decision_index": None,
+                    "public_state": {
+                        "players": {
+                            "RED": {
+                                "visible_victory_points": 1,
+                                "longest_road_length": 2,
+                                "has_longest_road": False,
+                                "has_largest_army": False,
+                                "resource_card_count": 0,
+                                "development_card_count": 0,
+                            },
+                            "BLUE": {
+                                "visible_victory_points": 0,
+                                "longest_road_length": 0,
+                                "has_longest_road": False,
+                                "has_largest_army": False,
+                                "resource_card_count": 0,
+                                "development_card_count": 0,
+                            },
+                        },
+                        "board": {
+                            "tiles": {},
+                            "nodes": {},
+                            "edges": [],
+                            "adjacent_tiles": {},
+                            "robber_coordinate": [0, 0, 0],
+                        },
+                    },
+                },
+            ],
+        )
+        _write_jsonl(
+            run_dir / "players" / "RED" / "prompt_trace.jsonl",
+            [
+                {
+                    "player_id": "RED",
+                    "history_index": 1,
+                    "turn_index": 1,
+                    "phase": "play_turn",
+                    "decision_index": 0,
+                    "stage": "choose_action",
+                    "model": "gpt-4o",
+                    "temperature": 0.5,
+                    "attempts": [
+                        {"messages": [], "response_text": "ok", "response": {}},
+                        {"messages": [], "response_text": "ok2", "response": {}},
+                    ],
+                }
+            ],
+        )
         _write_jsonl(run_dir / "players" / "BLUE" / "prompt_trace.jsonl", [])
-        _write_jsonl(run_dir / "players" / "RED" / "memory_trace.jsonl", [
-            {
-                "player_id": "RED",
-                "history_index": 0,
-                "turn_index": 1,
-                "phase": "play_turn",
-                "decision_index": 0,
-                "stage": "opening_strategy",
-                "memory": {"long_term": "Expand toward ore ports", "short_term": None},
-            },
-            {
-                "player_id": "RED",
-                "history_index": 2,
-                "turn_index": 3,
-                "phase": "play_turn",
-                "decision_index": 5,
-                "stage": "turn_end",
-                "memory": {"long_term": "Pivot to city strategy", "short_term": None},
-            },
-        ])
+        _write_jsonl(
+            run_dir / "players" / "RED" / "memory_trace.jsonl",
+            [
+                {
+                    "player_id": "RED",
+                    "history_index": 0,
+                    "turn_index": 1,
+                    "phase": "play_turn",
+                    "decision_index": 0,
+                    "stage": "opening_strategy",
+                    "memory": {
+                        "long_term": "Expand toward ore ports",
+                        "short_term": None,
+                    },
+                },
+                {
+                    "player_id": "RED",
+                    "history_index": 2,
+                    "turn_index": 3,
+                    "phase": "play_turn",
+                    "decision_index": 5,
+                    "stage": "turn_end",
+                    "memory": {
+                        "long_term": "Pivot to city strategy",
+                        "short_term": None,
+                    },
+                },
+            ],
+        )
         _write_jsonl(run_dir / "players" / "BLUE" / "memory_trace.jsonl", [])
 
     def test_analyze_game_returns_valid_structure(self) -> None:
@@ -920,9 +1155,14 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
             self.assertIn("trade_chat", players["RED"])
             self.assertIn("strategy", players["RED"])
             self.assertIn("market_profile", players["RED"])
-            self.assertEqual(players["RED"]["strategy"]["opening_strategy"], "Expand toward ore ports")
+            self.assertEqual(
+                players["RED"]["strategy"]["opening_strategy"],
+                "Expand toward ore ports",
+            )
             self.assertEqual(players["RED"]["strategy"]["strategy_update_count"], 2)
-            self.assertEqual(players["RED"]["strategy"]["final_strategy"], "Pivot to city strategy")
+            self.assertEqual(
+                players["RED"]["strategy"]["final_strategy"], "Pivot to city strategy"
+            )
             self.assertIn("strategy_stability", players["RED"]["strategy"])
             self.assertIn("market", analysis)
 

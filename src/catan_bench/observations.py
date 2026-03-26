@@ -83,8 +83,12 @@ class ObservationBuilder:
             turn_index=turn_index,
             phase=phase,
             decision_index=decision_index,
-            public_state=self._compact_public_state(engine=engine, player_id=player_id, phase=phase),
-            private_state=self._compact_private_state(engine=engine, player_id=player_id, phase=phase),
+            public_state=self._compact_public_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
+            private_state=self._compact_private_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
             public_history=self._tail_events(event_log.recent()),
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
@@ -148,8 +152,12 @@ class ObservationBuilder:
             turn_index=turn_index,
             phase=phase,
             decision_index=decision_index,
-            public_state=self._compact_public_state(engine=engine, player_id=player_id, phase=phase),
-            private_state=self._compact_private_state(engine=engine, player_id=player_id, phase=phase),
+            public_state=self._compact_public_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
+            private_state=self._compact_private_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
             turn_public_events=event_log.since(turn_start_history_index),
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
@@ -254,7 +262,9 @@ class ObservationBuilder:
         return events[-effective_limit:]
 
     @staticmethod
-    def _compact_public_state(*, engine: "EngineAdapter", player_id: str, phase: str) -> dict:
+    def _compact_public_state(
+        *, engine: "EngineAdapter", player_id: str, phase: str
+    ) -> dict:
         """Compact public state for prompts that have no active decision (turn_end)."""
         builder = getattr(engine, "public_state_for_decision", None)
         if callable(builder):
@@ -262,7 +272,9 @@ class ObservationBuilder:
         return dict(engine.public_state())
 
     @staticmethod
-    def _compact_private_state(*, engine: "EngineAdapter", player_id: str, phase: str) -> dict:
+    def _compact_private_state(
+        *, engine: "EngineAdapter", player_id: str, phase: str
+    ) -> dict:
         """Compact private state for prompts that have no active decision (turn_end)."""
         builder = getattr(engine, "private_state_for_decision", None)
         if callable(builder):

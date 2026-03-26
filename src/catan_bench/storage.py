@@ -17,7 +17,9 @@ from .schemas import (
 
 def write_json(path: Path, payload: dict[str, JsonValue]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def read_json(path: Path) -> dict[str, JsonValue] | None:
@@ -63,7 +65,9 @@ class EventLog:
         self.public_events = []
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            self._handle = _open_jsonl_handle(self.run_dir / "public_history.jsonl", truncate=True)
+            self._handle = _open_jsonl_handle(
+                self.run_dir / "public_history.jsonl", truncate=True
+            )
 
     def hydrate(self) -> None:
         self.close()
@@ -75,7 +79,9 @@ class EventLog:
             Event.from_dict(entry)
             for entry in read_jsonl(self.run_dir / "public_history.jsonl")
         ]
-        self._handle = _open_jsonl_handle(self.run_dir / "public_history.jsonl", truncate=False)
+        self._handle = _open_jsonl_handle(
+            self.run_dir / "public_history.jsonl", truncate=False
+        )
 
     def append(self, events: Iterable[Event]) -> tuple[Event, ...]:
         stored_events: list[Event] = []
@@ -108,7 +114,9 @@ class EventLog:
         return tuple(self.public_events[-limit:])
 
     def since(self, history_index: int, limit: int | None = None) -> tuple[Event, ...]:
-        events = tuple(event for event in self.public_events if event.history_index > history_index)
+        events = tuple(
+            event for event in self.public_events if event.history_index > history_index
+        )
         if limit is None:
             return events
         return events[-limit:]
@@ -189,14 +197,18 @@ class MemoryStore:
     def reset(self, player_ids: Iterable[str]) -> None:
         player_ids = tuple(player_ids)
         self.close()
-        self._current_by_player = {player_id: PlayerMemory() for player_id in player_ids}
+        self._current_by_player = {
+            player_id: PlayerMemory() for player_id in player_ids
+        }
         self._history_by_player = {player_id: [] for player_id in player_ids}
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             for player_id in player_ids:
                 player_dir = self.run_dir / "players" / player_id
                 player_dir.mkdir(parents=True, exist_ok=True)
-                write_json(player_dir / "memory.json", {"memory": PlayerMemory().to_dict()})
+                write_json(
+                    player_dir / "memory.json", {"memory": PlayerMemory().to_dict()}
+                )
                 self._trace_handles_by_player[player_id] = _open_jsonl_handle(
                     player_dir / "memory_trace.jsonl",
                     truncate=True,
@@ -227,7 +239,9 @@ class MemoryStore:
             else:
                 payload = read_json(player_dir / "memory.json") or {}
                 raw_memory = payload.get("memory")
-                current = PlayerMemory.from_dict(raw_memory if isinstance(raw_memory, dict) else None)
+                current = PlayerMemory.from_dict(
+                    raw_memory if isinstance(raw_memory, dict) else None
+                )
             self._current_by_player[player_id] = current
             self._trace_handles_by_player[player_id] = _open_jsonl_handle(
                 player_dir / "memory_trace.jsonl",
@@ -264,7 +278,9 @@ class MemoryStore:
             write_json(player_dir / "memory.json", snapshot.to_dict())
             handle = self._trace_handles_by_player.get(player_id)
             if handle is None:
-                handle = _open_jsonl_handle(player_dir / "memory_trace.jsonl", truncate=False)
+                handle = _open_jsonl_handle(
+                    player_dir / "memory_trace.jsonl", truncate=False
+                )
                 self._trace_handles_by_player[player_id] = handle
             _write_jsonl(handle, snapshot.to_dict())
         return snapshot
@@ -287,7 +303,9 @@ class MemoryStore:
         )
         return self.write(
             player_id=player_id,
-            memory=PlayerMemory(long_term=current.long_term, short_term=merged_short_term),
+            memory=PlayerMemory(
+                long_term=current.long_term, short_term=merged_short_term
+            ),
             history_index=history_index,
             turn_index=turn_index,
             phase=phase,
@@ -360,7 +378,9 @@ class MemoryStore:
                 return current_short_term
             if not current_text:
                 return new_text
-            existing_lines = [line.strip() for line in current_text.splitlines() if line.strip()]
+            existing_lines = [
+                line.strip() for line in current_text.splitlines() if line.strip()
+            ]
             if new_text in existing_lines:
                 return current_short_term
             return f"{current_text}\n{new_text}"
@@ -456,7 +476,9 @@ class ActionTraceStore:
         self.entries = []
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            self._handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=True)
+            self._handle = _open_jsonl_handle(
+                self.run_dir / "action_trace.jsonl", truncate=True
+            )
 
     def hydrate(self) -> None:
         self.close()
@@ -468,14 +490,18 @@ class ActionTraceStore:
             ActionTraceEntry.from_dict(entry)
             for entry in read_jsonl(self.run_dir / "action_trace.jsonl")
         ]
-        self._handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=False)
+        self._handle = _open_jsonl_handle(
+            self.run_dir / "action_trace.jsonl", truncate=False
+        )
 
     def append(self, entry: ActionTraceEntry) -> None:
         self.entries.append(entry)
         if self.run_dir is not None:
             handle = self._handle
             if handle is None:
-                handle = _open_jsonl_handle(self.run_dir / "action_trace.jsonl", truncate=False)
+                handle = _open_jsonl_handle(
+                    self.run_dir / "action_trace.jsonl", truncate=False
+                )
                 self._handle = handle
             _write_jsonl(handle, entry.to_dict())
 

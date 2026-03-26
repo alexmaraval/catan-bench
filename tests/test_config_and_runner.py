@@ -41,11 +41,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             game_toml = Path(tmpdir) / "game.toml"
             game_toml.write_text(
-                (
-                    "[game]\n"
-                    "engine = \"catanatron\"\n"
-                    "prompt_history_limit = 10\n"
-                ),
+                ('[game]\nengine = "catanatron"\nprompt_history_limit = 10\n'),
                 encoding="utf-8",
             )
 
@@ -59,13 +55,13 @@ class ConfigAndRunnerTests(unittest.TestCase):
             players_toml.write_text(
                 (
                     "[[players]]\n"
-                    "id = \"RED\"\n"
-                    "type = \"llm\"\n"
-                    "model = \"gpt-4o-mini\"\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "gpt-4o-mini"\n'
                     "prompt_history_limit = 10\n\n"
                     "[[players]]\n"
-                    "id = \"BLUE\"\n"
-                    "type = \"random\"\n\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n\n'
                 ),
                 encoding="utf-8",
             )
@@ -78,7 +74,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/openai-players.toml")
         players = build_players(player_configs, game_config)
         self.assertEqual(set(players.keys()), {"RED", "BLUE", "ORANGE", "WHITE"})
-        self.assertEqual(players["RED"].prompt_history_limit, game_config.prompt_history_limit)
+        self.assertEqual(
+            players["RED"].prompt_history_limit, game_config.prompt_history_limit
+        )
 
     def test_runner_executes_game_from_toml_configs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -87,22 +85,17 @@ class ConfigAndRunnerTests(unittest.TestCase):
             run_dir = Path(tmpdir) / "run"
 
             game_toml.write_text(
-                (
-                    "[game]\n"
-                    "engine = \"catanatron\"\n"
-                    "seed = 3\n"
-                    f"run_dir = \"{run_dir}\"\n"
-                ),
+                (f'[game]\nengine = "catanatron"\nseed = 3\nrun_dir = "{run_dir}"\n'),
                 encoding="utf-8",
             )
             players_toml.write_text(
                 (
                     "[[players]]\n"
-                    "id = \"RED\"\n"
-                    "type = \"random\"\n\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
                     "[[players]]\n"
-                    "id = \"BLUE\"\n"
-                    "type = \"random\"\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
                 ),
                 encoding="utf-8",
             )
@@ -129,15 +122,15 @@ class ConfigAndRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             game_toml = Path(tmpdir) / "game.toml"
             players_toml = Path(tmpdir) / "players.toml"
-            game_toml.write_text("[game]\nengine = \"catanatron\"\n", encoding="utf-8")
+            game_toml.write_text('[game]\nengine = "catanatron"\n', encoding="utf-8")
             players_toml.write_text(
                 (
                     "[[players]]\n"
-                    "id = \"RED\"\n"
-                    "type = \"random\"\n\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
                     "[[players]]\n"
-                    "id = \"BLUE\"\n"
-                    "type = \"random\"\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
                 ),
                 encoding="utf-8",
             )
@@ -161,7 +154,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
             reporter = orchestrator_cls.call_args.kwargs["reporter"]
             self.assertIsInstance(reporter, DebugTerminalReporter)
 
-    def test_runner_existing_run_dir_argument_resumes_and_ignores_config_run_dir(self) -> None:
+    def test_runner_existing_run_dir_argument_resumes_and_ignores_config_run_dir(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             game_toml = Path(tmpdir) / "game.toml"
             players_toml = Path(tmpdir) / "players.toml"
@@ -174,24 +169,26 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml.write_text(
                 (
                     "[game]\n"
-                    "engine = \"catanatron\"\n"
-                    f"run_dir = \"{Path(tmpdir) / 'new-run-base'}\"\n"
+                    'engine = "catanatron"\n'
+                    f'run_dir = "{Path(tmpdir) / "new-run-base"}"\n'
                 ),
                 encoding="utf-8",
             )
             players_toml.write_text(
                 (
                     "[[players]]\n"
-                    "id = \"RED\"\n"
-                    "type = \"random\"\n\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
                     "[[players]]\n"
-                    "id = \"BLUE\"\n"
-                    "type = \"random\"\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
                 ),
                 encoding="utf-8",
             )
 
-            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()) as build_engine_mock:
+            with patch(
+                "catan_bench.runner.build_engine", return_value=_StubEngine()
+            ) as build_engine_mock:
                 with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
                     orchestrator_cls.return_value.run.return_value = GameResult(
                         game_id="mock-game",
@@ -207,7 +204,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
                         run_dir=resume_run_dir,
                     )
 
-            self.assertEqual(build_engine_mock.call_args.kwargs["game_id"], "saved-game-id")
+            self.assertEqual(
+                build_engine_mock.call_args.kwargs["game_id"], "saved-game-id"
+            )
             self.assertIsNone(orchestrator_cls.call_args.kwargs["run_dir"])
             self.assertEqual(
                 orchestrator_cls.call_args.kwargs["resume_run_dir"],
@@ -222,19 +221,19 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml.write_text(
                 (
                     "[game]\n"
-                    "engine = \"catanatron\"\n"
-                    f"run_dir = \"{Path(tmpdir) / 'config-runs'}\"\n"
+                    'engine = "catanatron"\n'
+                    f'run_dir = "{Path(tmpdir) / "config-runs"}"\n'
                 ),
                 encoding="utf-8",
             )
             players_toml.write_text(
                 (
                     "[[players]]\n"
-                    "id = \"RED\"\n"
-                    "type = \"random\"\n\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
                     "[[players]]\n"
-                    "id = \"BLUE\"\n"
-                    "type = \"random\"\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
                 ),
                 encoding="utf-8",
             )
@@ -268,7 +267,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 memory_writes=0,
                 metadata={},
             )
-            exit_code = main(["--game", "game.toml", "--players", "players.toml", "--debug"])
+            exit_code = main(
+                ["--game", "game.toml", "--players", "players.toml", "--debug"]
+            )
 
         self.assertEqual(exit_code, 0)
         run_mock.assert_called_once_with(
@@ -356,7 +357,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
     def test_resolve_requested_run_dir_detects_existing_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_path = Path(tmpdir)
-            (run_path / "metadata.json").write_text('{"game_id":"saved"}\n', encoding="utf-8")
+            (run_path / "metadata.json").write_text(
+                '{"game_id":"saved"}\n', encoding="utf-8"
+            )
 
             run_dir, resume_run_dir = _resolve_requested_run_dir(
                 requested_run_dir=run_path,

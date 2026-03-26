@@ -18,8 +18,7 @@ class LLMClient(Protocol):
         temperature: float,
         top_p: float | None = None,
         reasoning_enabled: bool | None = None,
-    ) -> dict[str, object]:
-        ...
+    ) -> dict[str, object]: ...
 
 
 class LLMRequestTooLargeError(RuntimeError):
@@ -86,7 +85,10 @@ class OpenAICompatibleChatClient:
                         f"LLM request exceeded the provider payload limit: {details}"
                     ) from exc
                 attempt_index += 1
-                if self._should_retry_http_error(exc) and attempt_index < self.max_attempts:
+                if (
+                    self._should_retry_http_error(exc)
+                    and attempt_index < self.max_attempts
+                ):
                     time.sleep(self._retry_delay(exc, attempt_index))
                     continue
                 raise RuntimeError(
@@ -157,7 +159,10 @@ class OpenAICompatibleChatClient:
         if provider == "groq":
             return {"include_reasoning": reasoning_enabled}
         if provider == "google":
-            if reasoning_enabled is False and self._google_supports_reasoning_effort_none(model):
+            if (
+                reasoning_enabled is False
+                and self._google_supports_reasoning_effort_none(model)
+            ):
                 return {"reasoning_effort": "none"}
             return {}
         if provider == "openrouter":
@@ -171,8 +176,10 @@ class OpenAICompatibleChatClient:
     @staticmethod
     def _google_supports_reasoning_effort_none(model: str) -> bool:
         normalized = model.strip().lower()
-        return normalized.startswith("gemini-2.5-") and "pro" not in normalized and not normalized.startswith(
-            "gemini-3"
+        return (
+            normalized.startswith("gemini-2.5-")
+            and "pro" not in normalized
+            and not normalized.startswith("gemini-3")
         )
 
     def _provider_name(self) -> str:
@@ -190,7 +197,9 @@ class OpenAICompatibleChatClient:
 
     def _retry_delay(self, exc: error.HTTPError, attempt_index: int) -> float:
         """Return seconds to sleep before the next attempt, respecting Retry-After."""
-        retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
+        retry_after = (
+            exc.headers.get("Retry-After") if exc.headers is not None else None
+        )
         if retry_after is not None:
             try:
                 return float(retry_after) + 0.5
@@ -226,10 +235,7 @@ class OpenAICompatibleChatClient:
         message = str(error_payload.get("message", "")).lower()
         if code == "json_validate_failed":
             return True
-        return (
-            "failed to validate json" in message
-            or (
-                "response_format" in message
-                and ("unsupported" in message or "not supported" in message)
-            )
+        return "failed to validate json" in message or (
+            "response_format" in message
+            and ("unsupported" in message or "not supported" in message)
         )

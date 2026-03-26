@@ -12,10 +12,14 @@ except RuntimeError:  # pragma: no cover - dependency missing in some environmen
 from catan_bench import Action
 
 
-@unittest.skipIf(CatanatronEngineAdapter is None, "catanatron dependency is not installed")
+@unittest.skipIf(
+    CatanatronEngineAdapter is None, "catanatron dependency is not installed"
+)
 class CatanatronAdapterTests(unittest.TestCase):
     @staticmethod
-    def _affordable_trade_payload(adapter: CatanatronEngineAdapter) -> dict[str, dict[str, int]]:
+    def _affordable_trade_payload(
+        adapter: CatanatronEngineAdapter,
+    ) -> dict[str, dict[str, int]]:
         decision = adapter.current_decision()
         private_state = adapter.private_state(decision.acting_player_id)
         resources = private_state.get("resources", {})
@@ -23,7 +27,11 @@ class CatanatronAdapterTests(unittest.TestCase):
             raise AssertionError("Expected resource map in private state.")
 
         offered_resource = next(
-            (resource for resource, amount in resources.items() if isinstance(amount, int) and amount > 0),
+            (
+                resource
+                for resource, amount in resources.items()
+                if isinstance(amount, int) and amount > 0
+            ),
             None,
         )
         if offered_resource is None:
@@ -111,7 +119,9 @@ class CatanatronAdapterTests(unittest.TestCase):
 
         self.assertEqual(resolved, legal_actions[0])
 
-    def test_resolve_action_canonicalizes_confirm_trade_by_accepting_player(self) -> None:
+    def test_resolve_action_canonicalizes_confirm_trade_by_accepting_player(
+        self,
+    ) -> None:
         adapter = object.__new__(CatanatronEngineAdapter)
         legal_actions = (
             Action(
@@ -208,7 +218,9 @@ class CatanatronAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload["action"], {"action_type": "DISCARD", "payload": {}})
         self.assertEqual(payload["discarded_count"], 3)
-        self.assertEqual(CatanatronEngineAdapter._event_kind("DISCARD"), "resources_discarded")
+        self.assertEqual(
+            CatanatronEngineAdapter._event_kind("DISCARD"), "resources_discarded"
+        )
 
     def test_ordered_legal_actions_moves_end_turn_to_the_end(self) -> None:
         ordered = CatanatronEngineAdapter._ordered_legal_actions(
@@ -231,7 +243,10 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(decision.phase, "build_initial_settlement")
         self.assertGreater(len(decision.legal_actions), 0)
         self.assertTrue(
-            all(action.action_type == "BUILD_SETTLEMENT" for action in decision.legal_actions)
+            all(
+                action.action_type == "BUILD_SETTLEMENT"
+                for action in decision.legal_actions
+            )
         )
 
         private_state = adapter.private_state(decision.acting_player_id)
@@ -320,7 +335,9 @@ class CatanatronAdapterTests(unittest.TestCase):
             adapter.apply_action(adapter.current_decision().legal_actions[0])
 
         roll_transition = adapter.apply_action(Action("ROLL"))
-        self.assertTrue(any(event.kind == "dice_rolled" for event in roll_transition.public_events))
+        self.assertTrue(
+            any(event.kind == "dice_rolled" for event in roll_transition.public_events)
+        )
 
         while adapter.current_decision().phase != "play_turn":
             adapter.apply_action(adapter.current_decision().legal_actions[0])
@@ -357,21 +374,27 @@ class CatanatronAdapterTests(unittest.TestCase):
 
         initial_event_kinds = set()
         while adapter.current_decision().phase != "play_turn":
-            transition = adapter.apply_action(adapter.current_decision().legal_actions[0])
+            transition = adapter.apply_action(
+                adapter.current_decision().legal_actions[0]
+            )
             initial_event_kinds.update(event.kind for event in transition.public_events)
 
-        self.assertTrue(
-            {"settlement_built", "road_built"} & initial_event_kinds
-        )
+        self.assertTrue({"settlement_built", "road_built"} & initial_event_kinds)
 
         roll_transition = adapter.apply_action(Action("ROLL"))
-        self.assertTrue(any(event.kind == "dice_rolled" for event in roll_transition.public_events))
+        self.assertTrue(
+            any(event.kind == "dice_rolled" for event in roll_transition.public_events)
+        )
 
         while adapter.current_decision().phase != "play_turn":
             adapter.apply_action(adapter.current_decision().legal_actions[0])
 
         decision = adapter.current_decision()
-        trade_actions = [action for action in decision.legal_actions if action.action_type == "OFFER_TRADE"]
+        trade_actions = [
+            action
+            for action in decision.legal_actions
+            if action.action_type == "OFFER_TRADE"
+        ]
         self.assertEqual(len(trade_actions), 1)
         trade_payload = self._affordable_trade_payload(adapter)
 
@@ -385,7 +408,9 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(canonical_offer.action_type, "OFFER_TRADE")
 
         transition = adapter.apply_action(canonical_offer)
-        self.assertTrue(any(event.kind == "trade_offered" for event in transition.public_events))
+        self.assertTrue(
+            any(event.kind == "trade_offered" for event in transition.public_events)
+        )
         offered_event = transition.public_events[0]
         self.assertEqual(offered_event.actor_player_id, decision.acting_player_id)
         self.assertEqual(offered_event.payload["offer"], trade_payload["offer"])
@@ -398,7 +423,9 @@ class CatanatronAdapterTests(unittest.TestCase):
             )
         )
 
-    def test_resolve_action_rejects_trade_offer_when_player_lacks_resources(self) -> None:
+    def test_resolve_action_rejects_trade_offer_when_player_lacks_resources(
+        self,
+    ) -> None:
         adapter = CatanatronEngineAdapter(seed=1)
 
         while adapter.current_decision().phase != "play_turn":
@@ -476,7 +503,12 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertIsNone(event)
 
     def test_current_decision_auto_skips_self_trade_response_state(self) -> None:
-        from catan_bench.catanatron_adapter import ActionPrompt, ActionType, Color, NativeAction
+        from catan_bench.catanatron_adapter import (
+            ActionPrompt,
+            ActionType,
+            Color,
+            NativeAction,
+        )
 
         class _FakeState:
             def __init__(self) -> None:
@@ -494,18 +526,26 @@ class CatanatronAdapterTests(unittest.TestCase):
         class _FakeGame:
             def __init__(self) -> None:
                 self.state = _FakeState()
-                self.playable_actions = [NativeAction(Color.BLUE, ActionType.REJECT_TRADE, self.state.current_trade)]
+                self.playable_actions = [
+                    NativeAction(
+                        Color.BLUE, ActionType.REJECT_TRADE, self.state.current_trade
+                    )
+                ]
 
             def execute(self, native_action, validate_action=True):
                 self.state.action_records.append(native_action)
                 self.state.current_prompt = ActionPrompt.PLAY_TURN
                 self.state._current_color = Color.WHITE
-                self.playable_actions = [NativeAction(Color.WHITE, ActionType.END_TURN, None)]
+                self.playable_actions = [
+                    NativeAction(Color.WHITE, ActionType.END_TURN, None)
+                ]
                 return None
 
         adapter = object.__new__(CatanatronEngineAdapter)
         adapter.game = _FakeGame()
-        adapter._native_action_to_action = lambda native_action: Action(native_action.action_type.value)  # type: ignore[method-assign]
+        adapter._native_action_to_action = lambda native_action: Action(
+            native_action.action_type.value
+        )  # type: ignore[method-assign]
         adapter._can_offer_trade = lambda: False  # type: ignore[method-assign]
         adapter._can_counter_offer = lambda legal_actions: False  # type: ignore[method-assign]
         adapter._ordered_legal_actions = lambda legal_actions: legal_actions  # type: ignore[method-assign]
@@ -515,7 +555,9 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertEqual(decision.phase, "play_turn")
         self.assertEqual(decision.acting_player_id, "WHITE")
         self.assertEqual(len(adapter.game.state.action_records), 1)
-        self.assertEqual(adapter.game.state.action_records[0].action_type, ActionType.REJECT_TRADE)
+        self.assertEqual(
+            adapter.game.state.action_records[0].action_type, ActionType.REJECT_TRADE
+        )
 
     def test_result_exposes_victory_point_audit_fields(self) -> None:
         adapter = CatanatronEngineAdapter(seed=7)
@@ -532,7 +574,9 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertIn("has_longest_road", first_player)
         self.assertIn("has_largest_army", first_player)
 
-    def test_recompute_longest_road_counts_segment_ending_at_enemy_settlement(self) -> None:
+    def test_recompute_longest_road_counts_segment_ending_at_enemy_settlement(
+        self,
+    ) -> None:
         from catan_bench.catanatron_adapter import Color
 
         orange = Color.ORANGE

@@ -22,7 +22,9 @@ class CleanupRunsTests(unittest.TestCase):
         if finished:
             (path / "result.json").write_text("{}\n", encoding="utf-8")
 
-    def test_discover_incomplete_run_directories_finds_only_unfinished_runs(self) -> None:
+    def test_discover_incomplete_run_directories_finds_only_unfinished_runs(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             finished = base / "finished-run"
@@ -39,7 +41,9 @@ class CleanupRunsTests(unittest.TestCase):
             self.assertFalse(is_finished_run_directory(unfinished))
             self.assertTrue(is_finished_run_directory(finished))
 
-    def test_cleanup_incomplete_run_directories_deletes_only_unfinished_runs(self) -> None:
+    def test_cleanup_incomplete_run_directories_deletes_only_unfinished_runs(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             finished = base / "finished-run"

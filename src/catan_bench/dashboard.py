@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Mapping
 
 import altair as alt
 import pandas as pd
@@ -20,7 +21,9 @@ PLAYER_COLORS: dict[str, tuple[str, str, str]] = {
     "ORANGE": ("#ea580c", "#ffedd5", "#ea580c"),
     "WHITE": ("#ffffff", "#cbd5e1", "#ffffff"),
 }
-PLAYER_NAME_PATTERN = re.compile(r"\b(" + "|".join(re.escape(player_id) for player_id in PLAYER_COLORS) + r")\b")
+PLAYER_NAME_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(player_id) for player_id in PLAYER_COLORS) + r")\b"
+)
 NEUTRAL_COLORS = ("#374151", "#f3f4f6", "#9ca3af")
 TRADE_EVENT_KINDS = {
     "trade_offered",
@@ -137,7 +140,9 @@ class DashboardSnapshot:
     @property
     def max_history_index(self) -> int:
         if self.public_state_snapshots:
-            return max(snapshot.history_index for snapshot in self.public_state_snapshots)
+            return max(
+                snapshot.history_index for snapshot in self.public_state_snapshots
+            )
         return 0
 
 
@@ -175,7 +180,8 @@ def load_dashboard_snapshot(run_dir: str | Path) -> DashboardSnapshot:
     metadata = _read_json_if_exists(run_path / "metadata.json") or {}
     player_ids = _player_ids_from_run(run_path, metadata)
     public_events = tuple(
-        Event.from_dict(entry) for entry in _read_jsonl(run_path / "public_history.jsonl")
+        Event.from_dict(entry)
+        for entry in _read_jsonl(run_path / "public_history.jsonl")
     )
     public_state_snapshots = tuple(
         PublicStateSnapshot.from_dict(entry)
@@ -184,14 +190,18 @@ def load_dashboard_snapshot(run_dir: str | Path) -> DashboardSnapshot:
     memory_traces_by_player = {
         player_id: tuple(
             MemorySnapshot.from_dict(entry)
-            for entry in _read_jsonl(run_path / "players" / player_id / "memory_trace.jsonl")
+            for entry in _read_jsonl(
+                run_path / "players" / player_id / "memory_trace.jsonl"
+            )
         )
         for player_id in player_ids
     }
     prompt_traces_by_player = {
         player_id: tuple(
             PromptTrace.from_dict(entry)
-            for entry in _read_jsonl(run_path / "players" / player_id / "prompt_trace.jsonl")
+            for entry in _read_jsonl(
+                run_path / "players" / player_id / "prompt_trace.jsonl"
+            )
         )
         for player_id in player_ids
     }
@@ -214,7 +224,11 @@ def discover_run_directories(base_run_dir: str | Path) -> tuple[Path, ...]:
         return (base_path,)
     if not base_path.exists() or not base_path.is_dir():
         return ()
-    candidates = [path for path in base_path.iterdir() if path.is_dir() and _is_run_directory(path)]
+    candidates = [
+        path
+        for path in base_path.iterdir()
+        if path.is_dir() and _is_run_directory(path)
+    ]
     return tuple(sorted(candidates, key=_run_sort_key, reverse=True))
 
 
@@ -231,17 +245,21 @@ def build_player_timelines(
                 break
             if not _event_relevant_to_player(event, player_id):
                 continue
-            bucket_by_turn.setdefault(event.turn_index, _TurnBucket()).events.append(event)
+            bucket_by_turn.setdefault(event.turn_index, _TurnBucket()).events.append(
+                event
+            )
         for snapshot_entry in snapshot.memory_traces_by_player.get(player_id, ()):
             if snapshot_entry.history_index > cursor:
                 break
-            bucket_by_turn.setdefault(snapshot_entry.turn_index, _TurnBucket()).memory_snapshots.append(
-                snapshot_entry
-            )
+            bucket_by_turn.setdefault(
+                snapshot_entry.turn_index, _TurnBucket()
+            ).memory_snapshots.append(snapshot_entry)
         for trace in snapshot.prompt_traces_by_player.get(player_id, ()):
             if trace.history_index > cursor:
                 break
-            bucket_by_turn.setdefault(trace.turn_index, _TurnBucket()).prompt_traces.append(trace)
+            bucket_by_turn.setdefault(
+                trace.turn_index, _TurnBucket()
+            ).prompt_traces.append(trace)
 
         artifacts: list[TurnArtifact] = []
         for turn_index, bucket in sorted(
@@ -253,17 +271,27 @@ def build_player_timelines(
         ):
             if not (bucket.events or bucket.memory_snapshots or bucket.prompt_traces):
                 continue
-            sorted_events = tuple(sorted(bucket.events, key=lambda item: item.history_index))
+            sorted_events = tuple(
+                sorted(bucket.events, key=lambda item: item.history_index)
+            )
             sorted_memories = tuple(
                 sorted(
                     bucket.memory_snapshots,
-                    key=lambda item: (item.history_index, item.decision_index, STAGE_ORDER.get(item.stage, 99)),
+                    key=lambda item: (
+                        item.history_index,
+                        item.decision_index,
+                        STAGE_ORDER.get(item.stage, 99),
+                    ),
                 )
             )
             sorted_traces = tuple(
                 sorted(
                     bucket.prompt_traces,
-                    key=lambda item: (item.history_index, item.decision_index, STAGE_ORDER.get(item.stage, 99)),
+                    key=lambda item: (
+                        item.history_index,
+                        item.decision_index,
+                        STAGE_ORDER.get(item.stage, 99),
+                    ),
                 )
             )
             phases = tuple(
@@ -274,7 +302,8 @@ def build_player_timelines(
                 )
             )
             history_points = [
-                item.history_index for item in (*sorted_events, *sorted_memories, *sorted_traces)
+                item.history_index
+                for item in (*sorted_events, *sorted_memories, *sorted_traces)
             ]
             trade_artifacts = _build_trade_artifacts(player_id, sorted_events)
             artifacts.append(
@@ -309,7 +338,9 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
     _inject_styles(st)
 
     st.title("catan-bench live dashboard")
-    st.caption("Turn-focused view: navigate turns to inspect every LLM interaction, memory write, and trade session.")
+    st.caption(
+        "Turn-focused view: navigate turns to inspect every LLM interaction, memory write, and trade session."
+    )
 
     base_run_dir = Path(default_run_dir)
     available_runs = discover_run_directories(base_run_dir)
@@ -336,7 +367,9 @@ def render_dashboard(*, default_run_dir: str | Path) -> None:
 
     snapshot = load_dashboard_snapshot(run_path)
     if not snapshot.metadata:
-        st.info("Waiting for metadata.json. Start a game and this page will populate live.")
+        st.info(
+            "Waiting for metadata.json. Start a game and this page will populate live."
+        )
         _maybe_rerun(st, auto_refresh=auto_refresh, refresh_interval=refresh_interval)
         return
 
@@ -362,41 +395,53 @@ def _render_cursor_controls(st, snapshot: DashboardSnapshot) -> int:
     max_history_index = max(0, snapshot.max_history_index)
     if cursor_key not in st.session_state:
         st.session_state[cursor_key] = max_history_index
-    st.session_state[cursor_key] = min(max_history_index, max(0, st.session_state[cursor_key]))
+    st.session_state[cursor_key] = min(
+        max_history_index, max(0, st.session_state[cursor_key])
+    )
 
     turn_markers = _turn_markers(snapshot)
     current_cursor = int(st.session_state[cursor_key])
     current_turn = _turn_index_for_cursor(current_cursor, turn_markers)
 
     st.subheader("Timeline")
-    info_col, prev_turn_col, prev_event_col, next_event_col, next_turn_col, live_col = st.columns(
-        (2.2, 1, 1, 1, 1, 1)
+    info_col, prev_turn_col, prev_event_col, next_event_col, next_turn_col, live_col = (
+        st.columns((2.2, 1, 1, 1, 1, 1))
     )
     with info_col:
         st.caption(
             f"Turn {current_turn} · history {current_cursor}/{max_history_index}"
         )
     with prev_turn_col:
-        if st.button("Previous turn", width="stretch", key=f"prev-turn::{snapshot.run_dir}"):
+        if st.button(
+            "Previous turn", width="stretch", key=f"prev-turn::{snapshot.run_dir}"
+        ):
             st.session_state[cursor_key] = _jump_history_to_previous_turn(
                 current_cursor,
                 turn_markers,
             )
     with prev_event_col:
-        if st.button("Previous event", width="stretch", key=f"prev-event::{snapshot.run_dir}"):
+        if st.button(
+            "Previous event", width="stretch", key=f"prev-event::{snapshot.run_dir}"
+        ):
             st.session_state[cursor_key] = max(0, current_cursor - 1)
     with next_event_col:
-        if st.button("Next event", width="stretch", key=f"next-event::{snapshot.run_dir}"):
+        if st.button(
+            "Next event", width="stretch", key=f"next-event::{snapshot.run_dir}"
+        ):
             st.session_state[cursor_key] = min(max_history_index, current_cursor + 1)
     with next_turn_col:
-        if st.button("Next turn", width="stretch", key=f"next-turn::{snapshot.run_dir}"):
+        if st.button(
+            "Next turn", width="stretch", key=f"next-turn::{snapshot.run_dir}"
+        ):
             st.session_state[cursor_key] = _jump_history_to_next_turn(
                 current_cursor,
                 turn_markers,
                 max_history_index=max_history_index,
             )
     with live_col:
-        if st.button("Jump to latest", width="stretch", key=f"jump-live::{snapshot.run_dir}"):
+        if st.button(
+            "Jump to latest", width="stretch", key=f"jump-live::{snapshot.run_dir}"
+        ):
             st.session_state[cursor_key] = max_history_index
 
     cursor = st.slider(
@@ -412,18 +457,31 @@ def _render_header(st, snapshot: DashboardSnapshot, *, cursor: int) -> None:
     result = snapshot.result or {}
     current_state = _latest_state_at_or_before(snapshot.public_state_snapshots, cursor)
     current_turn = {}
-    if current_state is not None and isinstance(current_state.public_state.get("turn"), dict):
+    if current_state is not None and isinstance(
+        current_state.public_state.get("turn"), dict
+    ):
         current_turn = current_state.public_state["turn"]
-    current_player = current_turn.get("turn_player_id") or current_turn.get("current_player_id") or "-"
+    current_player = (
+        current_turn.get("turn_player_id")
+        or current_turn.get("current_player_id")
+        or "-"
+    )
 
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Run", snapshot.run_dir.name)
     col2.metric("Status", _status_label(snapshot))
     col3.metric("Cursor", cursor)
     col4.metric("Current player", str(current_player))
-    col5.metric("Public events", len([event for event in snapshot.public_events if event.history_index <= cursor]))
+    col5.metric(
+        "Public events",
+        len(
+            [event for event in snapshot.public_events if event.history_index <= cursor]
+        ),
+    )
     if result.get("winner_ids"):
-        st.success("Winner: " + ", ".join(str(player_id) for player_id in result["winner_ids"]))
+        st.success(
+            "Winner: " + ", ".join(str(player_id) for player_id in result["winner_ids"])
+        )
 
 
 def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> None:
@@ -432,11 +490,21 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
         st.caption("No public state snapshots yet.")
         return
     public_state = selected.public_state
-    turn_state = public_state.get("turn") if isinstance(public_state.get("turn"), dict) else {}
-    players = public_state.get("players") if isinstance(public_state.get("players"), dict) else {}
-    board = public_state.get("board") if isinstance(public_state.get("board"), dict) else {}
+    turn_state = (
+        public_state.get("turn") if isinstance(public_state.get("turn"), dict) else {}
+    )
+    players = (
+        public_state.get("players")
+        if isinstance(public_state.get("players"), dict)
+        else {}
+    )
+    board = (
+        public_state.get("board") if isinstance(public_state.get("board"), dict) else {}
+    )
     trade_state = (
-        public_state.get("trade_state") if isinstance(public_state.get("trade_state"), dict) else {}
+        public_state.get("trade_state")
+        if isinstance(public_state.get("trade_state"), dict)
+        else {}
     )
 
     st.subheader("Board")
@@ -460,14 +528,20 @@ def _render_board_summary(st, snapshot: DashboardSnapshot, *, cursor: int) -> No
     with side_col:
         st.markdown("**Players**")
         if players:
-            winner_ids = snapshot.result.get("winner_ids", []) if isinstance(snapshot.result, dict) else []
+            winner_ids = (
+                snapshot.result.get("winner_ids", [])
+                if isinstance(snapshot.result, dict)
+                else []
+            )
             _render_player_summary_table(st, players, winner_ids=winner_ids)
         else:
             st.caption("No public player summary yet.")
         _render_turn_event_digest(st, snapshot, cursor=cursor)
 
 
-def _render_player_summary_table(st, players: dict, *, winner_ids: list[str] | tuple[str, ...] | None = None) -> None:
+def _render_player_summary_table(
+    st, players: dict, *, winner_ids: list[str] | tuple[str, ...] | None = None
+) -> None:
     rows = []
     winner_set = {str(player_id) for player_id in (winner_ids or [])}
     for player_id, summary in players.items():
@@ -489,7 +563,9 @@ def _render_player_summary_table(st, players: dict, *, winner_ids: list[str] | t
         if not isinstance(army_count, int):
             army_count = 0
         army_cell = f"{army_count} ⚔️" if has_army else str(army_count)
-        rows.append((player_id, accent, board_vp, dev_vp, road_cell, army_cell, total_vp))
+        rows.append(
+            (player_id, accent, board_vp, dev_vp, road_cell, army_cell, total_vp)
+        )
 
     if rows:
         html_rows = []
@@ -510,9 +586,7 @@ def _render_player_summary_table(st, players: dict, *, winner_ids: list[str] | t
             "<thead><tr style='border-bottom:1px solid #e5e7eb'>"
             "<th style='text-align:left'>Player</th>"
             "<th>Board VP</th><th>Dev VP</th><th>L. Road</th><th>L. Army</th><th>Total VP</th>"
-            "</tr></thead><tbody>"
-            + "".join(html_rows)
-            + "</tbody></table>"
+            "</tr></thead><tbody>" + "".join(html_rows) + "</tbody></table>"
         )
         st.markdown(table_html, unsafe_allow_html=True)
 
@@ -533,12 +607,14 @@ def _render_turn_event_digest(
     current_turn = _turn_index_for_cursor(cursor, _turn_markers(snapshot))
     html_parts = ["<div class='turn-events-panel'>"]
     for turn_index, label, rows in sections:
-        group_class = "turn-events-group turn-events-group-current" if turn_index == current_turn else "turn-events-group"
+        group_class = (
+            "turn-events-group turn-events-group-current"
+            if turn_index == current_turn
+            else "turn-events-group"
+        )
         html_parts.append(f"<section class='{group_class}'>")
         html_parts.append(
-            "<div class='turn-events-divider'>"
-            f"<span>{_escape_html(label)}</span>"
-            "</div>"
+            f"<div class='turn-events-divider'><span>{_escape_html(label)}</span></div>"
         )
         for speaker, body in rows:
             accent, _, _ = _palette_for_player(None if speaker == "SYSTEM" else speaker)
@@ -579,7 +655,10 @@ def _recent_turn_event_sections(
             (
                 turn_index,
                 _turn_event_section_label(turn_index, turn_events),
-                tuple((str(event.actor_player_id or "SYSTEM"), summary) for event, summary in rows),
+                tuple(
+                    (str(event.actor_player_id or "SYSTEM"), summary)
+                    for event, summary in rows
+                ),
             )
         )
     return tuple(sections)
@@ -734,7 +813,11 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
 
     turn_index = current_state.turn_index
     turn_events = sorted(
-        (e for e in snapshot.public_events if e.turn_index == turn_index and e.history_index <= cursor),
+        (
+            e
+            for e in snapshot.public_events
+            if e.turn_index == turn_index and e.history_index <= cursor
+        ),
         key=lambda e: e.history_index,
     )
     turn_owner_id = _infer_turn_owner_player_id(
@@ -744,7 +827,6 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         current_state=current_state,
         turn_events=tuple(turn_events),
     )
-    turn_dict = current_state.public_state.get("turn") if isinstance(current_state.public_state.get("turn"), dict) else {}
 
     accent, background, _ = _palette_for_player(turn_owner_id or None)
     first_phase = current_state.phase or ""
@@ -769,7 +851,9 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         for trace in snapshot.prompt_traces_by_player.get(player_id, ()):
             if trace.turn_index == turn_index and trace.history_index <= cursor:
                 traces_for_turn.append(trace)
-    traces_for_turn.sort(key=lambda t: (t.history_index, t.decision_index, STAGE_ORDER.get(t.stage, 99)))
+    traces_for_turn.sort(
+        key=lambda t: (t.history_index, t.decision_index, STAGE_ORDER.get(t.stage, 99))
+    )
 
     # memories keyed by (player_id, decision_index, stage) → latest snapshot
     memories_for_turn: dict[tuple[str, int, str], MemorySnapshot] = {}
@@ -781,13 +865,21 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
                 if existing is None or mem.history_index >= existing.history_index:
                     memories_for_turn[key] = mem
 
-    trade_artifacts = _build_trade_artifacts(turn_owner_id, tuple(turn_events)) if turn_owner_id else ()
+    trade_artifacts = (
+        _build_trade_artifacts(turn_owner_id, tuple(turn_events))
+        if turn_owner_id
+        else ()
+    )
     trade_hi_set = {e.history_index for ta in trade_artifacts for e in ta.events}
     non_trade_events = [e for e in turn_events if e.history_index not in trade_hi_set]
 
     # assign trade-related traces to their artifact by history range
-    ta_ranges = [(ta.start_history_index, ta.end_history_index, ta) for ta in trade_artifacts]
-    trade_traces_by_ta: dict[int, list[PromptTrace]] = {id(ta): [] for ta in trade_artifacts}
+    ta_ranges = [
+        (ta.start_history_index, ta.end_history_index, ta) for ta in trade_artifacts
+    ]
+    trade_traces_by_ta: dict[int, list[PromptTrace]] = {
+        id(ta): [] for ta in trade_artifacts
+    }
     regular_traces: list[PromptTrace] = []
     for trace in traces_for_turn:
         if trace.stage in _TRADE_TRACE_STAGES:
@@ -825,12 +917,16 @@ def _render_current_turn_view(st, snapshot: DashboardSnapshot, *, cursor: int) -
         if item_type == "trace":
             trace = data  # type: ignore[assignment]
             mem_key = (trace.player_id, trace.decision_index, trace.stage)
-            _render_llm_interaction_card(st, trace, memory=memories_for_turn.get(mem_key))
+            _render_llm_interaction_card(
+                st, trace, memory=memories_for_turn.get(mem_key)
+            )
         elif item_type == "event":
             _render_event_card(st, data)  # type: ignore[arg-type]
         else:
             ta, ta_traces = data  # type: ignore[misc]
-            _render_trade_chat_box(st, ta, traces=ta_traces, memories_for_turn=memories_for_turn)
+            _render_trade_chat_box(
+                st, ta, traces=ta_traces, memories_for_turn=memories_for_turn
+            )
 
 
 def _render_json_or_text(st, value: object, *, expanded: bool) -> None:
@@ -853,7 +949,9 @@ def _system_prompt_message_summary(content: object) -> str:
 
 
 def _render_prompt_message(st, role: str, content: object) -> None:
-    role_bg = {"user": "#dbeafe", "assistant": "#dcfce7", "system": "#fef3c7"}.get(role, "#f3f4f6")
+    role_bg = {"user": "#dbeafe", "assistant": "#dcfce7", "system": "#fef3c7"}.get(
+        role, "#f3f4f6"
+    )
     st.markdown(
         f"<div style='background:{role_bg};border-radius:0.4rem;"
         f"padding:0.3rem 0.6rem;margin-bottom:0.25rem;"
@@ -883,7 +981,9 @@ def _render_llm_interaction_card(
     """Render a single LLM call as a query + answer interaction."""
     accent, background, border = _palette_for_player(trace.player_id)
     stage_label = trace.stage.replace("_", " ").title()
-    decision_label = f"· decision {trace.decision_index}" if trace.decision_index is not None else ""
+    decision_label = (
+        f"· decision {trace.decision_index}" if trace.decision_index is not None else ""
+    )
     st.markdown(
         "<div class='timeline-card' "
         f"style='border-left:6px solid {accent}; background:{background}; border-color:{border};'>"
@@ -905,7 +1005,9 @@ def _render_llm_interaction_card(
                 _render_prompt_message(st, role, content)
 
     for attempt_idx, attempt in enumerate(trace.attempts, start=1):
-        answer_label = "Answer" if len(trace.attempts) == 1 else f"Answer (attempt {attempt_idx})"
+        answer_label = (
+            "Answer" if len(trace.attempts) == 1 else f"Answer (attempt {attempt_idx})"
+        )
         with st.expander(answer_label, expanded=True):
             if attempt.response_text is not None:
                 st.code(attempt.response_text, language="json")
@@ -913,8 +1015,12 @@ def _render_llm_interaction_card(
                 st.json(attempt.response, expanded=True)
 
     if memory is not None:
-        with st.expander(f"{MEMORY_EMOJI} Memory written — {memory.stage}", expanded=False):
-            st.caption(f"history {memory.history_index} · decision {memory.decision_index}")
+        with st.expander(
+            f"{MEMORY_EMOJI} Memory written — {memory.stage}", expanded=False
+        ):
+            st.caption(
+                f"history {memory.history_index} · decision {memory.decision_index}"
+            )
             col_lt, col_st = st.columns(2)
             with col_lt:
                 st.markdown("`long_term`")
@@ -950,7 +1056,11 @@ def _render_trade_transcript(
     expanded: bool,
 ) -> None:
     counterparties = sorted(
-        {cp for e in artifact.events for cp in _trade_counterparties(e, artifact.owner_player_id)}
+        {
+            cp
+            for e in artifact.events
+            for cp in _trade_counterparties(e, artifact.owner_player_id)
+        }
     )
     participants = [artifact.owner_player_id] + counterparties
     title = f"{TRADE_EMOJI} Trade Room"
@@ -976,12 +1086,16 @@ def _render_trade_transcript(
                 continue
             trace = data  # type: ignore[assignment]
             mem_key = (trace.player_id, trace.decision_index, trace.stage)
-            _render_llm_interaction_card(st, trace, memory=memories_for_turn.get(mem_key))
+            _render_llm_interaction_card(
+                st, trace, memory=memories_for_turn.get(mem_key)
+            )
 
 
 def _render_trade_chat_bubble(st, event: Event) -> None:
     """Render a single trade event as a player-colored trade bubble."""
-    speaker = event.payload.get("speaker_player_id") or event.actor_player_id or "SYSTEM"
+    speaker = (
+        event.payload.get("speaker_player_id") or event.actor_player_id or "SYSTEM"
+    )
     speaker_str = str(speaker)
     alignment = _trade_bubble_alignment(event, speaker_player_id=speaker_str)
     accent, background, _ = _palette_for_player(
@@ -993,11 +1107,15 @@ def _render_trade_chat_bubble(st, event: Event) -> None:
     metadata_bits = [f"h{event.history_index}"]
     attempt_index = event.payload.get("attempt_index")
     round_index = event.payload.get("round_index")
-    proposal_id = event.payload.get("proposal_id") or event.payload.get("selected_proposal_id")
+    proposal_id = event.payload.get("proposal_id") or event.payload.get(
+        "selected_proposal_id"
+    )
     if isinstance(attempt_index, int):
         metadata_bits.insert(0, f"attempt {attempt_index}")
     if isinstance(round_index, int) and round_index > 0:
-        metadata_bits.insert(1 if isinstance(attempt_index, int) else 0, f"round {round_index}")
+        metadata_bits.insert(
+            1 if isinstance(attempt_index, int) else 0, f"round {round_index}"
+        )
     if isinstance(proposal_id, str):
         metadata_bits.append(proposal_id)
     justify_content = {
@@ -1063,7 +1181,9 @@ def _render_player_columns(
     if selected_state is not None:
         turn_state = selected_state.public_state.get("turn")
         if isinstance(turn_state, dict):
-            value = turn_state.get("turn_player_id") or turn_state.get("current_player_id")
+            value = turn_state.get("turn_player_id") or turn_state.get(
+                "current_player_id"
+            )
             if isinstance(value, str):
                 current_turn_player = value
 
@@ -1089,7 +1209,13 @@ def _render_player_column(
     cursor: int,
     is_current_player: bool,
 ) -> None:
-    _render_column_header(st, snapshot, player_id=player_id, cursor=cursor, is_current_player=is_current_player)
+    _render_column_header(
+        st,
+        snapshot,
+        player_id=player_id,
+        cursor=cursor,
+        is_current_player=is_current_player,
+    )
     if not timeline:
         st.caption("No timeline entries yet.")
         return
@@ -1099,7 +1225,8 @@ def _render_player_column(
             artifact,
             snapshot=snapshot,
             cursor=cursor,
-            expanded=is_current_player and artifact.end_history_index >= cursor >= artifact.start_history_index,
+            expanded=is_current_player
+            and artifact.end_history_index >= cursor >= artifact.start_history_index,
         )
 
 
@@ -1117,7 +1244,11 @@ def _render_column_header(
             "<div class='player-column-header' "
             f"style='border-left: 6px solid {accent}; background: {background};'>"
             f"<strong>{player_id}</strong>"
-            + (" <span class='player-column-badge'>active</span>" if is_current_player else "")
+            + (
+                " <span class='player-column-badge'>active</span>"
+                if is_current_player
+                else ""
+            )
             + "</div>"
         ),
         unsafe_allow_html=True,
@@ -1164,9 +1295,13 @@ def _render_turn_artifact(
             f"turn {artifact.turn_index} · phases {', '.join(artifact.phases) or '-'}"
         )
 
-        trade_by_start = {trade.start_history_index: trade for trade in artifact.trade_artifacts}
+        trade_by_start = {
+            trade.start_history_index: trade for trade in artifact.trade_artifacts
+        }
         consumed_trade_histories = {
-            event.history_index for trade in artifact.trade_artifacts for event in trade.events
+            event.history_index
+            for trade in artifact.trade_artifacts
+            for event in trade.events
         }
         events_by_history: dict[int, list[Event]] = {}
         for event in artifact.events:
@@ -1194,7 +1329,9 @@ def _render_turn_artifact(
             for trace in traces_by_history.get(history_index, ()):
                 _render_prompt_trace_card(st, trace, player_id=artifact.player_id)
 
-        final_state = _latest_state_at_or_before(snapshot.public_state_snapshots, min(cursor, artifact.end_history_index))
+        final_state = _latest_state_at_or_before(
+            snapshot.public_state_snapshots, min(cursor, artifact.end_history_index)
+        )
         if final_state is not None and final_state.turn_index == artifact.turn_index:
             with st.expander("Turn-end public snapshot", expanded=False):
                 board = final_state.public_state.get("board")
@@ -1308,7 +1445,10 @@ def _build_trade_artifacts(
     artifacts: list[TradeArtifact] = []
     current: list[Event] = []
     for event in events:
-        if event.kind not in TRADE_EVENT_KINDS or _trade_owner_player_id(event) != player_id:
+        if (
+            event.kind not in TRADE_EVENT_KINDS
+            or _trade_owner_player_id(event) != player_id
+        ):
             continue
         if current and _starts_new_trade_artifact(current, event):
             artifacts.append(_trade_artifact_from_events(player_id, tuple(current)))
@@ -1348,7 +1488,9 @@ def _ends_trade_artifact(event: Event) -> bool:
     return False
 
 
-def _trade_artifact_from_events(player_id: str, events: tuple[Event, ...]) -> TradeArtifact:
+def _trade_artifact_from_events(
+    player_id: str, events: tuple[Event, ...]
+) -> TradeArtifact:
     return TradeArtifact(
         owner_player_id=player_id,
         turn_index=events[0].turn_index,
@@ -1461,7 +1603,11 @@ def _event_body(event: Event) -> str:
         )
     if event.kind == "trade_chat_no_deal":
         message = payload.get("message")
-        return str(message) if isinstance(message, str) and message else "No trade selected."
+        return (
+            str(message)
+            if isinstance(message, str) and message
+            else "No trade selected."
+        )
     if event.kind == "trade_chat_closed":
         outcome = payload.get("outcome")
         selected = payload.get("selected_player_id")
@@ -1491,7 +1637,9 @@ def _emoji_for_event(kind: str) -> str:
 def _resource_map(value: object) -> str:
     if not isinstance(value, dict) or not value:
         return "nothing"
-    return ", ".join(f"{amount} {resource}" for resource, amount in sorted(value.items()))
+    return ", ".join(
+        f"{amount} {resource}" for resource, amount in sorted(value.items())
+    )
 
 
 def _palette_for_event(event: Event) -> tuple[str, str, str]:
@@ -1515,7 +1663,9 @@ def _colorize_player_mentions_html(text: str) -> str:
             html_parts.append(_escape_html(text[cursor:start]))
         player_id = match.group(0)
         accent, _, _ = _palette_for_player(player_id)
-        html_parts.append(f"<span style='color:{accent}'>{_escape_html(player_id)}</span>")
+        html_parts.append(
+            f"<span style='color:{accent}'>{_escape_html(player_id)}</span>"
+        )
         cursor = end
     if cursor < len(text):
         html_parts.append(_escape_html(text[cursor:]))
@@ -1557,31 +1707,31 @@ def _player_panel_svg(
     """Render a player hand/piece panel as an SVG <g> element at (px, py)."""
     # Resource colors matching the tile palette
     _RES_COLORS: dict[str, tuple[str, str]] = {
-        "WOOD":  ("#7fb069", "#4a7a40"),
+        "WOOD": ("#7fb069", "#4a7a40"),
         "BRICK": ("#d97757", "#a0472e"),
         "SHEEP": ("#a7d676", "#6a9e40"),
         "WHEAT": ("#f1d36b", "#c4a020"),
-        "ORE":   ("#9ca3af", "#5a6270"),
+        "ORE": ("#9ca3af", "#5a6270"),
     }
     _RES_ORDER = ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
 
     W, H = 140, 96
     accent, _, _ = _palette_for_player(player_id)
     resource_hand: dict[str, int] = summary.get("resource_hand") or {}  # type: ignore[assignment]
-    res        = int(summary.get("resource_card_count") or sum(resource_hand.values()))
-    dev        = int(summary.get("development_card_count") or 0)
-    vp         = int(summary.get("visible_victory_points") or 0)
+    res = int(summary.get("resource_card_count") or sum(resource_hand.values()))
+    dev = int(summary.get("development_card_count") or 0)
+    vp = int(summary.get("visible_victory_points") or 0)
     roads_left = max(0, 15 - roads_built)
-    sets_left  = max(0, 5  - settlements_built)
-    cits_left  = max(0, 4  - cities_built)
-    has_road   = bool(summary.get("has_longest_road"))
-    has_army   = bool(summary.get("has_largest_army"))
+    sets_left = max(0, 5 - settlements_built)
+    cits_left = max(0, 4 - cities_built)
+    has_road = bool(summary.get("has_longest_road"))
+    has_army = bool(summary.get("has_largest_army"))
 
     # Grid constants — label sits on the LEFT, cards start after it
-    CW, CH, CG  = 8, 11, 2        # card width / height / gap
-    LBL_W       = 28               # pixels reserved for "RES" / "DEV" text
-    CARD_X0     = px + 8 + LBL_W  # first card x
-    MAX_CARDS   = int((W - 8 - LBL_W - 8) // (CW + CG))  # ≈ 9
+    CW, CH, CG = 8, 11, 2  # card width / height / gap
+    LBL_W = 28  # pixels reserved for "RES" / "DEV" text
+    CARD_X0 = px + 8 + LBL_W  # first card x
+    MAX_CARDS = int((W - 8 - LBL_W - 8) // (CW + CG))  # ≈ 9
 
     # Row y: top of card rects (label baseline = card bottom)
     RES_TOP = py + 24
@@ -1678,7 +1828,7 @@ def _player_panel_svg(
         + f"<line x1='{px + 5:.1f}' y1='{py + 20:.1f}' x2='{px + W - 5:.1f}' y2='{py + 20:.1f}' "
         f"stroke='{accent}' stroke-opacity='0.35' stroke-width='0.7'/>"
         # Row 2: RES label (left) + per-resource colored cards (right)
-        + f"<text x='{px + 8:.1f}' y='{RES_TOP + CH:.1f}' font-size='8' "
+         + f"<text x='{px + 8:.1f}' y='{RES_TOP + CH:.1f}' font-size='8' "
         f"fill='#64748b' font-family='monospace'>RES</text>"
         + _resource_cards(RES_TOP)
         # Row 3: DEV label (left) + dev cards (right)
@@ -1689,8 +1839,7 @@ def _player_panel_svg(
         + f"<line x1='{px + 5:.1f}' y1='{py + H - 20:.1f}' x2='{px + W - 5:.1f}' y2='{py + H - 20:.1f}' "
         f"stroke='{accent}' stroke-opacity='0.25' stroke-width='0.7'/>"
         # Row 4: remaining pieces
-        + road_icon
-        + f"<text x='{px + 23:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
+         + road_icon + f"<text x='{px + 23:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
         f"fill='#94a3b8' font-family='monospace'>{roads_left}</text>"
         + set_icon
         + f"<text x='{stx + 4:.1f}' y='{PIECE_Y + 1:.1f}' font-size='10' "
@@ -1703,10 +1852,10 @@ def _player_panel_svg(
 
 # seat_index → (corner_h, corner_v): "left"/"right", "top"/"bottom"
 _SEAT_CORNER: dict[int, tuple[str, str]] = {
-    0: ("left",  "top"),
+    0: ("left", "top"),
     1: ("right", "top"),
     2: ("right", "bottom"),
-    3: ("left",  "bottom"),
+    3: ("left", "bottom"),
 }
 
 
@@ -1720,10 +1869,12 @@ def build_board_svg(
     nodes = board.get("nodes")
     edges = board.get("edges")
     robber_coordinate = board.get("robber_coordinate")
-    if not isinstance(tiles, list) or not isinstance(nodes, dict) or not isinstance(edges, list):
-        return (
-            "<div class='board-fallback'>Board visualization unavailable for this snapshot.</div>"
-        )
+    if (
+        not isinstance(tiles, list)
+        or not isinstance(nodes, dict)
+        or not isinstance(edges, list)
+    ):
+        return "<div class='board-fallback'>Board visualization unavailable for this snapshot.</div>"
 
     hex_size = 42.0
     tile_centers = {
@@ -1732,14 +1883,13 @@ def build_board_svg(
             hex_size,
         )
         for tile_entry in tiles
-        if isinstance(tile_entry, dict) and _as_int_tuple(tile_entry.get("coordinate"), size=3) is not None
+        if isinstance(tile_entry, dict)
+        and _as_int_tuple(tile_entry.get("coordinate"), size=3) is not None
     }
     node_positions = _board_node_positions(nodes, tile_centers, hex_size)
     all_points = list(tile_centers.values()) + list(node_positions.values())
     if not all_points:
-        return (
-            "<div class='board-fallback'>Board visualization unavailable for this snapshot.</div>"
-        )
+        return "<div class='board-fallback'>Board visualization unavailable for this snapshot.</div>"
 
     min_x = min(point[0] for point in all_points) - hex_size * 2.2
     max_x = max(point[0] for point in all_points) + hex_size * 2.2
@@ -1749,14 +1899,21 @@ def build_board_svg(
     view_box = f"{min_x:.1f} {min_y:.1f} {width:.1f} {(max_y - min_y):.1f}"
 
     edge_fragments = [
-        _edge_svg_fragment(edge, node_positions=node_positions, tile_centers=tile_centers, hex_size=hex_size)
+        _edge_svg_fragment(
+            edge,
+            node_positions=node_positions,
+            tile_centers=tile_centers,
+            hex_size=hex_size,
+        )
         for edge in edges
         if isinstance(edge, dict)
     ]
     tile_fragments = [
         _tile_svg_fragment(
             tile_entry,
-            center=tile_centers.get(_as_int_tuple(tile_entry.get("coordinate"), size=3)),
+            center=tile_centers.get(
+                _as_int_tuple(tile_entry.get("coordinate"), size=3)
+            ),
             hex_size=hex_size,
             robber_coordinate=robber_coordinate,
         )
@@ -1776,16 +1933,16 @@ def build_board_svg(
     if players:
         # Count built pieces per player from board data
         roads_by_player: dict[str, int] = {}
-        sets_by_player:  dict[str, int] = {}
-        cits_by_player:  dict[str, int] = {}
-        for edge in (edges or []):
+        sets_by_player: dict[str, int] = {}
+        cits_by_player: dict[str, int] = {}
+        for edge in edges or []:
             if isinstance(edge, dict):
                 ec = edge.get("color")
                 if isinstance(ec, str):
                     roads_by_player[ec] = roads_by_player.get(ec, 0) + 1
-        for node in (nodes.values() if isinstance(nodes, dict) else []):
+        for node in nodes.values() if isinstance(nodes, dict) else []:
             if isinstance(node, dict):
-                nc   = node.get("color")
+                nc = node.get("color")
                 bldg = node.get("building")
                 if isinstance(nc, str) and isinstance(bldg, str):
                     if bldg == "SETTLEMENT":
@@ -1800,14 +1957,18 @@ def build_board_svg(
             seat = int(summary.get("seat_index", 0)) % 4
             h_side, v_side = _SEAT_CORNER.get(seat, ("left", "top"))
             px = (min_x + MARGIN) if h_side == "left" else (max_x - MARGIN - PW)
-            py = (min_y + MARGIN) if v_side == "top"  else (max_y - MARGIN - PH)
-            panel_fragments.append(_player_panel_svg(
-                pid, summary,
-                roads_by_player.get(pid, 0),
-                sets_by_player.get(pid, 0),
-                cits_by_player.get(pid, 0),
-                px, py,
-            ))
+            py = (min_y + MARGIN) if v_side == "top" else (max_y - MARGIN - PH)
+            panel_fragments.append(
+                _player_panel_svg(
+                    pid,
+                    summary,
+                    roads_by_player.get(pid, 0),
+                    sets_by_player.get(pid, 0),
+                    cits_by_player.get(pid, 0),
+                    px,
+                    py,
+                )
+            )
 
     return (
         "<div class='board-shell'>"
@@ -1846,7 +2007,9 @@ def _board_node_positions(
     return positions
 
 
-def _cube_to_point(cube: tuple[int, int, int] | None, hex_size: float) -> tuple[float, float]:
+def _cube_to_point(
+    cube: tuple[int, int, int] | None, hex_size: float
+) -> tuple[float, float]:
     if cube is None:
         return (0.0, 0.0)
     q, _, r = cube
@@ -1897,7 +2060,11 @@ def _tile_svg_fragment(
     fill = _tile_fill(tile)
     stroke = "#94a3b8" if tile_type in {"WATER", "PORT"} else "#475569"
     label = _tile_label(tile)
-    robber = " 🥷" if coordinate is not None and list(coordinate) == robber_coordinate else ""
+    robber = (
+        " 🥷"
+        if coordinate is not None and list(coordinate) == robber_coordinate
+        else ""
+    )
     number = tile.get("number")
     cx, cy = center
     label_y = cy - 6 if number is not None else cy + 4
@@ -1912,8 +2079,7 @@ def _tile_svg_fragment(
         f"<polygon points='{_hex_points(center, hex_size)}' fill='{fill}' stroke='{stroke}' "
         "stroke-width='2'/>"
         f"<text x='{cx:.1f}' y='{label_y:.1f}' text-anchor='middle' class='board-label'>"
-        f"{_escape_html(label + robber)}</text>"
-        + number_markup
+        f"{_escape_html(label + robber)}</text>" + number_markup
     )
 
 
@@ -1953,7 +2119,11 @@ def _edge_svg_fragment(
 ) -> str:
     edge_id = edge.get("id")
     points: tuple[tuple[float, float], tuple[float, float]] | None = None
-    if isinstance(edge_id, list) and len(edge_id) == 2 and all(isinstance(item, int) for item in edge_id):
+    if (
+        isinstance(edge_id, list)
+        and len(edge_id) == 2
+        and all(isinstance(item, int) for item in edge_id)
+    ):
         first = node_positions.get(edge_id[0])
         second = node_positions.get(edge_id[1])
         if first is not None and second is not None:
@@ -2006,10 +2176,12 @@ def _node_svg_fragment(
     building = node.get("building")
     color = node.get("color")
     cx, cy = point
-    if not isinstance(building, str) or not isinstance(color, str) or color not in PLAYER_COLORS:
-        return (
-            f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='3.2' fill='#94a3b8' opacity='0.55' />"
-        )
+    if (
+        not isinstance(building, str)
+        or not isinstance(color, str)
+        or color not in PLAYER_COLORS
+    ):
+        return f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='3.2' fill='#94a3b8' opacity='0.55' />"
     accent, _, _ = _palette_for_player(color)
     stroke = PLAYER_STROKES.get(color, accent)
     if building == "CITY":
@@ -2033,7 +2205,11 @@ def _node_svg_fragment(
 
 
 def _as_int_tuple(value: object, *, size: int) -> tuple[int, ...] | None:
-    if not isinstance(value, list) or len(value) != size or not all(isinstance(item, int) for item in value):
+    if (
+        not isinstance(value, list)
+        or len(value) != size
+        or not all(isinstance(item, int) for item in value)
+    ):
         return None
     return tuple(value)
 
@@ -2050,7 +2226,8 @@ def _escape_html(value: object) -> str:
 
 def _bucket_start_history_index(bucket: _TurnBucket) -> int:
     history_points = [
-        item.history_index for item in (*bucket.events, *bucket.memory_snapshots, *bucket.prompt_traces)
+        item.history_index
+        for item in (*bucket.events, *bucket.memory_snapshots, *bucket.prompt_traces)
     ]
     return min(history_points) if history_points else 0
 
@@ -2115,7 +2292,11 @@ def _is_run_directory(path: Path) -> bool:
         return False
     return any(
         (path / file_name).exists()
-        for file_name in ("metadata.json", "public_history.jsonl", "public_state_trace.jsonl")
+        for file_name in (
+            "metadata.json",
+            "public_history.jsonl",
+            "public_state_trace.jsonl",
+        )
     )
 
 
@@ -2123,7 +2304,11 @@ def _run_sort_key(path: Path) -> float:
     return max(
         [
             path.stat().st_mtime,
-            *((path / name).stat().st_mtime for name in ("result.json", "public_history.jsonl", "metadata.json") if (path / name).exists()),
+            *(
+                (path / name).stat().st_mtime
+                for name in ("result.json", "public_history.jsonl", "metadata.json")
+                if (path / name).exists()
+            ),
         ]
     )
 
@@ -2143,7 +2328,9 @@ def _turn_markers(snapshot: DashboardSnapshot) -> tuple[tuple[int, int], ...]:
     return tuple(sorted(max_history_by_turn.items()))
 
 
-def _turn_index_for_cursor(cursor: int, turn_markers: tuple[tuple[int, int], ...]) -> int:
+def _turn_index_for_cursor(
+    cursor: int, turn_markers: tuple[tuple[int, int], ...]
+) -> int:
     current_turn = 0
     for turn_index, history_index in turn_markers:
         if history_index <= cursor:
@@ -2186,10 +2373,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     if analysis_data is None:
         if snapshot.result is None:
-            st.info("Game is still in progress. Analysis will be available once the game ends.")
+            st.info(
+                "Game is still in progress. Analysis will be available once the game ends."
+            )
             return
         if st.button("Generate Analysis", type="primary"):
             from .analysis import analyze_game
+
             analysis_data = analyze_game(snapshot.run_dir)
             st.rerun()
         else:
@@ -2206,9 +2396,14 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     cols[1].metric("Turns", gs.get("num_turns", "?"))
     cols[2].metric("Total Decisions", gs.get("total_decisions", "?"))
     cols[3].metric("Trade Activity", f"{gs.get('trade_activity_rate', 0):.1%}")
-    _chat_rooms_total = sum(p.get("trade_chat", {}).get("rooms_opened", 0) for p in players.values())
+    _chat_rooms_total = sum(
+        p.get("trade_chat", {}).get("rooms_opened", 0) for p in players.values()
+    )
     if _chat_rooms_total and gs.get("trade_efficiency", 0) == 0.0:
-        _selected = sum(p.get("trade_chat", {}).get("rooms_closed_selected", 0) for p in players.values())
+        _selected = sum(
+            p.get("trade_chat", {}).get("rooms_closed_selected", 0)
+            for p in players.values()
+        )
         _chat_rate = _selected / _chat_rooms_total
         cols[4].metric("Chat Success Rate", f"{_chat_rate:.1%}")
     else:
@@ -2262,12 +2457,20 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     # ── Resource Production ──
     st.subheader("Estimated Resource Production")
     _RES_ORDER = ["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"]
-    _RES_COLOR = {"WOOD": "#16a34a", "BRICK": "#c2410c", "SHEEP": "#86efac", "WHEAT": "#fbbf24", "ORE": "#94a3b8"}
+    _RES_COLOR = {
+        "WOOD": "#16a34a",
+        "BRICK": "#c2410c",
+        "SHEEP": "#86efac",
+        "WHEAT": "#fbbf24",
+        "ORE": "#94a3b8",
+    }
     res_rows = []
     for pid, pdata in players.items():
         production = pdata.get("resource_production", {}).get("total", {})
         for r in _RES_ORDER:
-            res_rows.append({"Player": pid, "Resource": r, "Count": production.get(r, 0)})
+            res_rows.append(
+                {"Player": pid, "Resource": r, "Count": production.get(r, 0)}
+            )
     if res_rows:
         df_res = pd.DataFrame(res_rows)
         pids = list(players.keys())
@@ -2280,18 +2483,39 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 alt.Chart(df_res[df_res["Player"] == pid])
                 .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=32)
                 .encode(
-                    x=alt.X("Resource:N", sort=_RES_ORDER, axis=alt.Axis(
-                        title=None, labelExpr=_emoji_expr,
-                        labelFontSize=18, ticks=False, domain=False, labelAngle=0,
-                    )),
-                    y=alt.Y("Count:Q", axis=alt.Axis(title=None, labelFontSize=9, tickCount=4)),
-                    color=alt.Color("Resource:N",
-                        scale=alt.Scale(domain=_RES_ORDER, range=res_color_list), legend=None),
+                    x=alt.X(
+                        "Resource:N",
+                        sort=_RES_ORDER,
+                        axis=alt.Axis(
+                            title=None,
+                            labelExpr=_emoji_expr,
+                            labelFontSize=18,
+                            ticks=False,
+                            domain=False,
+                            labelAngle=0,
+                        ),
+                    ),
+                    y=alt.Y(
+                        "Count:Q",
+                        axis=alt.Axis(title=None, labelFontSize=9, tickCount=4),
+                    ),
+                    color=alt.Color(
+                        "Resource:N",
+                        scale=alt.Scale(domain=_RES_ORDER, range=res_color_list),
+                        legend=None,
+                    ),
                     tooltip=["Resource:N", "Count:Q"],
                 )
                 .properties(
-                    title=alt.TitleParams(pid, color=accent, fontSize=13, fontWeight="bold", anchor="middle"),
-                    height=160, width=180,
+                    title=alt.TitleParams(
+                        pid,
+                        color=accent,
+                        fontSize=13,
+                        fontWeight="bold",
+                        anchor="middle",
+                    ),
+                    height=160,
+                    width=180,
                 )
             )
             player_charts.append(c)
@@ -2302,8 +2526,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── Trade Activity ──
     st.subheader("Trade Activity")
-    has_classic = any(pdata.get("trade", {}).get("offers_made", 0) > 0 for pdata in players.values())
-    has_chat = any(pdata.get("trade_chat", {}).get("rooms_opened", 0) > 0 for pdata in players.values())
+    has_classic = any(
+        pdata.get("trade", {}).get("offers_made", 0) > 0 for pdata in players.values()
+    )
+    has_chat = any(
+        pdata.get("trade_chat", {}).get("rooms_opened", 0) > 0
+        for pdata in players.values()
+    )
 
     def _cumulative_by_turn(by_player: dict[str, dict], max_turn: int) -> list[dict]:
         cum = {pid: 0 for pid in by_player}
@@ -2316,9 +2545,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             rows.append(row)
         return rows
 
-    def _altair_line(by_player: dict[str, dict], max_turn: int, title: str) -> alt.Chart:
+    def _altair_line(
+        by_player: dict[str, dict], max_turn: int, title: str
+    ) -> alt.Chart:
         rows = _cumulative_by_turn(by_player, max_turn)
-        df = pd.DataFrame(rows).melt(id_vars=["Turn"], var_name="Player", value_name="Count")
+        df = pd.DataFrame(rows).melt(
+            id_vars=["Turn"], var_name="Player", value_name="Count"
+        )
         pids = list(by_player.keys())
         colors = [PLAYER_COLORS.get(p, NEUTRAL_COLORS)[0] for p in pids]
         return (
@@ -2352,22 +2585,80 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     rendered = 0
     if has_classic:
-        rendered += _render_chart_row([
-            ("Offers Made", {pid: players[pid].get("trade", {}).get("offers_made_by_turn", {}) for pid in _player_ids}),
-            ("Completed", {pid: players[pid].get("trade", {}).get("completed_by_turn", {}) for pid in _player_ids}),
-        ])
+        rendered += _render_chart_row(
+            [
+                (
+                    "Offers Made",
+                    {
+                        pid: players[pid]
+                        .get("trade", {})
+                        .get("offers_made_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Completed",
+                    {
+                        pid: players[pid].get("trade", {}).get("completed_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+            ]
+        )
     if has_chat:
         if not has_classic:
             st.caption("All trades negotiated via chat rooms")
-        rendered += _render_chart_row([
-            ("Rooms Opened", {pid: players[pid].get("trade_chat", {}).get("rooms_opened_by_turn", {}) for pid in _player_ids}),
-            ("Rooms Joined", {pid: players[pid].get("trade_chat", {}).get("rooms_participated_by_turn", {}) for pid in _player_ids}),
-            ("Proposals Made", {pid: players[pid].get("trade_chat", {}).get("proposals_made_by_turn", {}) for pid in _player_ids}),
-            ("Proposals Accepted", {pid: players[pid].get("trade_chat", {}).get("proposals_accepted_by_turn", {}) for pid in _player_ids}),
-            ("Completed", {pid: players[pid].get("trade", {}).get("completed_by_turn", {}) for pid in _player_ids}),
-        ])
+        rendered += _render_chart_row(
+            [
+                (
+                    "Rooms Opened",
+                    {
+                        pid: players[pid]
+                        .get("trade_chat", {})
+                        .get("rooms_opened_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Rooms Joined",
+                    {
+                        pid: players[pid]
+                        .get("trade_chat", {})
+                        .get("rooms_participated_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Proposals Made",
+                    {
+                        pid: players[pid]
+                        .get("trade_chat", {})
+                        .get("proposals_made_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Proposals Accepted",
+                    {
+                        pid: players[pid]
+                        .get("trade_chat", {})
+                        .get("proposals_accepted_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Completed",
+                    {
+                        pid: players[pid].get("trade", {}).get("completed_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+            ]
+        )
     if rendered == 0 and (has_classic or has_chat):
-        st.info("Per-turn data not available — regenerate analysis.json to see trade activity charts.")
+        st.info(
+            "Per-turn data not available — regenerate analysis.json to see trade activity charts."
+        )
 
     # ── Building Timeline + Longest Road + Largest Army ──
     st.subheader("Building & Achievement Progression")
@@ -2376,21 +2667,31 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         buildings = pdata.get("buildings", {})
         for s in buildings.get("settlements", []):
             if s.get("turn_index") is not None:
-                _build_events.append({"player": pid, "turn": s["turn_index"], "type": "Settlement"})
+                _build_events.append(
+                    {"player": pid, "turn": s["turn_index"], "type": "Settlement"}
+                )
         for c in buildings.get("cities", []):
             if c.get("turn_index") is not None:
-                _build_events.append({"player": pid, "turn": c["turn_index"], "type": "City"})
+                _build_events.append(
+                    {"player": pid, "turn": c["turn_index"], "type": "City"}
+                )
         for r in buildings.get("roads", []):
             if r.get("turn_index") is not None:
-                _build_events.append({"player": pid, "turn": r["turn_index"], "type": "Road"})
+                _build_events.append(
+                    {"player": pid, "turn": r["turn_index"], "type": "Road"}
+                )
 
     _game_max_turn = gs.get("num_turns", 0)
     _plotly_layout_base = dict(
         height=320,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title="Turn", gridcolor="#1e293b", color="#94a3b8",
-                   range=[0, _game_max_turn] if _game_max_turn else None),
+        xaxis=dict(
+            title="Turn",
+            gridcolor="#1e293b",
+            color="#94a3b8",
+            range=[0, _game_max_turn] if _game_max_turn else None,
+        ),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=10)),
         margin=dict(l=40, r=10, t=30, b=40),
         hovermode="x unified",
@@ -2412,7 +2713,9 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
                 for btype in ("Road", "Settlement", "City"):
                     _event_turns = sorted(
-                        e["turn"] for e in _build_events if e["player"] == pid and e["type"] == btype
+                        e["turn"]
+                        for e in _build_events
+                        if e["player"] == pid and e["type"] == btype
                     )
                     if not _event_turns:
                         continue
@@ -2420,47 +2723,68 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     for t in _turns:
                         _count += _event_turns.count(t)
                         _cum.append(_count)
-                    _btimeline_fig.add_trace(go.Scatter(
-                        x=_turns,
-                        y=_cum,
-                        mode="lines",
-                        name=f"{pid} – {btype}",
-                        line=dict(color=_pcolor, dash=_dash[btype], width=_width[btype]),
-                        showlegend=False,
-                        hovertemplate=f"<b>{pid}</b> {btype}<br>Turn %{{x}}: %{{y}}<extra></extra>",
-                    ))
+                    _btimeline_fig.add_trace(
+                        go.Scatter(
+                            x=_turns,
+                            y=_cum,
+                            mode="lines",
+                            name=f"{pid} – {btype}",
+                            line=dict(
+                                color=_pcolor, dash=_dash[btype], width=_width[btype]
+                            ),
+                            showlegend=False,
+                            hovertemplate=f"<b>{pid}</b> {btype}<br>Turn %{{x}}: %{{y}}<extra></extra>",
+                        )
+                    )
                     if btype == "Settlement":
                         _mx = list(_event_turns)
                         _my = [_cum[_turns.index(t)] for t in _mx]
-                        _btimeline_fig.add_trace(go.Scatter(
-                            x=_mx, y=_my,
-                            mode="markers",
-                            marker=dict(symbol="circle", size=8, color=_pcolor, line=dict(width=1.5, color="#0f172a")),
-                            showlegend=False,
-                            hoverinfo="skip",
-                        ))
+                        _btimeline_fig.add_trace(
+                            go.Scatter(
+                                x=_mx,
+                                y=_my,
+                                mode="markers",
+                                marker=dict(
+                                    symbol="circle",
+                                    size=8,
+                                    color=_pcolor,
+                                    line=dict(width=1.5, color="#0f172a"),
+                                ),
+                                showlegend=False,
+                                hoverinfo="skip",
+                            )
+                        )
                     elif btype == "City":
                         _mx = list(_event_turns)
                         _my = [_cum[_turns.index(t)] for t in _mx]
-                        _btimeline_fig.add_trace(go.Scatter(
-                            x=_mx, y=_my,
-                            mode="text",
-                            text=["⌂"] * len(_mx),
-                            textfont=dict(size=20, color=_pcolor),
-                            showlegend=False,
-                            hoverinfo="skip",
-                        ))
+                        _btimeline_fig.add_trace(
+                            go.Scatter(
+                                x=_mx,
+                                y=_my,
+                                mode="text",
+                                text=["⌂"] * len(_mx),
+                                textfont=dict(size=20, color=_pcolor),
+                                showlegend=False,
+                                hoverinfo="skip",
+                            )
+                        )
 
             # Static legend as annotations at the top
             _btimeline_fig.update_layout(
                 **{**_plotly_layout_base, "margin": dict(l=40, r=10, t=50, b=40)},
                 showlegend=False,
-                yaxis=dict(title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"),
+                yaxis=dict(
+                    title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"
+                ),
                 annotations=[
                     dict(
                         text="- - Road &nbsp;&nbsp; ── ● Settlement &nbsp;&nbsp; ━━ ⌂ City",
-                        xref="paper", yref="paper", x=0.5, y=1.12,
-                        showarrow=False, font=dict(color="#94a3b8", size=10),
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=1.12,
+                        showarrow=False,
+                        font=dict(color="#94a3b8", size=10),
                         xanchor="center",
                     ),
                 ],
@@ -2482,21 +2806,27 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             _has_road_data = True
             turns = [e["turn_index"] for e in road_prog]
             lengths = [e["road_length"] for e in road_prog]
-            _road_fig.add_trace(go.Scatter(
-                x=turns,
-                y=lengths,
-                mode="lines",
-                name=pid,
-                line=dict(color=_pcolor, width=2),
-                showlegend=False,
-                hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} segments<extra></extra>",
-            ))
+            _road_fig.add_trace(
+                go.Scatter(
+                    x=turns,
+                    y=lengths,
+                    mode="lines",
+                    name=pid,
+                    line=dict(color=_pcolor, width=2),
+                    showlegend=False,
+                    hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} segments<extra></extra>",
+                )
+            )
         # Add threshold line at 5 (minimum for longest road award)
         if _has_road_data:
             _road_fig.add_hline(
-                y=5, line_dash="dot", line_color="#94a3b8",
-                annotation_text="Min for 🏆", annotation_position="top left",
-                annotation_font_color="#94a3b8", annotation_font_size=10,
+                y=5,
+                line_dash="dot",
+                line_color="#94a3b8",
+                annotation_text="Min for 🏆",
+                annotation_position="top left",
+                annotation_font_color="#94a3b8",
+                annotation_font_size=10,
             )
             _road_fig.update_layout(
                 **_plotly_layout_base,
@@ -2519,24 +2849,32 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             _has_army_data = True
             turns = [e["turn_index"] for e in army_prog]
             knights = [e["knights"] for e in army_prog]
-            _army_fig.add_trace(go.Scatter(
-                x=turns,
-                y=knights,
-                mode="lines",
-                name=pid,
-                line=dict(color=_pcolor, width=2),
-                showlegend=False,
-                hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} knights<extra></extra>",
-            ))
+            _army_fig.add_trace(
+                go.Scatter(
+                    x=turns,
+                    y=knights,
+                    mode="lines",
+                    name=pid,
+                    line=dict(color=_pcolor, width=2),
+                    showlegend=False,
+                    hovertemplate=f"<b>{pid}</b><br>Turn %{{x}}: %{{y}} knights<extra></extra>",
+                )
+            )
         if _has_army_data:
             _army_fig.add_hline(
-                y=3, line_dash="dot", line_color="#94a3b8",
-                annotation_text="Min for 🏆", annotation_position="top left",
-                annotation_font_color="#94a3b8", annotation_font_size=10,
+                y=3,
+                line_dash="dot",
+                line_color="#94a3b8",
+                annotation_text="Min for 🏆",
+                annotation_position="top left",
+                annotation_font_color="#94a3b8",
+                annotation_font_size=10,
             )
             _army_fig.update_layout(
                 **_plotly_layout_base,
-                yaxis=dict(title="Knights played", gridcolor="#1e293b", color="#94a3b8"),
+                yaxis=dict(
+                    title="Knights played", gridcolor="#1e293b", color="#94a3b8"
+                ),
             )
             st.plotly_chart(_army_fig, width="stretch")
         else:
@@ -2548,11 +2886,16 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     for idx, (pid, pdata) in enumerate(players.items()):
         with player_cols[idx]:
             accent, _, _ = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
-            st.markdown(f"<span style='color:{accent};font-weight:700'>{pid}</span> {'🏆' if pdata.get('is_winner') else ''}", unsafe_allow_html=True)
+            st.markdown(
+                f"<span style='color:{accent};font-weight:700'>{pid}</span> {'🏆' if pdata.get('is_winner') else ''}",
+                unsafe_allow_html=True,
+            )
             st.metric("Final VP", pdata.get("final_vp", "?"))
 
             counts = pdata.get("buildings", {}).get("counts", {})
-            st.caption(f"Buildings: {counts.get('settlements', 0)}S / {counts.get('cities', 0)}C / {counts.get('roads', 0)}R")
+            st.caption(
+                f"Buildings: {counts.get('settlements', 0)}S / {counts.get('cities', 0)}C / {counts.get('roads', 0)}R"
+            )
 
             achievements = pdata.get("achievements", {})
             if achievements.get("has_longest_road"):
@@ -2561,19 +2904,27 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 st.caption("Largest Army")
 
             robber = pdata.get("robber", {})
-            st.caption(f"Robber: moved {robber.get('times_moved_robber', 0)}x, targeted {robber.get('times_targeted', 0)}x")
+            st.caption(
+                f"Robber: moved {robber.get('times_moved_robber', 0)}x, targeted {robber.get('times_targeted', 0)}x"
+            )
 
             dev = pdata.get("dev_cards", {})
             if dev.get("cards_played", 0) or dev.get("cards_held_at_end", 0):
-                st.caption(f"Dev cards: {dev.get('cards_played', 0)} played, {dev.get('cards_held_at_end', 0)} held")
+                st.caption(
+                    f"Dev cards: {dev.get('cards_played', 0)} played, {dev.get('cards_held_at_end', 0)} held"
+                )
 
             dq = pdata.get("decision_quality", {})
             if dq.get("total_prompts", 0):
-                st.caption(f"Retries: {dq.get('retries', 0)}/{dq.get('total_prompts', 0)} ({dq.get('retry_rate', 0):.1%})")
+                st.caption(
+                    f"Retries: {dq.get('retries', 0)}/{dq.get('total_prompts', 0)} ({dq.get('retry_rate', 0):.1%})"
+                )
 
             phase = pdata.get("phase_analysis", {}).get("opening", {})
             if phase.get("pip_count", 0):
-                st.caption(f"Opening: {phase.get('resource_diversity', 0)} types, {phase.get('pip_count', 0)} pips")
+                st.caption(
+                    f"Opening: {phase.get('resource_diversity', 0)} types, {phase.get('pip_count', 0)} pips"
+                )
             market_profile = pdata.get("market_profile", {})
             if market_profile:
                 st.caption(
@@ -2584,7 +2935,9 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 )
             strat = pdata.get("strategy", {})
             if strat.get("strategy_stability") is not None:
-                st.caption(f"Strategy stability: {strat.get('strategy_stability', 0):.0%}")
+                st.caption(
+                    f"Strategy stability: {strat.get('strategy_stability', 0):.0%}"
+                )
 
     # ── Trade Negotiation Breakdown ──
     any_chat = any(
@@ -2600,25 +2953,25 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         for pid, pdata in players.items():
             tc = pdata.get("trade_chat", {})
             opened = tc.get("rooms_opened", 0)
-            chat_rows.append({
-                "Player": pid,
-                "Rooms Opened": opened,
-                "Successful Initiated Trades": f"{tc.get('negotiation_success_rate', 0):.0%}",
-                "Proposals Made": tc.get("proposals_made", 0),
-                "Proposals Accepted": tc.get("proposals_accepted", 0),
-                "Counter-Offers Made": tc.get("counter_offers_made", 0),
-                "Others' Rooms Participated": tc.get("rooms_participated_in", 0),
-                "Rooms Opened / Turn": (
-                    f"{opened / num_turns:.2f}" if num_turns > 0 else "—"
-                ),
-            })
+            chat_rows.append(
+                {
+                    "Player": pid,
+                    "Rooms Opened": opened,
+                    "Successful Initiated Trades": f"{tc.get('negotiation_success_rate', 0):.0%}",
+                    "Proposals Made": tc.get("proposals_made", 0),
+                    "Proposals Accepted": tc.get("proposals_accepted", 0),
+                    "Counter-Offers Made": tc.get("counter_offers_made", 0),
+                    "Others' Rooms Participated": tc.get("rooms_participated_in", 0),
+                    "Rooms Opened / Turn": (
+                        f"{opened / num_turns:.2f}" if num_turns > 0 else "—"
+                    ),
+                }
+            )
         st.dataframe(chat_rows, width="stretch")
 
         # ── Negotiation Strategy Analysis ──
         st.subheader("🎯 Negotiation Strategy")
-        st.caption(
-            "Owner perspective: whether final deals match the original ask."
-        )
+        st.caption("Owner perspective: whether final deals match the original ask.")
         neg_rows = []
         for pid, pdata in players.items():
             tc = pdata.get("trade_chat", {})
@@ -2626,18 +2979,19 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             matched = tc.get("deals_matched_original", 0)
             negotiated = tc.get("deals_negotiated_away", 0)
             total_deals = matched + negotiated
-            neg_rows.append({
-                "Player": pid,
-                "🏠 Rooms Opened": opened,
-                "✅ Deals at Original Terms": matched,
-                "🔄 Deals Negotiated Away": negotiated,
-                "📊 Original Terms Rate": (
-                    f"{matched / total_deals:.0%}"
-                    if total_deals > 0 else "—"
-                ),
-                "🔁 Counter-Offers Received": tc.get("counter_offers_received", 0),
-                "🤝 Others' Rooms Participated": tc.get("rooms_participated_in", 0),
-            })
+            neg_rows.append(
+                {
+                    "Player": pid,
+                    "🏠 Rooms Opened": opened,
+                    "✅ Deals at Original Terms": matched,
+                    "🔄 Deals Negotiated Away": negotiated,
+                    "📊 Original Terms Rate": (
+                        f"{matched / total_deals:.0%}" if total_deals > 0 else "—"
+                    ),
+                    "🔁 Counter-Offers Received": tc.get("counter_offers_received", 0),
+                    "🤝 Others' Rooms Participated": tc.get("rooms_participated_in", 0),
+                }
+            )
         if any(r["🏠 Rooms Opened"] > 0 for r in neg_rows):
             st.dataframe(neg_rows, width="stretch")
         else:
@@ -2645,7 +2999,11 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
         # ── Bipartite trade network (aggregated across all resources) ──
         _RESOURCE_EMOJIS = {
-            "WOOD": "🪵", "BRICK": "🧱", "SHEEP": "🐑", "WHEAT": "🌾", "ORE": "🪨",
+            "WOOD": "🪵",
+            "BRICK": "🧱",
+            "SHEEP": "🐑",
+            "WHEAT": "🌾",
+            "ORE": "🪨",
         }
         _ENTITY_COLORS: dict[str, str] = {"BANK": "#6b7280", "PORT": "#8b5cf6"}
         # Build total trading volume between each pair of actors
@@ -2682,15 +3040,20 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                         pair_volume[key] = pair_volume.get(key, 0) + vol
 
         if pair_volume and all_trade_nodes:
-            st.caption("Total trade volume between each pair of actors (incl. 🏦 BANK / ⚓ PORT maritime)")
+            st.caption(
+                "Total trade volume between each pair of actors (incl. 🏦 BANK / ⚓ PORT maritime)"
+            )
 
             _NODE_ORDER = ("BLUE", "ORANGE", "RED", "WHITE", "BANK", "PORT")
             _NODE_EMOJIS: dict[str, str] = {
-                "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
-                "BANK": "🏦", "PORT": "⚓",
+                "BLUE": "🔵",
+                "RED": "🔴",
+                "WHITE": "⚪",
+                "ORANGE": "🟠",
+                "BANK": "🏦",
+                "PORT": "⚓",
             }
             hex_nodes = [n for n in _NODE_ORDER if n in all_trade_nodes]
-            n_nodes = len(hex_nodes)
 
             # Regular hexagon: all 6 nodes at equal radius, one per vertex
             # Vertex order clockwise from top: BLUE, ORANGE, BANK, WHITE, RED, PORT
@@ -2713,12 +3076,16 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             max_vol = max(pair_volume.values()) if pair_volume else 1
 
             # Faint circle
-            fig.add_trace(go.Scatter(
-                x=circle_xs, y=circle_ys,
-                mode="lines",
-                line=dict(width=1, color="rgba(148,163,184,0.1)"),
-                hoverinfo="none", showlegend=False,
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=circle_xs,
+                    y=circle_ys,
+                    mode="lines",
+                    line=dict(width=1, color="rgba(148,163,184,0.1)"),
+                    hoverinfo="none",
+                    showlegend=False,
+                )
+            )
 
             # Edges
             for (a, b), vol in pair_volume.items():
@@ -2735,19 +3102,31 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     cy = my + 0.25 * my / dist
                 else:
                     cx, cy = mx, my
-                curve_xs = [(1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1 for t in [i/40 for i in range(41)]]
-                curve_ys = [(1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1 for t in [i/40 for i in range(41)]]
-                fig.add_trace(go.Scatter(
-                    x=curve_xs + [None], y=curve_ys + [None],
-                    mode="lines",
-                    line=dict(width=lw, color="rgba(200,200,200,0.4)"),
-                    hoverinfo="none", showlegend=False,
-                ))
+                curve_xs = [
+                    (1 - t) ** 2 * x0 + 2 * (1 - t) * t * cx + t**2 * x1
+                    for t in [i / 40 for i in range(41)]
+                ]
+                curve_ys = [
+                    (1 - t) ** 2 * y0 + 2 * (1 - t) * t * cy + t**2 * y1
+                    for t in [i / 40 for i in range(41)]
+                ]
+                fig.add_trace(
+                    go.Scatter(
+                        x=curve_xs + [None],
+                        y=curve_ys + [None],
+                        mode="lines",
+                        line=dict(width=lw, color="rgba(200,200,200,0.4)"),
+                        hoverinfo="none",
+                        showlegend=False,
+                    )
+                )
 
             # Nodes
             for node in all_hex:
                 x, y = pos[node]
-                node_color = _ENTITY_COLORS.get(node, PLAYER_COLORS.get(node, NEUTRAL_COLORS)[0])
+                node_color = _ENTITY_COLORS.get(
+                    node, PLAYER_COLORS.get(node, NEUTRAL_COLORS)[0]
+                )
                 node_size = 34
                 label = f"{_NODE_EMOJIS.get(node, '')} {node}"
                 # Position label away from center
@@ -2757,22 +3136,44 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     text_pos = "middle left"
                 else:
                     text_pos = "middle right"
-                fig.add_trace(go.Scatter(
-                    x=[x], y=[y],
-                    mode="markers+text",
-                    marker=dict(size=node_size, color=node_color, symbol="hexagon", line=dict(width=2, color="#1f2937")),
-                    text=label, textposition=text_pos,
-                    textfont=dict(size=11, color="#cbd5e1"),
-                    hovertext=f"{node}: {sum(v for (a,b),v in pair_volume.items() if node in (a,b))} total vol",
-                    hoverinfo="text", showlegend=False,
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=[x],
+                        y=[y],
+                        mode="markers+text",
+                        marker=dict(
+                            size=node_size,
+                            color=node_color,
+                            symbol="hexagon",
+                            line=dict(width=2, color="#1f2937"),
+                        ),
+                        text=label,
+                        textposition=text_pos,
+                        textfont=dict(size=11, color="#cbd5e1"),
+                        hovertext=f"{node}: {sum(v for (a, b), v in pair_volume.items() if node in (a, b))} total vol",
+                        hoverinfo="text",
+                        showlegend=False,
+                    )
+                )
 
             fig.update_layout(
                 height=500,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.6, 1.6]),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.6, 1.6], scaleanchor="x", scaleratio=1),
+                xaxis=dict(
+                    showgrid=False,
+                    zeroline=False,
+                    showticklabels=False,
+                    range=[-1.6, 1.6],
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    zeroline=False,
+                    showticklabels=False,
+                    range=[-1.6, 1.6],
+                    scaleanchor="x",
+                    scaleratio=1,
+                ),
                 margin=dict(l=20, r=20, t=20, b=20),
             )
             st.plotly_chart(fig, width="stretch")
@@ -2784,50 +3185,83 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         st.subheader("Market Structure")
 
         _TABLE_EMOJIS: dict[str, str] = {
-            "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
-            "BANK": "🏦", "PORT": "⚓",
+            "BLUE": "🔵",
+            "RED": "🔴",
+            "WHITE": "⚪",
+            "ORANGE": "🟠",
+            "BANK": "🏦",
+            "PORT": "⚓",
         }
 
         # ── Maker / Taker bar chart ──
         _MT_ACTOR_EMOJIS: dict[str, str] = {
-            "BLUE": "🔵", "RED": "🔴", "WHITE": "⚪", "ORANGE": "🟠",
-            "BANK": "🏦", "PORT": "⚓",
+            "BLUE": "🔵",
+            "RED": "🔴",
+            "WHITE": "⚪",
+            "ORANGE": "🟠",
+            "BANK": "🏦",
+            "PORT": "⚓",
         }
         maker_taker_rows = []
         # Players first, then BANK/PORT grouped at the end
-        mt_actor_order_raw = [a for a in market_actors if a in players] + [a for a in ("BANK", "PORT") if a in market_actors]
+        mt_actor_order_raw = [a for a in market_actors if a in players] + [
+            a for a in ("BANK", "PORT") if a in market_actors
+        ]
         for actor in mt_actor_order_raw:
             stats = market_actors[actor]
             if not isinstance(stats, dict):
                 continue
             label = f"{_MT_ACTOR_EMOJIS.get(actor, '')} {actor}"
-            maker_taker_rows.append({"Actor": label, "Deals": stats.get("maker_deals", 0), "Type": "📈 Maker"})
-            maker_taker_rows.append({"Actor": label, "Deals": stats.get("taker_deals", 0), "Type": "📉 Taker"})
+            maker_taker_rows.append(
+                {
+                    "Actor": label,
+                    "Deals": stats.get("maker_deals", 0),
+                    "Type": "📈 Maker",
+                }
+            )
+            maker_taker_rows.append(
+                {
+                    "Actor": label,
+                    "Deals": stats.get("taker_deals", 0),
+                    "Type": "📉 Taker",
+                }
+            )
         if maker_taker_rows:
             mt_df = pd.DataFrame(maker_taker_rows)
-            actor_order = [f"{_MT_ACTOR_EMOJIS.get(a, '')} {a}" for a in mt_actor_order_raw]
-            actor_colors = [
-                _ENTITY_COLORS.get(a, PLAYER_COLORS.get(a, NEUTRAL_COLORS)[0])
-                for a in mt_actor_order_raw
+            actor_order = [
+                f"{_MT_ACTOR_EMOJIS.get(a, '')} {a}" for a in mt_actor_order_raw
             ]
             mt_chart = (
                 alt.Chart(mt_df)
                 .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
                 .encode(
-                    x=alt.X("Actor:N", sort=actor_order, axis=alt.Axis(labelColor="#e2e8f0", titleColor="#e2e8f0", labelAngle=0)),
-                    y=alt.Y("Deals:Q", axis=alt.Axis(labelColor="#94a3b8", titleColor="#e2e8f0")),
+                    x=alt.X(
+                        "Actor:N",
+                        sort=actor_order,
+                        axis=alt.Axis(
+                            labelColor="#e2e8f0", titleColor="#e2e8f0", labelAngle=0
+                        ),
+                    ),
+                    y=alt.Y(
+                        "Deals:Q",
+                        axis=alt.Axis(labelColor="#94a3b8", titleColor="#e2e8f0"),
+                    ),
                     color=alt.Color(
                         "Type:N",
                         scale=alt.Scale(
                             domain=["📈 Maker", "📉 Taker"],
                             range=["#22c55e", "#ef4444"],
                         ),
-                        legend=alt.Legend(title="Type", labelColor="#e2e8f0", titleColor="#e2e8f0"),
+                        legend=alt.Legend(
+                            title="Type", labelColor="#e2e8f0", titleColor="#e2e8f0"
+                        ),
                     ),
                     xOffset="Type:N",
                     tooltip=["Actor", "Type", "Deals"],
                 )
-                .properties(height=360, title=alt.Title("Maker vs Taker Deals", color="#e2e8f0"))
+                .properties(
+                    height=360, title=alt.Title("Maker vs Taker Deals", color="#e2e8f0")
+                )
                 .configure_view(strokeWidth=0)
                 .configure_axis(gridColor="rgba(148,163,184,0.15)")
             )
@@ -2837,15 +3271,24 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         resource_market_share = market.get("resource_market_share", {})
         if resource_market_share:
             st.subheader("Market Share by Resource")
-            st.caption("Each player's share of total trade volume per resource (including BANK/PORT).")
+            st.caption(
+                "Each player's share of total trade volume per resource (including BANK/PORT)."
+            )
 
             _RESOURCE_LABELS = {
-                "WOOD": "🪵 WOOD", "BRICK": "🧱 BRICK", "SHEEP": "🐑 SHEEP",
-                "WHEAT": "🌾 WHEAT", "ORE": "🪨 ORE",
+                "WOOD": "🪵 WOOD",
+                "BRICK": "🧱 BRICK",
+                "SHEEP": "🐑 SHEEP",
+                "WHEAT": "🌾 WHEAT",
+                "ORE": "🪨 ORE",
             }
             _ACTOR_LABELS = {
-                "BLUE": "🔵 BLUE", "RED": "🔴 RED", "WHITE": "⚪ WHITE",
-                "ORANGE": "🟠 ORANGE", "BANK": "🏦 BANK", "PORT": "⚓ PORT",
+                "BLUE": "🔵 BLUE",
+                "RED": "🔴 RED",
+                "WHITE": "⚪ WHITE",
+                "ORANGE": "🟠 ORANGE",
+                "BANK": "🏦 BANK",
+                "PORT": "⚓ PORT",
             }
             share_chart_rows = []
             all_share_actors: list[str] = []
@@ -2854,18 +3297,22 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 for actor, share in shares.items():
                     if actor not in all_share_actors:
                         all_share_actors.append(actor)
-                    share_chart_rows.append({
-                        "Resource": _RESOURCE_LABELS.get(resource, resource),
-                        "Actor": _ACTOR_LABELS.get(actor, actor),
-                        "Share": share,
-                    })
+                    share_chart_rows.append(
+                        {
+                            "Resource": _RESOURCE_LABELS.get(resource, resource),
+                            "Actor": _ACTOR_LABELS.get(actor, actor),
+                            "Share": share,
+                        }
+                    )
 
             if share_chart_rows:
                 share_df = pd.DataFrame(share_chart_rows)
                 # Stack order (bottom→top): BANK, PORT, BLUE, ORANGE, RED, WHITE
                 # Legend reads top→bottom matching the visual top→bottom of bars
                 _STACK_ORDER = ("BANK", "PORT", "BLUE", "ORANGE", "RED", "WHITE")
-                ordered_actors_raw_bottom_up = [a for a in _STACK_ORDER if a in all_share_actors]
+                ordered_actors_raw_bottom_up = [
+                    a for a in _STACK_ORDER if a in all_share_actors
+                ]
                 # Legend order is reversed (top→bottom = top of stack first)
                 legend_order_raw = list(reversed(ordered_actors_raw_bottom_up))
                 legend_actors = [_ACTOR_LABELS.get(a, a) for a in legend_order_raw]
@@ -2879,7 +3326,10 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     for i, a in enumerate(ordered_actors_raw_bottom_up)
                 }
                 share_df["_stack_order"] = share_df["Actor"].map(stack_index_map)
-                resource_order = [_RESOURCE_LABELS[r] for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")]
+                resource_order = [
+                    _RESOURCE_LABELS[r]
+                    for r in ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
+                ]
 
                 share_chart = (
                     alt.Chart(share_df)
@@ -2893,13 +3343,19 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                         y=alt.Y(
                             "Share:Q",
                             stack="normalize",
-                            axis=alt.Axis(format="%", labelColor="#94a3b8", titleColor="#e2e8f0"),
+                            axis=alt.Axis(
+                                format="%", labelColor="#94a3b8", titleColor="#e2e8f0"
+                            ),
                             title="Market Share",
                         ),
                         color=alt.Color(
                             "Actor:N",
                             scale=alt.Scale(domain=legend_actors, range=legend_colors),
-                            legend=alt.Legend(title="Actor", labelColor="#e2e8f0", titleColor="#e2e8f0"),
+                            legend=alt.Legend(
+                                title="Actor",
+                                labelColor="#e2e8f0",
+                                titleColor="#e2e8f0",
+                            ),
                         ),
                         order=alt.Order("_stack_order:Q"),
                         tooltip=[
@@ -2908,7 +3364,10 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                             alt.Tooltip("Share:Q", format=".1%"),
                         ],
                     )
-                    .properties(height=380, title=alt.Title("Market Share per Resource", color="#e2e8f0"))
+                    .properties(
+                        height=380,
+                        title=alt.Title("Market Share per Resource", color="#e2e8f0"),
+                    )
                     .configure_view(strokeWidth=0)
                     .configure_axis(gridColor="rgba(148,163,184,0.15)")
                 )
@@ -2916,8 +3375,7 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     # ── Strategy Evolution ──
     any_strategy = any(
-        pdata.get("strategy", {}).get("opening_strategy")
-        for pdata in players.values()
+        pdata.get("strategy", {}).get("opening_strategy") for pdata in players.values()
     )
     if any_strategy:
         st.subheader("Strategy Evolution")
@@ -2925,9 +3383,12 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             strat = pdata.get("strategy", {})
             if not strat.get("opening_strategy") and not strat.get("strategy_updates"):
                 continue
-            color = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
-            with st.expander(f"{pid} — {strat.get('strategy_update_count', 0)} strategy updates"):
-                st.caption(f"Strategy stability: {strat.get('strategy_stability', 0):.0%}")
+            with st.expander(
+                f"{pid} — {strat.get('strategy_update_count', 0)} strategy updates"
+            ):
+                st.caption(
+                    f"Strategy stability: {strat.get('strategy_stability', 0):.0%}"
+                )
                 if strat.get("opening_strategy"):
                     st.markdown(f"**Opening strategy:** {strat['opening_strategy']}")
                 updates = strat.get("strategy_updates", [])
@@ -2935,8 +3396,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     if i == 0 and upd.get("stage") == "opening_strategy":
                         continue  # Already shown above
                     lt = upd.get("long_term", "")
-                    st.markdown(f"**Turn {upd.get('turn_index', '?')}** ({upd.get('stage', '')}): {lt}")
-                if strat.get("final_strategy") and (not updates or updates[-1].get("long_term") != strat["final_strategy"]):
+                    st.markdown(
+                        f"**Turn {upd.get('turn_index', '?')}** ({upd.get('stage', '')}): {lt}"
+                    )
+                if strat.get("final_strategy") and (
+                    not updates
+                    or updates[-1].get("long_term") != strat["final_strategy"]
+                ):
                     st.markdown(f"**Final strategy:** {strat['final_strategy']}")
 
 

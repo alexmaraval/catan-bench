@@ -143,10 +143,30 @@ class DashboardTests(unittest.TestCase):
         _render_player_summary_table(
             st,
             {
-                "BLUE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
-                "ORANGE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
-                "RED": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
-                "WHITE": {"visible_victory_points": 2, "dev_victory_points": 0, "longest_road_length": 1, "played_knights": 0},
+                "BLUE": {
+                    "visible_victory_points": 2,
+                    "dev_victory_points": 0,
+                    "longest_road_length": 1,
+                    "played_knights": 0,
+                },
+                "ORANGE": {
+                    "visible_victory_points": 2,
+                    "dev_victory_points": 0,
+                    "longest_road_length": 1,
+                    "played_knights": 0,
+                },
+                "RED": {
+                    "visible_victory_points": 2,
+                    "dev_victory_points": 0,
+                    "longest_road_length": 1,
+                    "played_knights": 0,
+                },
+                "WHITE": {
+                    "visible_victory_points": 2,
+                    "dev_victory_points": 0,
+                    "longest_road_length": 1,
+                    "played_knights": 0,
+                },
             },
             winner_ids=["BLUE"],
         )
@@ -166,7 +186,10 @@ class DashboardTests(unittest.TestCase):
                 {
                     "game_id": "live-game",
                     "player_ids": ["RED", "BLUE"],
-                    "player_adapter_types": {"RED": "LLMPlayer", "BLUE": "RandomLegalPlayer"},
+                    "player_adapter_types": {
+                        "RED": "LLMPlayer",
+                        "BLUE": "RandomLegalPlayer",
+                    },
                 },
             )
             self._write_jsonl(
@@ -211,7 +234,10 @@ class DashboardTests(unittest.TestCase):
                         "phase": "play_turn",
                         "decision_index": 4,
                         "stage": "turn_start",
-                        "memory": {"long_term": {"goal": "trade"}, "short_term": {"plan": "offer"}},
+                        "memory": {
+                            "long_term": {"goal": "trade"},
+                            "short_term": {"plan": "offer"},
+                        },
                     }
                 ],
             )
@@ -238,15 +264,26 @@ class DashboardTests(unittest.TestCase):
 
             self.assertEqual(snapshot.player_ids, ("RED", "BLUE"))
             self.assertEqual(snapshot.max_history_index, 1)
-            self.assertEqual(snapshot.memory_traces_by_player["RED"][0].memory.long_term, {"goal": "trade"})
-            self.assertEqual(snapshot.prompt_traces_by_player["RED"][0].stage, "choose_action")
+            self.assertEqual(
+                snapshot.memory_traces_by_player["RED"][0].memory.long_term,
+                {"goal": "trade"},
+            )
+            self.assertEqual(
+                snapshot.prompt_traces_by_player["RED"][0].stage, "choose_action"
+            )
             self.assertEqual(snapshot.public_events[0].kind, "trade_offered")
 
     def test_load_dashboard_snapshot_discovers_players_without_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
-            self._write_json(run_dir / "players" / "WHITE" / "memory.json", {"memory": {"long_term": None, "short_term": None}})
-            self._write_json(run_dir / "players" / "ORANGE" / "memory.json", {"memory": {"long_term": {"note": "x"}, "short_term": None}})
+            self._write_json(
+                run_dir / "players" / "WHITE" / "memory.json",
+                {"memory": {"long_term": None, "short_term": None}},
+            )
+            self._write_json(
+                run_dir / "players" / "ORANGE" / "memory.json",
+                {"memory": {"long_term": {"note": "x"}, "short_term": None}},
+            )
 
             snapshot = load_dashboard_snapshot(run_dir)
 
@@ -414,7 +451,12 @@ class DashboardTests(unittest.TestCase):
                 "tiles": [
                     {
                         "coordinate": [0, 0, 0],
-                        "tile": {"id": 0, "type": "RESOURCE_TILE", "resource": "WOOD", "number": 8},
+                        "tile": {
+                            "id": 0,
+                            "type": "RESOURCE_TILE",
+                            "resource": "WOOD",
+                            "number": 8,
+                        },
                     }
                 ],
                 "nodes": {
@@ -548,7 +590,9 @@ class DashboardTests(unittest.TestCase):
             "trade cancelled",
         )
 
-    def test_recent_turn_event_sections_group_recent_turns_and_filter_chat_noise(self) -> None:
+    def test_recent_turn_event_sections_group_recent_turns_and_filter_chat_noise(
+        self,
+    ) -> None:
         snapshot = DashboardSnapshot(
             run_dir=Path("/tmp/fake-run"),
             metadata={},
@@ -634,7 +678,9 @@ class DashboardTests(unittest.TestCase):
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
     @classmethod
     def _write_jsonl(cls, path: Path, payloads: list[dict]) -> None:

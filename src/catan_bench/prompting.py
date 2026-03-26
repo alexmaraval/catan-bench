@@ -12,9 +12,17 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in lean test envs.
 
 
 _RESOURCE_ORDER = ("WOOD", "BRICK", "SHEEP", "WHEAT", "ORE")
-_DEV_CARD_ORDER = ("KNIGHT", "YEAR_OF_PLENTY", "MONOPOLY", "ROAD_BUILDING", "VICTORY_POINT")
+_DEV_CARD_ORDER = (
+    "KNIGHT",
+    "YEAR_OF_PLENTY",
+    "MONOPOLY",
+    "ROAD_BUILDING",
+    "VICTORY_POINT",
+)
 # Keys that are harness metadata or already in the system prompt — excluded from payload_json
-_NOISE_KEYS = frozenset({"game_rules", "game_id", "history_index", "phase", "decision_index"})
+_NOISE_KEYS = frozenset(
+    {"game_rules", "game_id", "history_index", "phase", "decision_index"}
+)
 
 
 def fmt_resources(resources: object) -> str:
@@ -186,7 +194,9 @@ class PromptRenderer:
             return self._env.get_template(template_name).render(**context).strip()
         return self._render_without_jinja(template_name, context).strip()
 
-    def _render_without_jinja(self, template_name: str, context: dict[str, object]) -> str:
+    def _render_without_jinja(
+        self, template_name: str, context: dict[str, object]
+    ) -> str:
         template_path = self._templates_dir / template_name
         template = template_path.read_text(encoding="utf-8")
         template = re.sub(

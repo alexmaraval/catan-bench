@@ -36,7 +36,9 @@ def build_player_replay_timeline(
     return build_replay_timeline(run_dir)
 
 
-def export_replay_html(run_dir: str | Path, output_path: str | Path | None = None) -> Path:
+def export_replay_html(
+    run_dir: str | Path, output_path: str | Path | None = None
+) -> Path:
     run_path = Path(run_dir)
     timeline = build_replay_timeline(run_path)
     output = Path(output_path) if output_path is not None else run_path / "replay.html"
@@ -53,9 +55,7 @@ def export_replay_html(run_dir: str | Path, output_path: str | Path | None = Non
     output.write_text(
         (
             "<html><head><meta charset='utf-8'><title>catan-bench replay</title></head><body>"
-            "<h1>catan-bench replay</h1>"
-            + "".join(html_items)
-            + "</body></html>"
+            "<h1>catan-bench replay</h1>" + "".join(html_items) + "</body></html>"
         ),
         encoding="utf-8",
     )
@@ -108,7 +108,9 @@ def _read_jsonl(path: Path) -> list[dict[str, JsonValue]]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Export a simple public replay HTML page.")
+    parser = argparse.ArgumentParser(
+        description="Export a simple public replay HTML page."
+    )
     parser.add_argument("run_dir", help="Run directory to export.")
     parser.add_argument("--output", help="Optional output file path.")
     args = parser.parse_args(argv)

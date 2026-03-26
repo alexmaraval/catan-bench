@@ -44,7 +44,9 @@ def load_game_config(path: str | Path) -> GameConfig:
     payload = data.get("game", data)
     engine = str(payload.get("engine", "catanatron"))
     if engine != "catanatron":
-        raise ValueError(f"Unsupported engine {engine!r}. Only 'catanatron' is supported.")
+        raise ValueError(
+            f"Unsupported engine {engine!r}. Only 'catanatron' is supported."
+        )
 
     seed = payload.get("seed")
     discard_limit = int(payload.get("discard_limit", 7))
@@ -56,7 +58,9 @@ def load_game_config(path: str | Path) -> GameConfig:
     trading_chat_max_failed_attempts_per_turn = int(
         payload.get("trading_chat_max_failed_attempts_per_turn", 5)
     )
-    trading_chat_max_rooms_per_turn = int(payload.get("trading_chat_max_rooms_per_turn", 5))
+    trading_chat_max_rooms_per_turn = int(
+        payload.get("trading_chat_max_rooms_per_turn", 5)
+    )
     trading_chat_max_rounds_per_attempt = int(
         payload.get("trading_chat_max_rounds_per_attempt", 3)
     )
@@ -67,7 +71,9 @@ def load_game_config(path: str | Path) -> GameConfig:
     if prompt_history_limit is not None:
         prompt_history_limit = int(prompt_history_limit)
         if prompt_history_limit < 0:
-            raise ValueError("`prompt_history_limit` must be non-negative when provided.")
+            raise ValueError(
+                "`prompt_history_limit` must be non-negative when provided."
+            )
     if trading_chat_history_limit is not None:
         trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
@@ -97,7 +103,9 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
 
     players_payload = data.get("players")
     if not isinstance(players_payload, list) or not players_payload:
-        raise ValueError("openai-players.toml must define a non-empty [[players]] list.")
+        raise ValueError(
+            "openai-players.toml must define a non-empty [[players]] list."
+        )
 
     seen_ids: set[str] = set()
     configs: list[PlayerConfig] = []

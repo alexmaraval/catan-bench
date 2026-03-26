@@ -30,7 +30,9 @@ class Action:
         return cls(
             action_type=str(data["action_type"]),
             payload=dict(data.get("payload") or {}),
-            description=str(data["description"]) if data.get("description") is not None else None,
+            description=str(data["description"])
+            if data.get("description") is not None
+            else None,
         )
 
 
@@ -66,7 +68,9 @@ class Event:
             history_index=int(data.get("history_index", 0)),
             turn_index=int(data.get("turn_index", 0)),
             phase=str(data.get("phase", "unknown")),
-            decision_index=int(data["decision_index"]) if data.get("decision_index") is not None else None,
+            decision_index=int(data["decision_index"])
+            if data.get("decision_index") is not None
+            else None,
             actor_player_id=(
                 str(data["actor_player_id"])
                 if data.get("actor_player_id") is not None
@@ -127,7 +131,9 @@ class MemorySnapshot:
             decision_index=int(data.get("decision_index", 0)),
             stage=str(data.get("stage", "unknown")),
             memory=PlayerMemory.from_dict(
-                dict(data.get("memory") or {}) if isinstance(data.get("memory"), dict) else None
+                dict(data.get("memory") or {})
+                if isinstance(data.get("memory"), dict)
+                else None
             ),
         )
 
@@ -157,7 +163,9 @@ class PublicStateSnapshot:
             history_index=int(data.get("history_index", 0)),
             turn_index=int(data.get("turn_index", 0)),
             phase=str(data.get("phase", "unknown")),
-            decision_index=int(data["decision_index"]) if data.get("decision_index") is not None else None,
+            decision_index=int(data["decision_index"])
+            if data.get("decision_index") is not None
+            else None,
             public_state=dict(data.get("public_state") or {}),
         )
 
@@ -289,7 +297,9 @@ class ActionObservation:
             "public_state": self.public_state,
             "private_state": self.private_state,
             "public_history": [event.to_dict() for event in self.public_history],
-            "turn_public_events": [event.to_dict() for event in self.turn_public_events],
+            "turn_public_events": [
+                event.to_dict() for event in self.turn_public_events
+            ],
             "legal_actions": [action.to_dict() for action in self.legal_actions],
             "decision_prompt": self.decision_prompt,
             "trade_chat_enabled": self.trade_chat_enabled,
@@ -323,7 +333,9 @@ class TurnEndObservation:
             "decision_index": self.decision_index,
             "public_state": self.public_state,
             "private_state": self.private_state,
-            "turn_public_events": [event.to_dict() for event in self.turn_public_events],
+            "turn_public_events": [
+                event.to_dict() for event in self.turn_public_events
+            ],
             "game_rules": self.game_rules,
             "memory": self.memory.to_dict(),
         }
@@ -601,10 +613,14 @@ class PromptTraceAttempt:
     def from_dict(cls, data: dict[str, JsonValue]) -> "PromptTraceAttempt":
         return cls(
             messages=tuple(
-                dict(message) for message in data.get("messages", ()) if isinstance(message, dict)
+                dict(message)
+                for message in data.get("messages", ())
+                if isinstance(message, dict)
             ),
             response=dict(data.get("response") or {}),
-            response_text=str(data["response_text"]) if data.get("response_text") is not None else None,
+            response_text=str(data["response_text"])
+            if data.get("response_text") is not None
+            else None,
         )
 
 
@@ -675,7 +691,9 @@ class GameResult:
     def from_dict(cls, data: dict[str, JsonValue]) -> "GameResult":
         return cls(
             game_id=str(data["game_id"]),
-            winner_ids=tuple(str(player_id) for player_id in data.get("winner_ids", ())),
+            winner_ids=tuple(
+                str(player_id) for player_id in data.get("winner_ids", ())
+            ),
             total_decisions=int(data["total_decisions"]),
             public_event_count=int(data["public_event_count"]),
             memory_writes=int(data["memory_writes"]),

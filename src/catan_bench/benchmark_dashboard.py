@@ -80,7 +80,9 @@ def _load_benchmark_data(
             "total_vp": elo.total_vp,
             "history": elo.history,
         }
-        rubrics_ser = {m: r.as_dict() | {"overall": r.overall} for m, r in rubrics.items()}
+        rubrics_ser = {
+            m: r.as_dict() | {"overall": r.overall} for m, r in rubrics.items()
+        }
         return games_ser, elo_ser, rubrics_ser
 
     result = _cached_load(str(base_run_dir))
@@ -150,9 +152,7 @@ def render_benchmark_tab(st: Any, *, base_run_dir: Path) -> None:
     cols[1].metric("Unique Models", len(unique_models))
     cols[2].metric("Total Decisions", f"{total_decisions:,}")
     # Check if we have cross-model games
-    cross_model_games = sum(
-        1 for g in games if len(set(g.player_models.values())) > 1
-    )
+    cross_model_games = sum(1 for g in games if len(set(g.player_models.values())) > 1)
     cols[3].metric("Cross-Model Games", cross_model_games)
 
     if len(unique_models) < 2:
@@ -190,7 +190,9 @@ def _render_leaderboard(
 ) -> None:
     st.subheader("ELO Leaderboard")
 
-    ranked_models = sorted(elo.ratings.keys(), key=lambda m: elo.ratings[m], reverse=True)
+    ranked_models = sorted(
+        elo.ratings.keys(), key=lambda m: elo.ratings[m], reverse=True
+    )
 
     rows = []
     for rank, model in enumerate(ranked_models, 1):
@@ -246,7 +248,13 @@ def _render_leaderboard(
 
 def _render_rubric_radar(st: Any, rubrics: dict[str, RubricScores]) -> None:
     st.subheader("Rubric Comparison")
-    categories = ["Trading", "Strategy", "Manipulation", "Resource Mgmt", "Game Mechanics"]
+    categories = [
+        "Trading",
+        "Strategy",
+        "Manipulation",
+        "Resource Mgmt",
+        "Game Mechanics",
+    ]
 
     fig = go.Figure()
     for i, (model, scores) in enumerate(rubrics.items()):
@@ -358,9 +366,7 @@ def _render_elo_history(st: Any, elo: EloState) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _render_head_to_head(
-    st: Any, games: list[GameRecord], models: list[str]
-) -> None:
+def _render_head_to_head(st: Any, games: list[GameRecord], models: list[str]) -> None:
     st.subheader("Head-to-Head Win Rates")
 
     h2h = compute_head_to_head(games)
@@ -382,7 +388,9 @@ def _render_head_to_head(
                 if total > 0:
                     wr = record["wins"] / total
                     row_vals.append(wr)
-                    row_annot.append(f"{wr:.0%}\n({record['wins']}W {record['losses']}L)")
+                    row_annot.append(
+                        f"{wr:.0%}\n({record['wins']}W {record['losses']}L)"
+                    )
                 else:
                     row_vals.append(None)
                     row_annot.append("N/A")
@@ -457,7 +465,13 @@ def _render_model_breakdowns(
             f"{wins}W / {gp}G | Overall: {rubric.overall:.1f}/100"
         ):
             cols = st.columns(5)
-            labels = ["Trading", "Strategy", "Manipulation", "Resource Mgmt", "Game Mechanics"]
+            labels = [
+                "Trading",
+                "Strategy",
+                "Manipulation",
+                "Resource Mgmt",
+                "Game Mechanics",
+            ]
             values = [
                 rubric.trading,
                 rubric.strategy,

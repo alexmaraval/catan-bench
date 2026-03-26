@@ -9,6 +9,7 @@ from typing import Sequence
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:  # pragma: no cover - optional dependency in lean test envs.
+
     def load_dotenv(path: str | Path, override: bool = False):  # type: ignore[no-redef]
         loaded = False
         env_path = Path(path)
@@ -27,6 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency in lean te
                 loaded = True
         return loaded
 
+
 from .config import GameConfig, PlayerConfig, load_game_config, load_player_configs
 from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
@@ -37,7 +39,9 @@ from .storage import read_json
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
-except RuntimeError as exc:  # pragma: no cover - dependency missing in some environments.
+except (
+    RuntimeError
+) as exc:  # pragma: no cover - dependency missing in some environments.
     CatanatronEngineAdapter = None
     _catanatron_import_error = exc
 else:
@@ -64,7 +68,9 @@ def build_engine(
     )
 
 
-def build_players(players: Sequence[PlayerConfig], game_config: GameConfig | None = None):
+def build_players(
+    players: Sequence[PlayerConfig], game_config: GameConfig | None = None
+):
     built_players = {}
     effective_game_config = game_config or GameConfig()
     for player_config in players:
@@ -132,7 +138,8 @@ def run_from_config_files(
             DebugTerminalReporter(
                 skip_setup=debug_from_setup,
                 debug_trade=debug_trade,
-            ) if (debug or debug_from_setup or debug_trade)
+            )
+            if (debug or debug_from_setup or debug_trade)
             else TerminalReporter()
         ),
     )
@@ -244,6 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_directory = result.metadata.get("benchmark", {}).get("run_directory")
         if run_directory:
             from .analysis import analyze_game, print_terminal_summary
+
             analysis = analyze_game(run_directory)
             print_terminal_summary(analysis)
 

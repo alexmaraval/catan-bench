@@ -1,4 +1,5 @@
 """Terminal reporter: prints a live human-readable game summary to stderr."""
+
 from __future__ import annotations
 
 import json
@@ -20,16 +21,16 @@ if TYPE_CHECKING:
 # ── ANSI helpers ─────────────────────────────────────────────────────────────
 
 _RESET = "\033[0m"
-_BOLD  = "\033[1m"
-_DIM   = "\033[2m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
 
 _PLAYER_ANSI: dict[str, str] = {
-    "RED":    "\033[31m",
-    "BLUE":   "\033[34m",
+    "RED": "\033[31m",
+    "BLUE": "\033[34m",
     "ORANGE": "\033[33m",
-    "WHITE":  "\033[97m",
-    "GREEN":  "\033[32m",
-    "TEAL":   "\033[36m",
+    "WHITE": "\033[97m",
+    "GREEN": "\033[32m",
+    "TEAL": "\033[36m",
 }
 
 
@@ -38,6 +39,7 @@ def _c(text: str, code: str, *, on: bool) -> str:
 
 
 # ── Reporter ─────────────────────────────────────────────────────────────────
+
 
 class TerminalReporter:
     """Emits structured, coloured game progress to *file* (default: stderr)."""
@@ -65,7 +67,9 @@ class TerminalReporter:
         if decision.turn_index != self._last_turn:
             self._last_turn = decision.turn_index
             label = f" Turn {decision.turn_index} "
-            bar = _c("─" * 4 + label + "─" * max(0, 42 - len(label)), _DIM, on=self._colour)
+            bar = _c(
+                "─" * 4 + label + "─" * max(0, 42 - len(label)), _DIM, on=self._colour
+            )
             self._put(f"\n{bar}")
 
         if transition.result_metadata.get("hidden_internal_step"):
@@ -73,7 +77,9 @@ class TerminalReporter:
 
         # Collect descriptions from public events; fall back to action description
         descs = [d for e in transition.public_events if (d := _describe(e)) is not None]
-        summary = "  ·  ".join(descs) if descs else (action.description or action.action_type)
+        summary = (
+            "  ·  ".join(descs) if descs else (action.description or action.action_type)
+        )
 
         pid = decision.acting_player_id
         pad = " " * max(0, 8 - len(pid))
@@ -134,7 +140,9 @@ class DebugTerminalReporter(TerminalReporter):
             f"[turn={trace.turn_index} phase={trace.phase} decision={trace.decision_index} "
             f"stage={trace.stage}] "
         )
-        bar = _c("─" * 3 + header + "─" * max(0, 24 - len(header)), _DIM, on=self._colour)
+        bar = _c(
+            "─" * 3 + header + "─" * max(0, 24 - len(header)), _DIM, on=self._colour
+        )
         self._put(f"\n{bar}")
         self._put(f"  model  {trace.model}")
         self._put(f"  temperature  {trace.temperature}")
@@ -144,7 +152,9 @@ class DebugTerminalReporter(TerminalReporter):
                 left_title="prompt",
                 left_lines=self._render_attempt_messages(attempt.messages),
                 right_title="answer",
-                right_lines=self._render_attempt_response(attempt.response_text, attempt.response),
+                right_lines=self._render_attempt_response(
+                    attempt.response_text, attempt.response
+                ),
             )
             self._wait_for_next()
 
@@ -172,9 +182,7 @@ class DebugTerminalReporter(TerminalReporter):
         self._put(
             f"  {left_title.upper():<{column_width}}{gutter}{right_title.upper():<{column_width}}"
         )
-        self._put(
-            f"  {'-' * column_width}{gutter}{'-' * column_width}"
-        )
+        self._put(f"  {'-' * column_width}{gutter}{'-' * column_width}")
         wrapped_left = self._wrap_lines(left_lines, width=column_width)
         wrapped_right = self._wrap_lines(right_lines, width=column_width)
         row_count = max(len(wrapped_left), len(wrapped_right))
@@ -196,7 +204,9 @@ class DebugTerminalReporter(TerminalReporter):
             content = message.get("content")
             rendered.append(f"[{role}]")
             if role == "system":
-                rendered.append(DebugTerminalReporter._collapsed_system_prompt_summary(content))
+                rendered.append(
+                    DebugTerminalReporter._collapsed_system_prompt_summary(content)
+                )
             else:
                 rendered.extend(DebugTerminalReporter._render_debug_content(content))
             rendered.append("")
@@ -270,7 +280,9 @@ class DebugTerminalReporter(TerminalReporter):
                 rendered.append(f"{key_label}: {json.dumps(value, sort_keys=True)}")
             else:
                 rendered.append(f"{key_label}:")
-                rendered.extend(json.dumps(value, indent=2, sort_keys=True).splitlines())
+                rendered.extend(
+                    json.dumps(value, indent=2, sort_keys=True).splitlines()
+                )
             rendered.append("")
         if rendered and rendered[-1] == "":
             rendered.pop()
@@ -298,6 +310,7 @@ class DebugTerminalReporter(TerminalReporter):
 
 
 # ── Event description ─────────────────────────────────────────────────────────
+
 
 def _describe(event: object) -> str | None:
     """Return a short human-readable string for a public event, or None to skip."""
@@ -333,9 +346,11 @@ def _describe(event: object) -> str | None:
         return f"discarded {count} {noun}"
 
     if kind == "robber_moved":
-        coord  = p.get("coordinate")
+        coord = p.get("coordinate")
         victim = p.get("victim")
-        return f"robber → {coord}, stole from {victim}" if victim else f"robber → {coord}"
+        return (
+            f"robber → {coord}, stole from {victim}" if victim else f"robber → {coord}"
+        )
 
     if kind == "trade_offered":
         return f"offered {_res(p.get('offer'))} for {_res(p.get('request'))}"
@@ -377,7 +392,9 @@ def _describe(event: object) -> str | None:
         if desc:
             return str(desc)
         at = action_p.get("action_type") if action_p else None
-        return f"played {str(at).lower().replace('_', ' ')}" if at else "played dev card"
+        return (
+            f"played {str(at).lower().replace('_', ' ')}" if at else "played dev card"
+        )
 
     if kind == "turn_ended":
         return None  # turn boundary already shown by the header

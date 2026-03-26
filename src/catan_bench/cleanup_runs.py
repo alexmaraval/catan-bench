@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 from pathlib import Path
 
 
@@ -10,7 +9,9 @@ RUN_MARKER_FILES = ("metadata.json", "public_history.jsonl", "public_state_trace
 
 
 def is_run_directory(path: Path) -> bool:
-    return path.is_dir() and all((path / file_name).exists() for file_name in RUN_MARKER_FILES)
+    return path.is_dir() and all(
+        (path / file_name).exists() for file_name in RUN_MARKER_FILES
+    )
 
 
 def is_finished_run_directory(path: Path) -> bool:

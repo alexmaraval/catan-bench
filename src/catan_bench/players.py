@@ -17,7 +17,6 @@ from .schemas import (
     JsonValue,
     OpeningStrategyObservation,
     OpeningStrategyResponse,
-    PlayerMemory,
     PromptTrace,
     PromptTraceAttempt,
     ReactiveObservation,
@@ -35,24 +34,22 @@ from .schemas import (
 class Player(Protocol):
     def plan_opening_strategy(
         self, observation: OpeningStrategyObservation
-    ) -> OpeningStrategyResponse:
-        ...
+    ) -> OpeningStrategyResponse: ...
 
-    def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
-        ...
+    def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse: ...
 
-    def choose_action(self, observation: ActionObservation) -> ActionDecision:
-        ...
+    def choose_action(self, observation: ActionObservation) -> ActionDecision: ...
 
-    def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
-        ...
+    def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse: ...
 
-    def respond_reactive(self, observation: ReactiveObservation) -> ActionDecision:
-        ...
+    def respond_reactive(self, observation: ReactiveObservation) -> ActionDecision: ...
 
 
 def _is_resource_swap_template(action: Action) -> bool:
-    return action.action_type in {"OFFER_TRADE", "COUNTER_OFFER"} and action.payload == {
+    return action.action_type in {
+        "OFFER_TRADE",
+        "COUNTER_OFFER",
+    } and action.payload == {
         "offer": {},
         "request": {},
     }
@@ -88,7 +85,9 @@ def _coerce_trade_chat_selected_proposal_id(
                 return selected_proposal_id
 
         hint_tokens = {
-            token for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper()) if token
+            token
+            for token in re.split(r"[^A-Z0-9]+", selected_proposal_id.upper())
+            if token
         }
         matching_players = {
             proposal.player_id
@@ -112,14 +111,18 @@ class ScriptedPlayer:
     def __init__(
         self,
         *,
-        opening_strategy_responses: Iterable[OpeningStrategyResponse | JsonValue | None] = (),
+        opening_strategy_responses: Iterable[
+            OpeningStrategyResponse | JsonValue | None
+        ] = (),
         start_turn_responses: Iterable[TurnStartResponse | JsonValue | None] = (),
         action_responses: Iterable[ActionDecision | Action] = (),
         end_turn_responses: Iterable[TurnEndResponse | JsonValue | None] = (),
         reactive_responses: Iterable[ActionDecision | Action] = (),
         trade_chat_open_responses: Iterable[TradeChatOpenResponse] = (),
         trade_chat_reply_responses: Iterable[TradeChatReplyResponse] = (),
-        trade_chat_owner_decision_responses: Iterable[TradeChatOwnerDecisionResponse] = (),
+        trade_chat_owner_decision_responses: Iterable[
+            TradeChatOwnerDecisionResponse
+        ] = (),
     ) -> None:
         self._opening_strategy_responses = deque(opening_strategy_responses)
         self._start_turn_responses = deque(start_turn_responses)
@@ -128,7 +131,9 @@ class ScriptedPlayer:
         self._reactive_responses = deque(reactive_responses)
         self._trade_chat_open_responses = deque(trade_chat_open_responses)
         self._trade_chat_reply_responses = deque(trade_chat_reply_responses)
-        self._trade_chat_owner_decision_responses = deque(trade_chat_owner_decision_responses)
+        self._trade_chat_owner_decision_responses = deque(
+            trade_chat_owner_decision_responses
+        )
         self.opening_strategy_observations: list[OpeningStrategyObservation] = []
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
@@ -183,13 +188,17 @@ class ScriptedPlayer:
             return response
         return ActionDecision(action=response, short_term=None)
 
-    def open_trade_chat(self, observation: TradeChatObservation) -> TradeChatOpenResponse:
+    def open_trade_chat(
+        self, observation: TradeChatObservation
+    ) -> TradeChatOpenResponse:
         self.trade_chat_observations.append(observation)
         if not self._trade_chat_open_responses:
             return TradeChatOpenResponse()
         return self._trade_chat_open_responses.popleft()
 
-    def respond_trade_chat(self, observation: TradeChatObservation) -> TradeChatReplyResponse:
+    def respond_trade_chat(
+        self, observation: TradeChatObservation
+    ) -> TradeChatReplyResponse:
         self.trade_chat_observations.append(observation)
         if not self._trade_chat_reply_responses:
             return TradeChatReplyResponse()
@@ -449,7 +458,9 @@ class LLMPlayer:
                 attempts=trace_attempts,
             )
             raise
-        response = TurnStartResponse(short_term=self._coerce_memory_field(response_payload, "short_term"))
+        response = TurnStartResponse(
+            short_term=self._coerce_memory_field(response_payload, "short_term")
+        )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
             history_index=observation.history_index,
@@ -560,7 +571,9 @@ class LLMPlayer:
                 attempts=trace_attempts,
             )
             raise
-        response = TurnEndResponse(long_term=self._coerce_memory_field(response_payload, "long_term"))
+        response = TurnEndResponse(
+            long_term=self._coerce_memory_field(response_payload, "long_term")
+        )
         self._append_prompt_trace_entry(
             player_id=observation.player_id,
             history_index=observation.history_index,
@@ -627,7 +640,9 @@ class LLMPlayer:
             parse_decision=self._reactive_decision_from_payload,
         )
 
-    def open_trade_chat(self, observation: TradeChatObservation) -> TradeChatOpenResponse:
+    def open_trade_chat(
+        self, observation: TradeChatObservation
+    ) -> TradeChatOpenResponse:
         trace_attempts: list[PromptTraceAttempt] = []
         messages = self._messages_for_trade_chat_open(observation)
         try:
@@ -658,7 +673,9 @@ class LLMPlayer:
         )
         return response
 
-    def respond_trade_chat(self, observation: TradeChatObservation) -> TradeChatReplyResponse:
+    def respond_trade_chat(
+        self, observation: TradeChatObservation
+    ) -> TradeChatReplyResponse:
         trace_attempts: list[PromptTraceAttempt] = []
         messages = self._messages_for_trade_chat_reply(observation)
         try:
@@ -793,7 +810,9 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "public_history": [
                 event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=compact)
+                for event in self._tail_events(
+                    observation.public_history, compact=compact
+                )
             ],
             "memory": observation.memory.to_dict(),
             "context_window": {
@@ -825,11 +844,15 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "public_history": [
                 event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=compact)
+                for event in self._tail_events(
+                    observation.public_history, compact=compact
+                )
             ],
             "turn_public_events": [
                 event.to_dict()
-                for event in self._tail_events(observation.turn_public_events, compact=compact)
+                for event in self._tail_events(
+                    observation.turn_public_events, compact=compact
+                )
             ],
             "memory": observation.memory.to_dict(),
             "decision_prompt": observation.decision_prompt,
@@ -841,9 +864,13 @@ class LLMPlayer:
             },
         }
         if placement_candidates_key is None:
-            payload["legal_actions"] = self._action_prompt_entries(observation.legal_actions)
+            payload["legal_actions"] = self._action_prompt_entries(
+                observation.legal_actions
+            )
         else:
-            payload["candidate_source"] = f"public_state.board.{placement_candidates_key}"
+            payload["candidate_source"] = (
+                f"public_state.board.{placement_candidates_key}"
+            )
         return self.renderer.render_messages(
             system_template="choose_action_system.jinja",
             user_template="choose_action_user.jinja",
@@ -867,7 +894,9 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "turn_public_events": [
                 event.to_dict()
-                for event in self._tail_events(observation.turn_public_events, compact=compact)
+                for event in self._tail_events(
+                    observation.turn_public_events, compact=compact
+                )
             ],
             "memory": observation.memory.to_dict(),
             "context_window": {
@@ -899,7 +928,9 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "public_history": [
                 event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=compact)
+                for event in self._tail_events(
+                    observation.public_history, compact=compact
+                )
             ],
             "memory": observation.memory.to_dict(),
             "decision_prompt": observation.decision_prompt,
@@ -909,9 +940,13 @@ class LLMPlayer:
             },
         }
         if placement_candidates_key is None:
-            payload["legal_actions"] = self._action_prompt_entries(observation.legal_actions)
+            payload["legal_actions"] = self._action_prompt_entries(
+                observation.legal_actions
+            )
         else:
-            payload["candidate_source"] = f"public_state.board.{placement_candidates_key}"
+            payload["candidate_source"] = (
+                f"public_state.board.{placement_candidates_key}"
+            )
         return self.renderer.render_messages(
             system_template="reactive_action_system.jinja",
             user_template="reactive_action_user.jinja",
@@ -1013,7 +1048,9 @@ class LLMPlayer:
         self, observation: ActionObservation, response_payload: dict[str, object]
     ) -> ActionDecision:
         return ActionDecision(
-            action=self._action_from_payload(observation.legal_actions, response_payload),
+            action=self._action_from_payload(
+                observation.legal_actions, response_payload
+            ),
             short_term=self._coerce_memory_field(response_payload, "short_term"),
             reasoning=self._coerce_reasoning(response_payload),
         )
@@ -1022,7 +1059,9 @@ class LLMPlayer:
         self, observation: ReactiveObservation, response_payload: dict[str, object]
     ) -> ActionDecision:
         return ActionDecision(
-            action=self._action_from_payload(observation.legal_actions, response_payload),
+            action=self._action_from_payload(
+                observation.legal_actions, response_payload
+            ),
             short_term=None,
             reasoning=self._coerce_reasoning(response_payload),
         )
@@ -1142,7 +1181,9 @@ class LLMPlayer:
             if value is None:
                 continue
             if not isinstance(value, str):
-                raise RuntimeError(f"LLM response field `{key}` must be a string when present.")
+                raise RuntimeError(
+                    f"LLM response field `{key}` must be a string when present."
+                )
             return value
         return None
 
@@ -1151,7 +1192,9 @@ class LLMPlayer:
         if value is None:
             return None
         if not isinstance(value, str):
-            raise RuntimeError("Public chat message fields must be strings when present.")
+            raise RuntimeError(
+                "Public chat message fields must be strings when present."
+            )
         stripped = value.strip()
         return stripped or None
 
@@ -1183,7 +1226,9 @@ class LLMPlayer:
             or response_payload.get("owner_gets")
         )
         if not open_chat or (message is None and not requested_resources):
-            return TradeChatOpenResponse(open_chat=False, reasoning=self._coerce_reasoning(response_payload))
+            return TradeChatOpenResponse(
+                open_chat=False, reasoning=self._coerce_reasoning(response_payload)
+            )
         return TradeChatOpenResponse(
             open_chat=True,
             message=message,
@@ -1235,12 +1280,11 @@ class LLMPlayer:
 
         owner_relative = (dict(generic_offer), dict(generic_request))
         responder_relative = (dict(generic_request), dict(generic_offer))
-        if (
-            self._score_trade_chat_candidate(observation=observation, candidate=owner_relative)
-            >= self._score_trade_chat_candidate(
-                observation=observation,
-                candidate=responder_relative,
-            )
+        if self._score_trade_chat_candidate(
+            observation=observation, candidate=owner_relative
+        ) >= self._score_trade_chat_candidate(
+            observation=observation,
+            candidate=responder_relative,
         ):
             return owner_relative
         return responder_relative
@@ -1256,7 +1300,9 @@ class LLMPlayer:
             return -1000
 
         score = 0
-        player_resources = self._coerce_resource_map(observation.private_state.get("resources"))
+        player_resources = self._coerce_resource_map(
+            observation.private_state.get("resources")
+        )
         if owner_gets:
             if self._resource_map_is_subset(player_resources, owner_gets):
                 score += 100
@@ -1341,7 +1387,9 @@ class LLMPlayer:
         )
 
     @staticmethod
-    def _is_legal_response_action(action: Action, legal_actions: tuple[Action, ...]) -> bool:
+    def _is_legal_response_action(
+        action: Action, legal_actions: tuple[Action, ...]
+    ) -> bool:
         if _is_resource_swap_template(action):
             return False
         if any(legal_action.matches(action) for legal_action in legal_actions):
@@ -1390,7 +1438,9 @@ class LLMPlayer:
             "previous_response": attempted_response,
         }
         if placement_candidates_key is None:
-            payload["legal_actions"] = self._action_prompt_entries(observation.legal_actions)
+            payload["legal_actions"] = self._action_prompt_entries(
+                observation.legal_actions
+            )
         else:
             payload["candidate_source"] = (
                 f"Use one action_index from public_state.board.{placement_candidates_key}."
@@ -1415,7 +1465,9 @@ class LLMPlayer:
             ActionDecision,
         ],
     ) -> ActionDecision:
-        decision = self._parse_action_decision(parse_decision, observation, initial_payload)
+        decision = self._parse_action_decision(
+            parse_decision, observation, initial_payload
+        )
         if decision is not None and self._is_legal_response_action(
             decision.action, observation.legal_actions
         ):
@@ -1426,7 +1478,9 @@ class LLMPlayer:
             )
             return decision
 
-        repair_messages = initial_messages + self._repair_messages(observation, initial_payload)
+        repair_messages = initial_messages + self._repair_messages(
+            observation, initial_payload
+        )
         repaired_payload: dict[str, object] | None = None
         repaired_decision: ActionDecision | None = None
         try:
@@ -1503,7 +1557,9 @@ class LLMPlayer:
         if not trace_attempts:
             return False
         last_response = trace_attempts[-1].response
-        error_payload = last_response.get("error") if isinstance(last_response, dict) else None
+        error_payload = (
+            last_response.get("error") if isinstance(last_response, dict) else None
+        )
         if not isinstance(error_payload, dict):
             return False
         return error_payload.get("type") == "invalid_response"
@@ -1544,7 +1600,9 @@ class LLMPlayer:
             except RuntimeError as exc:
                 trace_attempts.append(
                     PromptTraceAttempt(
-                        messages=tuple(self._json_safe_message(message) for message in messages),
+                        messages=tuple(
+                            self._json_safe_message(message) for message in messages
+                        ),
                         response=self._json_safe_object(
                             {
                                 "error": {
@@ -1564,7 +1622,9 @@ class LLMPlayer:
 
             trace_attempts.append(
                 PromptTraceAttempt(
-                    messages=tuple(self._json_safe_message(message) for message in messages),
+                    messages=tuple(
+                        self._json_safe_message(message) for message in messages
+                    ),
                     response=self._json_safe_object(response_payload),
                     response_text=raw_response_text,
                 )
@@ -1585,7 +1645,9 @@ class LLMPlayer:
     ) -> None:
         trace_attempts.append(
             PromptTraceAttempt(
-                messages=tuple(self._json_safe_message(message) for message in messages),
+                messages=tuple(
+                    self._json_safe_message(message) for message in messages
+                ),
                 response=self._json_safe_object(
                     {"error": {"type": error_type, "message": error_message}}
                 ),
@@ -1689,12 +1751,16 @@ class LLMPlayer:
     ) -> dict[str, object]:
         choices = completion.get("choices")
         first_choice = choices[0] if isinstance(choices, list) and choices else None
-        message = first_choice.get("message") if isinstance(first_choice, dict) else None
+        message = (
+            first_choice.get("message") if isinstance(first_choice, dict) else None
+        )
         stripped_content = LLMPlayer._strip_markdown_fences(raw_response_text)
         if not stripped_content:
             reasoning = message.get("reasoning") if isinstance(message, dict) else None
             finish_reason = (
-                first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
+                first_choice.get("finish_reason")
+                if isinstance(first_choice, dict)
+                else None
             )
             if isinstance(reasoning, str) and reasoning.strip():
                 raise RuntimeError(
@@ -1725,7 +1791,9 @@ class LLMPlayer:
             lines = lines[:-1]
         return "\n".join(lines).strip()
 
-    def _tail_events(self, items: tuple[Event, ...], *, compact: bool) -> tuple[Event, ...]:
+    def _tail_events(
+        self, items: tuple[Event, ...], *, compact: bool
+    ) -> tuple[Event, ...]:
         limit = self._effective_history_limit(compact=compact)
         if limit is None:
             return items
@@ -1736,7 +1804,9 @@ class LLMPlayer:
             return None if not compact else 6
         if not compact:
             return self.prompt_history_limit
-        return max(1, min(self.prompt_history_limit, max(1, self.prompt_history_limit // 2)))
+        return max(
+            1, min(self.prompt_history_limit, max(1, self.prompt_history_limit // 2))
+        )
 
     @staticmethod
     def _placement_candidates_key(
@@ -1756,10 +1826,13 @@ class LLMPlayer:
         if not isinstance(board, dict):
             return None
         candidates = board.get(candidates_key)
-        if not isinstance(candidates, list) or len(candidates) != len(observation.legal_actions):
+        if not isinstance(candidates, list) or len(candidates) != len(
+            observation.legal_actions
+        ):
             return None
         if any(
-            not isinstance(candidate, dict) or not isinstance(candidate.get("action_index"), int)
+            not isinstance(candidate, dict)
+            or not isinstance(candidate.get("action_index"), int)
             for candidate in candidates
         ):
             return None

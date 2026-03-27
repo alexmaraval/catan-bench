@@ -116,13 +116,13 @@ prompt_history_limit = 12
 public_chat_enabled = true
 trading_chat_enabled = true
 run_dir = "runs/"
-run_tags = ["0.4.0", "dev"]
+run_tags = ["0.5.0", "dev"]
 ```
 
 New runs are created directly under `runs/`, with tags prefixed into the run directory name. For example:
 
 ```text
-runs/0.4.0-dev-<game-id>-<timestamp>-<token>/
+runs/0.5.0-dev-mixed-players-seed-<seed>-<game-id>-<timestamp>-<token>/
 ```
 
 Minimal player config:

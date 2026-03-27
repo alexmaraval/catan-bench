@@ -131,6 +131,93 @@ def load_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def load_live_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
+    """Load artifacts for an in-progress run and synthesize a provisional result."""
+    metadata = read_json(run_dir / "metadata.json") or {}
+
+    events = [
+        Event.from_dict(entry) for entry in read_jsonl(run_dir / "public_history.jsonl")
+    ]
+
+    state_snapshots = [
+        PublicStateSnapshot.from_dict(entry)
+        for entry in read_jsonl(run_dir / "public_state_trace.jsonl")
+    ]
+
+    player_ids = [str(pid) for pid in (metadata.get("player_ids") or [])]
+    if not player_ids and state_snapshots:
+        first_ps = state_snapshots[0].public_state.get("players")
+        if isinstance(first_ps, dict):
+            player_ids = list(first_ps.keys())
+
+    prompt_traces_by_player: dict[str, list[PromptTrace]] = {}
+    memory_traces_by_player: dict[str, list[MemorySnapshot]] = {}
+    for player_id in player_ids:
+        trace_path = run_dir / "players" / player_id / "prompt_trace.jsonl"
+        raw = read_jsonl(trace_path)
+        prompt_traces_by_player[player_id] = [
+            PromptTrace.from_dict(entry) for entry in raw
+        ]
+
+        mem_path = run_dir / "players" / player_id / "memory_trace.jsonl"
+        mem_raw = read_jsonl(mem_path)
+        memory_traces_by_player[player_id] = [
+            MemorySnapshot.from_dict(entry) for entry in mem_raw
+        ]
+
+    latest_snapshot = state_snapshots[-1] if state_snapshots else None
+    public_players = (
+        latest_snapshot.public_state.get("players", {})
+        if latest_snapshot is not None
+        and isinstance(latest_snapshot.public_state.get("players"), dict)
+        else {}
+    )
+    players_meta: dict[str, dict[str, Any]] = {}
+    for player_id in player_ids:
+        summary = public_players.get(player_id, {}) if isinstance(public_players, dict) else {}
+        if not isinstance(summary, dict):
+            summary = {}
+        visible_vp = int(summary.get("visible_victory_points", summary.get("vp", 0)) or 0)
+        dev_vp = int(summary.get("dev_victory_points", 0) or 0)
+        players_meta[player_id] = {
+            "actual_victory_points": visible_vp + dev_vp,
+            "visible_victory_points": visible_vp,
+            "dev_victory_points": dev_vp,
+            "played_knights": int(summary.get("played_knights", 0) or 0),
+            "longest_road_length": int(summary.get("longest_road_length", 0) or 0),
+            "has_longest_road": bool(summary.get("has_longest_road")),
+            "has_largest_army": bool(summary.get("has_largest_army")),
+        }
+
+    total_decisions = max(
+        (trace.decision_index or 0) for traces in prompt_traces_by_player.values() for trace in traces
+    ) if any(prompt_traces_by_player.values()) else 0
+    num_turns = latest_snapshot.turn_index if latest_snapshot is not None else 0
+    result = {
+        "game_id": str(metadata.get("game_id", run_dir.name)),
+        "winner_ids": [],
+        "total_decisions": total_decisions,
+        "public_event_count": len(events),
+        "memory_writes": sum(len(traces) for traces in memory_traces_by_player.values()),
+        "metadata": {
+            "num_turns": int(num_turns),
+            "players": players_meta,
+            "vps_to_win": metadata.get("vps_to_win", 10),
+        },
+        "live": True,
+    }
+
+    return {
+        "result": result,
+        "metadata": metadata,
+        "events": events,
+        "state_snapshots": state_snapshots,
+        "prompt_traces_by_player": prompt_traces_by_player,
+        "memory_traces_by_player": memory_traces_by_player,
+        "player_ids": player_ids,
+    }
+
+
 # ── Board helpers ────────────────────────────────────────────────────────────
 
 
@@ -250,6 +337,7 @@ def compute_game_summary(
         for e in events
         if e.kind == "trade_chat_closed" and e.payload.get("outcome") == "no_deal"
     )
+    trade_attempts = trade_offered + chat_rooms_selected + chat_rooms_no_deal
 
     return {
         "winner_ids": list(result.get("winner_ids", [])),
@@ -259,8 +347,8 @@ def compute_game_summary(
         "events_per_turn": round(total_events / max(num_turns, 1), 2),
         "decisions_per_turn": round(total_decisions / max(num_turns, 1), 2),
         "trade_activity_rate": round(trade_events / max(total_events, 1), 4),
-        "trade_efficiency": round(trade_confirmed / max(trade_offered, 1), 4)
-        if trade_offered
+        "trade_efficiency": round(trade_confirmed / max(trade_attempts, 1), 4)
+        if trade_attempts
         else 0.0,
         "trade_chat_rooms": chat_rooms_opened,
         "trade_chat_no_deals": chat_rooms_no_deal,
@@ -569,25 +657,56 @@ def compute_public_chat_analysis(player_id: str, events: list[Event]) -> dict[st
     targeted_messages_sent = 0
     messages_targeted_at_player = 0
     targets: dict[str, int] = {}
+    incoming_sources: dict[str, int] = {}
+    messages_sent_by_turn: dict[int, int] = {}
+    targeted_messages_sent_by_turn: dict[int, int] = {}
+    messages_targeted_at_player_by_turn: dict[int, int] = {}
+    unique_targets_by_turn: dict[int, int] = {}
+    spoken_turns: set[int] = set()
+    targeted_so_far: set[str] = set()
 
     for event in events:
         if event.kind != "public_chat_message":
             continue
         speaker = event.payload.get("speaker_player_id") or event.actor_player_id
         target = event.payload.get("target_player_id")
+        turn_index = int(event.turn_index)
         if speaker == player_id:
             messages_sent += 1
+            messages_sent_by_turn[turn_index] = messages_sent_by_turn.get(turn_index, 0) + 1
+            spoken_turns.add(turn_index)
             if isinstance(target, str):
                 targeted_messages_sent += 1
+                targeted_messages_sent_by_turn[turn_index] = (
+                    targeted_messages_sent_by_turn.get(turn_index, 0) + 1
+                )
                 targets[target] = targets.get(target, 0) + 1
+                if target not in targeted_so_far:
+                    targeted_so_far.add(target)
+                    unique_targets_by_turn[turn_index] = (
+                        unique_targets_by_turn.get(turn_index, 0) + 1
+                    )
         if isinstance(target, str) and target == player_id and speaker != player_id:
             messages_targeted_at_player += 1
+            messages_targeted_at_player_by_turn[turn_index] = (
+                messages_targeted_at_player_by_turn.get(turn_index, 0) + 1
+            )
+            if isinstance(speaker, str):
+                incoming_sources[speaker] = incoming_sources.get(speaker, 0) + 1
 
     return {
         "messages_sent": messages_sent,
+        "messages_sent_by_turn": messages_sent_by_turn,
         "targeted_messages_sent": targeted_messages_sent,
+        "targeted_messages_sent_by_turn": targeted_messages_sent_by_turn,
         "messages_targeted_at_player": messages_targeted_at_player,
+        "messages_targeted_at_player_by_turn": messages_targeted_at_player_by_turn,
+        "unique_targets": len(targets),
+        "unique_targets_by_turn": unique_targets_by_turn,
+        "speaking_turns": len(spoken_turns),
+        "speaking_turns_by_turn": {turn_index: 1 for turn_index in sorted(spoken_turns)},
         "targets": targets,
+        "incoming_sources": incoming_sources,
     }
 
 
@@ -1530,10 +1649,19 @@ def analyze_player(
 # ── Top-level orchestration ──────────────────────────────────────────────────
 
 
-def analyze_game(run_dir: str | Path, *, write: bool = True) -> dict[str, Any]:
+def analyze_game(
+    run_dir: str | Path, *, write: bool = True, allow_incomplete: bool = False
+) -> dict[str, Any]:
     """Main entry point: load artifacts, compute all metrics, optionally write analysis.json."""
     run_dir = Path(run_dir)
-    artifacts = load_analysis_artifacts(run_dir)
+    try:
+        artifacts = load_analysis_artifacts(run_dir)
+        live = False
+    except FileNotFoundError:
+        if not allow_incomplete:
+            raise
+        artifacts = load_live_analysis_artifacts(run_dir)
+        live = True
 
     result = artifacts["result"]
     events = artifacts["events"]
@@ -1573,12 +1701,13 @@ def analyze_game(run_dir: str | Path, *, write: bool = True) -> dict[str, Any]:
     analysis = {
         "game_id": str(result.get("game_id", "")),
         "version": "3",
+        "live": live,
         "game_summary": game_summary,
         "players": players,
         "market": market,
     }
 
-    if write:
+    if write and not live:
         write_json(run_dir / "analysis.json", analysis)
 
     return analysis

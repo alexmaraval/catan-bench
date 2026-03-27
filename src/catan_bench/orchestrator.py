@@ -61,20 +61,24 @@ def _resolve_run_dir(
     *,
     game_id: str,
     run_tags: tuple[str, ...] = (),
+    run_label: str | None = None,
+    game_seed: int | None = None,
 ) -> Path | None:
     if base_run_dir is None:
         return None
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     token = secrets.token_hex(4)
-    tag_prefix = "-".join(
+    name_parts = [
         _slugify_path_component(tag) for tag in run_tags if _slugify_path_component(tag)
-    )
-    if tag_prefix:
-        run_name = (
-            f"{tag_prefix}-{_slugify_path_component(game_id)}-{timestamp}-{token}"
-        )
-    else:
-        run_name = f"{_slugify_path_component(game_id)}-{timestamp}-{token}"
+    ]
+    if run_label:
+        label_slug = _slugify_path_component(run_label)
+        if label_slug:
+            name_parts.append(label_slug)
+    if game_seed is not None:
+        name_parts.append(f"seed-{game_seed}")
+    name_parts.append(_slugify_path_component(game_id))
+    run_name = "-".join(name_parts + [timestamp, token])
     return Path(base_run_dir) / run_name
 
 
@@ -121,6 +125,8 @@ class GameOrchestrator:
         action_trace_store: ActionTraceStore | None = None,
         run_dir: str | Path | None = None,
         run_tags: tuple[str, ...] = (),
+        run_label: str | None = None,
+        game_seed: int | None = None,
         resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
         public_chat_enabled: bool = False,
@@ -140,7 +146,13 @@ class GameOrchestrator:
         resolved_run_dir = (
             Path(resume_run_dir)
             if resume_run_dir is not None
-            else _resolve_run_dir(run_dir, game_id=engine.game_id, run_tags=run_tags)
+            else _resolve_run_dir(
+                run_dir,
+                game_id=engine.game_id,
+                run_tags=run_tags,
+                run_label=run_label,
+                game_seed=game_seed,
+            )
         )
         self.engine = engine
         self.players = dict(players)
@@ -158,6 +170,8 @@ class GameOrchestrator:
         )
         self.run_dir = resolved_run_dir
         self._run_tags = tuple(str(tag) for tag in run_tags)
+        self._run_label = None if run_label is None else str(run_label)
+        self._game_seed = game_seed
         self.max_decisions = max_decisions
         self.public_chat_enabled = public_chat_enabled
         self.public_chat_message_chars = public_chat_message_chars
@@ -328,6 +342,8 @@ class GameOrchestrator:
                     "artifact_version": 3,
                     "run_directory": str(self.run_dir),
                     "run_tags": list(self._run_tags),
+                    "run_label": self._run_label,
+                    "game_seed": self._game_seed,
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
                         player_id: type(self.players[player_id]).__name__
@@ -874,6 +890,13 @@ class GameOrchestrator:
             decision_index=decision.decision_index,
             stage="turn_start",
         )
+        self._active_turn = _ActiveTurnSession(
+            owner_player_id=player_id,
+            turn_index=decision.turn_index,
+            start_history_index=observation.history_index,
+            start_phase=decision.phase,
+            start_decision_index=decision.decision_index,
+        )
         self._record_response_public_chat(
             acting_player_id=player_id,
             turn_index=decision.turn_index,
@@ -881,13 +904,6 @@ class GameOrchestrator:
             decision_index=decision.decision_index,
             stage="turn_start",
             response=response,
-        )
-        self._active_turn = _ActiveTurnSession(
-            owner_player_id=player_id,
-            turn_index=decision.turn_index,
-            start_history_index=observation.history_index,
-            start_phase=decision.phase,
-            start_decision_index=decision.decision_index,
         )
 
     def _turn_owner_response(
@@ -1024,7 +1040,7 @@ class GameOrchestrator:
             decision=decision,
             proposed_action=proposed_action,
         )
-        self._record_response_public_chat(
+        public_chat_event = self._record_response_public_chat(
             acting_player_id=decision.acting_player_id,
             turn_index=decision.turn_index,
             phase=decision.phase,
@@ -1032,6 +1048,8 @@ class GameOrchestrator:
             stage="choose_action" if update_short_term else "reactive_action",
             response=response,
         )
+        if public_chat_event is not None:
+            self._write_inflight_checkpoint()
         engine_transition = self.engine.apply_action(action)
         transition = self._record_transition(
             decision=decision,
@@ -1494,7 +1512,7 @@ class GameOrchestrator:
             decision_index=decision_index,
             stage="turn_cleanup",
         )
-        self._record_response_public_chat(
+        public_chat_event = self._record_response_public_chat(
             acting_player_id=active.owner_player_id,
             turn_index=active.turn_index,
             phase=phase,
@@ -1506,6 +1524,8 @@ class GameOrchestrator:
             self.event_log.current_history_index
         )
         self._active_turn = None
+        if public_chat_event is not None:
+            self._write_inflight_checkpoint()
 
     def _turn_owner_id(self, decision: DecisionPoint) -> str:
         turn_owner_id_prop = getattr(self.engine, "turn_owner_id", None)
@@ -1717,6 +1737,7 @@ class GameOrchestrator:
                 )
             )
         self._record_public_events(events)
+        self._write_inflight_checkpoint()
 
         proposals: list[TradeChatProposal] = []
         for round_index in range(1, self.trading_chat_max_rounds_per_attempt + 1):
@@ -1784,6 +1805,7 @@ class GameOrchestrator:
                 )
                 events.append(message_event)
                 self._record_public_events((message_event,))
+                self._write_inflight_checkpoint()
 
             owner_decision = self._decide_trade_chat(
                 player=player,
@@ -1807,6 +1829,7 @@ class GameOrchestrator:
                     )
                     events.append(owner_message_event)
                     self._record_public_events((owner_message_event,))
+                    self._write_inflight_checkpoint()
                 continue
 
             selected_proposal = None
@@ -1862,8 +1885,9 @@ class GameOrchestrator:
                     actor_player_id=decision.acting_player_id,
                 )
                 events.extend((no_deal_event, close_event))
-                self._record_public_events((no_deal_event, close_event))
                 self._increment_failed_trade_chat_attempt()
+                self._record_public_events((no_deal_event, close_event))
+                self._write_inflight_checkpoint()
                 return tuple(events), None
 
             selected_event = Event(
@@ -1898,8 +1922,6 @@ class GameOrchestrator:
                 decision_index=decision.decision_index,
                 actor_player_id=decision.acting_player_id,
             )
-            events.extend((selected_event, close_event))
-            self._record_public_events((selected_event, close_event))
             self._pending_trade_chat_selection = _PendingTradeChatSelection(
                 owner_player_id=decision.acting_player_id,
                 counterparty_player_id=selected_proposal.player_id,
@@ -1913,6 +1935,9 @@ class GameOrchestrator:
                 },
                 turn_index=decision.turn_index,
             )
+            events.extend((selected_event, close_event))
+            self._record_public_events((selected_event, close_event))
+            self._write_inflight_checkpoint()
             return (
                 tuple(events),
                 Action(
@@ -1951,8 +1976,9 @@ class GameOrchestrator:
             actor_player_id=decision.acting_player_id,
         )
         events.extend((no_deal_event, close_event))
-        self._record_public_events((no_deal_event, close_event))
         self._increment_failed_trade_chat_attempt()
+        self._record_public_events((no_deal_event, close_event))
+        self._write_inflight_checkpoint()
         return tuple(events), None
 
     def _open_trade_chat(
@@ -2103,6 +2129,11 @@ class GameOrchestrator:
         self, events: tuple[Event, ...] | list[Event]
     ) -> tuple[Event, ...]:
         return self._store_events(events)
+
+    def _write_inflight_checkpoint(self) -> None:
+        if self.run_dir is None:
+            return
+        self._write_checkpoint(terminal=False)
 
     def _record_response_public_chat(
         self,

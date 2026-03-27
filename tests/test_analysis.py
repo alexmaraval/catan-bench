@@ -170,6 +170,22 @@ class TestComputeGameSummary(unittest.TestCase):
         # 1 confirmed out of 3 offered — result is rounded to 4 decimal places
         self.assertAlmostEqual(summary["trade_efficiency"], 1 / 3, places=3)
 
+    def test_trade_efficiency_includes_resolved_trade_chat_attempts(self) -> None:
+        events = [
+            _event("trade_chat_opened"),
+            _event("trade_chat_closed", outcome="selected"),
+            _event("trade_chat_opened"),
+            _event("trade_chat_closed", outcome="no_deal"),
+            _event("trade_confirmed"),
+        ]
+        summary = compute_game_summary(
+            result={"winner_ids": []},
+            events=events,
+            num_turns=2,
+            total_decisions=6,
+        )
+        self.assertAlmostEqual(summary["trade_efficiency"], 0.5)
+
     def test_no_trades_yields_zero_efficiency(self) -> None:
         summary = compute_game_summary(
             result={"winner_ids": []},
@@ -968,6 +984,7 @@ class TestPublicChatAnalysis(unittest.TestCase):
                 _event(
                     "public_chat_message",
                     actor="RED",
+                    turn=1,
                     speaker_player_id="RED",
                     message="BLUE, watch WHITE.",
                     target_player_id="BLUE",
@@ -975,6 +992,7 @@ class TestPublicChatAnalysis(unittest.TestCase):
                 _event(
                     "public_chat_message",
                     actor="BLUE",
+                    turn=3,
                     speaker_player_id="BLUE",
                     message="RED, no brick from me.",
                     target_player_id="RED",
@@ -982,6 +1000,7 @@ class TestPublicChatAnalysis(unittest.TestCase):
                 _event(
                     "public_chat_message",
                     actor="RED",
+                    turn=4,
                     speaker_player_id="RED",
                     message="General table talk.",
                 ),
@@ -992,6 +1011,14 @@ class TestPublicChatAnalysis(unittest.TestCase):
         self.assertEqual(result["targeted_messages_sent"], 1)
         self.assertEqual(result["messages_targeted_at_player"], 1)
         self.assertEqual(result["targets"], {"BLUE": 1})
+        self.assertEqual(result["messages_sent_by_turn"], {1: 1, 4: 1})
+        self.assertEqual(result["targeted_messages_sent_by_turn"], {1: 1})
+        self.assertEqual(result["messages_targeted_at_player_by_turn"], {3: 1})
+        self.assertEqual(result["unique_targets"], 1)
+        self.assertEqual(result["unique_targets_by_turn"], {1: 1})
+        self.assertEqual(result["speaking_turns"], 2)
+        self.assertEqual(result["speaking_turns_by_turn"], {1: 1, 4: 1})
+        self.assertEqual(result["incoming_sources"], {"BLUE": 1})
 
 
 # ── Strategy evolution tests ──────────────────────────────────────────────────
@@ -1366,9 +1393,9 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_discover_completed_run_directories_from_base_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            completed = base_dir / "0.4.0-dev-game-a"
-            other_completed = base_dir / "0.4.0-dev-game-b"
-            incomplete = base_dir / "0.4.0-dev-game-c"
+            completed = base_dir / "0.5.0-dev-game-a"
+            other_completed = base_dir / "0.5.0-dev-game-b"
+            incomplete = base_dir / "0.5.0-dev-game-c"
             self._make_minimal_run(completed)
             self._make_minimal_run(other_completed)
             _write_json(
@@ -1388,8 +1415,8 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_analysis_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            run_a = base_dir / "0.4.0-dev-game-a"
-            run_b = base_dir / "0.4.0-dev-game-b"
+            run_a = base_dir / "0.5.0-dev-game-a"
+            run_b = base_dir / "0.5.0-dev-game-b"
             self._make_minimal_run(run_a)
             self._make_minimal_run(run_b)
 

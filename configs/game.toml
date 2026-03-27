@@ -1,6 +1,6 @@
 [game]
 engine = "catanatron"
-seed = 12
+seed = 24
 discard_limit = 7
 vps_to_win = 10
 history_window = 100
@@ -15,4 +15,4 @@ trading_chat_message_chars = 500
 trading_chat_history_limit = 40
 prompt_history_limit = 30
 run_dir = "runs/"
-run_tags = ["0.4.0", "dev"]
+run_tags = ["0.5.0", "dev"]

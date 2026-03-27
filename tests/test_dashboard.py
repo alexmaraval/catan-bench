@@ -12,6 +12,7 @@ from catan_bench.dashboard import (
     _event_body,
     _infer_turn_owner_player_id,
     _public_chat_panel_html,
+    _render_analysis_tab,
     _render_player_summary_table,
     build_board_svg,
     build_player_timelines,
@@ -27,6 +28,152 @@ from catan_bench.schemas import Event, PromptTrace, PublicStateSnapshot
 
 
 class DashboardTests(unittest.TestCase):
+    def test_render_analysis_tab_supports_live_incomplete_run(self) -> None:
+        class FakeColumn:
+            def __init__(self) -> None:
+                self.metrics: list[tuple[str, object]] = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def metric(self, label: str, value: object) -> None:
+                self.metrics.append((label, value))
+
+            def altair_chart(self, *args, **kwargs) -> None:
+                return None
+
+            def markdown(self, *args, **kwargs) -> None:
+                return None
+
+            def info(self, *args, **kwargs) -> None:
+                return None
+
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.info_calls: list[str] = []
+                self.caption_calls: list[str] = []
+                self.subheader_calls: list[str] = []
+
+            def info(self, body: str) -> None:
+                self.info_calls.append(body)
+
+            def caption(self, body: str) -> None:
+                self.caption_calls.append(body)
+
+            def subheader(self, body: str) -> None:
+                self.subheader_calls.append(body)
+
+            def columns(self, n: int):
+                return [FakeColumn() for _ in range(n)]
+
+            def metric(self, label: str, value: object) -> None:
+                return None
+
+            def button(self, *args, **kwargs) -> bool:
+                return False
+
+            def dataframe(self, *args, **kwargs) -> None:
+                return None
+
+            def altair_chart(self, *args, **kwargs) -> None:
+                return None
+
+            def plotly_chart(self, *args, **kwargs) -> None:
+                return None
+
+            def markdown(self, *args, **kwargs) -> None:
+                return None
+
+            def expander(self, *args, **kwargs):
+                class _Dummy:
+                    def __enter__(self_inner):
+                        return self_inner
+
+                    def __exit__(self_inner, exc_type, exc, tb):
+                        return False
+
+                return _Dummy()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            self._write_json(
+                run_dir / "metadata.json",
+                {
+                    "game_id": "live-game",
+                    "player_ids": ["RED", "BLUE"],
+                },
+            )
+            self._write_jsonl(
+                run_dir / "public_history.jsonl",
+                [
+                    {
+                        "history_index": 1,
+                        "turn_index": 1,
+                        "phase": "play_turn",
+                        "kind": "public_chat_message",
+                        "payload": {
+                            "speaker_player_id": "RED",
+                            "message": "Watching BLUE.",
+                            "target_player_id": "BLUE",
+                        },
+                        "actor_player_id": "RED",
+                    }
+                ],
+            )
+            self._write_jsonl(
+                run_dir / "public_state_trace.jsonl",
+                [
+                    {
+                        "history_index": 1,
+                        "turn_index": 1,
+                        "phase": "play_turn",
+                        "decision_index": 1,
+                        "public_state": {
+                            "players": {
+                                "RED": {
+                                    "visible_victory_points": 2,
+                                    "dev_victory_points": 0,
+                                    "longest_road_length": 1,
+                                    "played_knights": 0,
+                                },
+                                "BLUE": {
+                                    "visible_victory_points": 1,
+                                    "dev_victory_points": 0,
+                                    "longest_road_length": 1,
+                                    "played_knights": 0,
+                                },
+                            },
+                            "board": {
+                                "tiles": {},
+                                "nodes": {},
+                                "edges": [],
+                                "adjacent_tiles": {},
+                                "robber_coordinate": [0, 0, 0],
+                            },
+                        },
+                    }
+                ],
+            )
+            self._write_jsonl(run_dir / "players" / "RED" / "prompt_trace.jsonl", [])
+            self._write_jsonl(run_dir / "players" / "BLUE" / "prompt_trace.jsonl", [])
+            self._write_jsonl(run_dir / "players" / "RED" / "memory_trace.jsonl", [])
+            self._write_jsonl(run_dir / "players" / "BLUE" / "memory_trace.jsonl", [])
+
+            snapshot = load_dashboard_snapshot(run_dir)
+            st = FakeStreamlit()
+
+            _render_analysis_tab(st, snapshot)
+
+            self.assertTrue(
+                any("live provisional analysis" in body.lower() for body in st.info_calls)
+            )
+            self.assertTrue(
+                any("provisional" in body.lower() for body in st.caption_calls)
+            )
+
     def test_event_body_formats_public_chat_message(self) -> None:
         body = _event_body(
             Event(

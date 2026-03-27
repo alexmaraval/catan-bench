@@ -116,7 +116,8 @@ def run_from_config_files(
     debug_from_setup: bool = False,
     debug_trade: bool = False,
 ):
-    _load_local_env(Path(players_config_path).resolve().parent)
+    players_config_path = Path(players_config_path)
+    _load_local_env(players_config_path.resolve().parent)
     game_config = load_game_config(game_config_path)
     player_configs = load_player_configs(players_config_path)
     effective_run_dir, resume_run_dir = _resolve_requested_run_dir(
@@ -134,6 +135,8 @@ def run_from_config_files(
         ),
         run_dir=effective_run_dir,
         run_tags=game_config.run_tags,
+        run_label=players_config_path.stem,
+        game_seed=game_config.seed,
         resume_run_dir=resume_run_dir,
         public_chat_enabled=game_config.public_chat_enabled,
         public_chat_message_chars=game_config.public_chat_message_chars,

@@ -430,6 +430,32 @@ class MockTradeChatEngine:
         return {"winner_ids": ["RED"], "num_turns": 1}
 
 
+class MockTradeChatResumeTimeoutEngine(MockTradeChatEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self._game_id = "trade-chat-resume-timeout-game"
+
+    def apply_action(self, action: Action) -> TransitionResult:
+        if self._step == 1 and action.action_type == "END_TURN":
+            self._step = 5
+            self._terminal = True
+            return TransitionResult(
+                public_events=(
+                    Event(
+                        "turn_ended",
+                        {},
+                        turn_index=1,
+                        phase="play_turn",
+                        decision_index=1,
+                        actor_player_id="RED",
+                    ),
+                ),
+                terminal=True,
+                result_metadata={"winner_ids": ["RED"], "num_turns": 1},
+            )
+        return super().apply_action(action)
+
+
 class MockTradeChatInvalidSelectionEngine:
     def __init__(self) -> None:
         self._game_id = "trade-chat-invalid-selection-game"
@@ -1247,6 +1273,86 @@ class MockPublicChatEngine:
 
 
 class GameOrchestratorTests(unittest.TestCase):
+    def test_can_resume_after_timeout_during_trade_chat_owner_decision(self) -> None:
+        class TimeoutOwnerDecisionPlayer(ScriptedPlayer):
+            def decide_trade_chat(self, observation):
+                self.trade_chat_observations.append(observation)
+                raise TimeoutError("owner decision timed out")
+
+        red = TimeoutOwnerDecisionPlayer(
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    )
+                )
+            ],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need brick.",
+                    requested_resources={"BRICK": 1},
+                )
+            ],
+        )
+        blue = ScriptedPlayer(
+            trade_chat_reply_responses=[
+                TradeChatReplyResponse(
+                    message="I can do that for sheep.",
+                    owner_gives={"SHEEP": 1},
+                    owner_gets={"BRICK": 1},
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orchestrator = GameOrchestrator(
+                MockTradeChatResumeTimeoutEngine(),
+                {"RED": red, "BLUE": blue},
+                run_dir=tmpdir,
+                trading_chat_enabled=True,
+            )
+
+            orchestrator.step()
+            with self.assertRaisesRegex(TimeoutError, "timed out"):
+                orchestrator.step()
+
+            run_dir = Path(orchestrator.run_dir)
+            checkpoint = json.loads(
+                (run_dir / "checkpoint.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(checkpoint["total_decisions"], 1)
+            self.assertEqual(
+                checkpoint["current_history_index"],
+                len(orchestrator.event_log.public_events),
+            )
+            self.assertEqual(
+                [event.kind for event in orchestrator.event_log.public_events],
+                [
+                    "dice_rolled",
+                    "trade_chat_opened",
+                    "trade_chat_message",
+                    "trade_chat_message",
+                ],
+            )
+
+            resumed_red = ScriptedPlayer(action_responses=[Action("END_TURN")])
+            resumed = GameOrchestrator(
+                MockTradeChatResumeTimeoutEngine(),
+                {"RED": resumed_red, "BLUE": ScriptedPlayer()},
+                resume_run_dir=run_dir,
+                trading_chat_enabled=True,
+            )
+
+            result = resumed.run()
+
+            self.assertEqual(result.winner_ids, ("RED",))
+            self.assertEqual(result.total_decisions, 2)
+            self.assertEqual(
+                resumed.action_trace_store.entries[-1].action.action_type, "END_TURN"
+            )
+
     def test_opening_strategy_phase_runs_for_all_players_before_first_turn_start(
         self,
     ) -> None:

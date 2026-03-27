@@ -2514,11 +2514,13 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     if analysis_data is None:
         if snapshot.result is None:
-            st.info(
-                "Game is still in progress. Analysis will be available once the game ends."
+            from .analysis import analyze_game
+
+            analysis_data = analyze_game(
+                snapshot.run_dir, write=False, allow_incomplete=True
             )
-            return
-        if st.button("Generate Analysis", type="primary"):
+            st.info("Showing live provisional analysis for an in-progress game.")
+        elif st.button("Generate Analysis", type="primary"):
             from .analysis import analyze_game
 
             analysis_data = analyze_game(snapshot.run_dir)
@@ -2529,6 +2531,8 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
 
     gs = analysis_data.get("game_summary", {})
     players = analysis_data.get("players", {})
+    if analysis_data.get("live"):
+        st.caption("Live analysis is provisional and may change until the run finishes.")
 
     # ── Game summary metrics ──
     st.subheader("Game Summary")
@@ -2539,6 +2543,17 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     cols[3].metric("Trade Activity", f"{gs.get('trade_activity_rate', 0):.1%}")
     cols[4].metric("Trade Efficiency", f"{gs.get('trade_efficiency', 0):.1%}")
     cols[5].metric("Chat No-Deal Rate", f"{gs.get('trade_chat_no_deal_rate', 0):.1%}")
+    chat_cols = st.columns(3)
+    chat_cols[0].metric("Main Chat Messages", gs.get("public_chat_messages", 0))
+    chat_cols[1].metric(
+        "Targeted Main Chat", gs.get("public_chat_targeted_messages", 0)
+    )
+    chat_cols[2].metric(
+        "Targeted Share",
+        f"{gs.get('public_chat_targeted_messages', 0) / max(gs.get('public_chat_messages', 0), 1):.1%}"
+        if gs.get("public_chat_messages", 0)
+        else "—",
+    )
 
     # ── VP Progression Chart ──
     st.subheader("Victory Point Progression")
@@ -2584,76 +2599,6 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             .properties(height=250)
         )
         st.altair_chart(vp_chart, width="stretch")
-
-    # ── Resource Production ──
-    st.subheader("Estimated Resource Production")
-    _RES_ORDER = ["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"]
-    _RES_COLOR = {
-        "WOOD": "#16a34a",
-        "BRICK": "#c2410c",
-        "SHEEP": "#86efac",
-        "WHEAT": "#fbbf24",
-        "ORE": "#94a3b8",
-    }
-    res_rows = []
-    for pid, pdata in players.items():
-        production = pdata.get("resource_production", {}).get("total", {})
-        for r in _RES_ORDER:
-            res_rows.append(
-                {"Player": pid, "Resource": r, "Count": production.get(r, 0)}
-            )
-    if res_rows:
-        df_res = pd.DataFrame(res_rows)
-        pids = list(players.keys())
-        res_color_list = [_RES_COLOR[r] for r in _RES_ORDER]
-        _emoji_expr = "{'WOOD':'🪵','BRICK':'🧱','SHEEP':'🐑','WHEAT':'🌾','ORE':'🪨'}[datum.value]"
-        player_charts = []
-        for pid in pids:
-            accent, _, _ = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
-            c = (
-                alt.Chart(df_res[df_res["Player"] == pid])
-                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=32)
-                .encode(
-                    x=alt.X(
-                        "Resource:N",
-                        sort=_RES_ORDER,
-                        axis=alt.Axis(
-                            title=None,
-                            labelExpr=_emoji_expr,
-                            labelFontSize=18,
-                            ticks=False,
-                            domain=False,
-                            labelAngle=0,
-                        ),
-                    ),
-                    y=alt.Y(
-                        "Count:Q",
-                        axis=alt.Axis(title=None, labelFontSize=9, tickCount=4),
-                    ),
-                    color=alt.Color(
-                        "Resource:N",
-                        scale=alt.Scale(domain=_RES_ORDER, range=res_color_list),
-                        legend=None,
-                    ),
-                    tooltip=["Resource:N", "Count:Q"],
-                )
-                .properties(
-                    title=alt.TitleParams(
-                        pid,
-                        color=accent,
-                        fontSize=13,
-                        fontWeight="bold",
-                        anchor="middle",
-                    ),
-                    height=160,
-                    width=180,
-                )
-            )
-            player_charts.append(c)
-        st.altair_chart(
-            alt.hconcat(*player_charts, spacing=40).configure_view(strokeWidth=0),
-            width="stretch",
-        )
 
     # ── Trade Activity ──
     st.subheader("Trade Activity")
@@ -2790,6 +2735,163 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         st.info(
             "Per-turn data not available — regenerate analysis.json to see trade activity charts."
         )
+
+    # ── Main Public Chat Activity ──
+    has_public_chat = any(
+        pdata.get("public_chat", {}).get("messages_sent", 0) > 0
+        or pdata.get("public_chat", {}).get("messages_targeted_at_player", 0) > 0
+        for pdata in players.values()
+    )
+    if has_public_chat:
+        st.subheader("Main Chat Activity")
+        st.caption("Cumulative public-chat activity by turn.")
+        rendered_chat = _render_chart_row(
+            [
+                (
+                    "Messages Sent",
+                    {
+                        pid: players[pid]
+                        .get("public_chat", {})
+                        .get("messages_sent_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Targeted Messages Sent",
+                    {
+                        pid: players[pid]
+                        .get("public_chat", {})
+                        .get("targeted_messages_sent_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Targeted At Player",
+                    {
+                        pid: players[pid]
+                        .get("public_chat", {})
+                        .get("messages_targeted_at_player_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+                (
+                    "Speaking Turns",
+                    {
+                        pid: players[pid]
+                        .get("public_chat", {})
+                        .get("speaking_turns_by_turn", {})
+                        for pid in _player_ids
+                    },
+                ),
+            ]
+        )
+        if rendered_chat == 0:
+            st.info(
+                "Per-turn public-chat data not available — regenerate analysis.json to see main chat charts."
+            )
+
+        has_targeted_chat = any(
+            pdata.get("public_chat", {}).get("targeted_messages_sent", 0) > 0
+            or pdata.get("public_chat", {}).get("messages_targeted_at_player", 0) > 0
+            for pdata in players.values()
+        )
+        if has_targeted_chat:
+            st.caption("Interaction structure from targeted public chat.")
+            interaction_cols = st.columns(3)
+
+            unique_targets_by_player = {
+                pid: players[pid]
+                .get("public_chat", {})
+                .get("unique_targets_by_turn", {})
+                for pid in _player_ids
+            }
+            received_by_player = {
+                pid: players[pid]
+                .get("public_chat", {})
+                .get("messages_targeted_at_player_by_turn", {})
+                for pid in _player_ids
+            }
+
+            with interaction_cols[0]:
+                if any(unique_targets_by_player.values()):
+                    st.altair_chart(
+                        _altair_line(
+                            unique_targets_by_player,
+                            _max_turn,
+                            "Unique Targets Reached",
+                        ),
+                        width="stretch",
+                    )
+                else:
+                    st.info("No targeted chat yet.")
+
+            with interaction_cols[1]:
+                if any(received_by_player.values()):
+                    st.altair_chart(
+                        _altair_line(
+                            received_by_player,
+                            _max_turn,
+                            "Messages Received",
+                        ),
+                        width="stretch",
+                    )
+                else:
+                    st.info("No directed messages received yet.")
+
+            with interaction_cols[2]:
+                heat_rows = []
+                for speaker_id in _player_ids:
+                    outgoing = players[speaker_id].get("public_chat", {}).get(
+                        "targets", {}
+                    )
+                    for target_id in _player_ids:
+                        heat_rows.append(
+                            {
+                                "Speaker": speaker_id,
+                                "Target": target_id,
+                                "Messages": int(outgoing.get(target_id, 0)),
+                            }
+                        )
+                heat_df = pd.DataFrame(heat_rows)
+                if not heat_df.empty and int(heat_df["Messages"].sum()) > 0:
+                    heat_chart = (
+                        alt.Chart(heat_df)
+                        .mark_rect(cornerRadius=3)
+                        .encode(
+                            x=alt.X(
+                                "Target:N",
+                                sort=_player_ids,
+                                axis=alt.Axis(title=None, labelAngle=0),
+                            ),
+                            y=alt.Y(
+                                "Speaker:N",
+                                sort=_player_ids,
+                                axis=alt.Axis(title=None),
+                            ),
+                            color=alt.Color(
+                                "Messages:Q",
+                                scale=alt.Scale(scheme="teals"),
+                                legend=None,
+                            ),
+                            tooltip=["Speaker:N", "Target:N", "Messages:Q"],
+                        )
+                        .properties(title="Who Talks To Whom", height=180)
+                    )
+                    text_chart = (
+                        alt.Chart(heat_df)
+                        .mark_text(color="#e2e8f0", fontSize=11)
+                        .encode(
+                            x=alt.X("Target:N", sort=_player_ids),
+                            y=alt.Y("Speaker:N", sort=_player_ids),
+                            text=alt.Text("Messages:Q"),
+                        )
+                    )
+                    st.altair_chart(
+                        (heat_chart + text_chart).configure_view(strokeWidth=0),
+                        width="stretch",
+                    )
+                else:
+                    st.info("No targeted public chat heatmap yet.")
 
     # ── Building Timeline + Longest Road + Largest Army ──
     st.subheader("Building & Achievement Progression")
@@ -3531,6 +3633,76 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                     .configure_axis(gridColor="rgba(148,163,184,0.15)")
                 )
                 st.altair_chart(share_chart, width="stretch")
+
+    # ── Resource Production ──
+    st.subheader("Estimated Resource Production")
+    _RES_ORDER = ["WOOD", "BRICK", "SHEEP", "WHEAT", "ORE"]
+    _RES_COLOR = {
+        "WOOD": "#16a34a",
+        "BRICK": "#c2410c",
+        "SHEEP": "#86efac",
+        "WHEAT": "#fbbf24",
+        "ORE": "#94a3b8",
+    }
+    res_rows = []
+    for pid, pdata in players.items():
+        production = pdata.get("resource_production", {}).get("total", {})
+        for r in _RES_ORDER:
+            res_rows.append(
+                {"Player": pid, "Resource": r, "Count": production.get(r, 0)}
+            )
+    if res_rows:
+        df_res = pd.DataFrame(res_rows)
+        pids = list(players.keys())
+        res_color_list = [_RES_COLOR[r] for r in _RES_ORDER]
+        _emoji_expr = "{'WOOD':'🪵','BRICK':'🧱','SHEEP':'🐑','WHEAT':'🌾','ORE':'🪨'}[datum.value]"
+        player_charts = []
+        for pid in pids:
+            accent, _, _ = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)
+            c = (
+                alt.Chart(df_res[df_res["Player"] == pid])
+                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=32)
+                .encode(
+                    x=alt.X(
+                        "Resource:N",
+                        sort=_RES_ORDER,
+                        axis=alt.Axis(
+                            title=None,
+                            labelExpr=_emoji_expr,
+                            labelFontSize=18,
+                            ticks=False,
+                            domain=False,
+                            labelAngle=0,
+                        ),
+                    ),
+                    y=alt.Y(
+                        "Count:Q",
+                        axis=alt.Axis(title=None, labelFontSize=9, tickCount=4),
+                    ),
+                    color=alt.Color(
+                        "Resource:N",
+                        scale=alt.Scale(domain=_RES_ORDER, range=res_color_list),
+                        legend=None,
+                    ),
+                    tooltip=["Resource:N", "Count:Q"],
+                )
+                .properties(
+                    title=alt.TitleParams(
+                        pid,
+                        color=accent,
+                        fontSize=13,
+                        fontWeight="bold",
+                        anchor="middle",
+                    ),
+                    height=160,
+                    width=180,
+                )
+            )
+            player_charts.append(c)
+        st.altair_chart(
+            alt.hconcat(*player_charts, spacing=40).configure_view(strokeWidth=0),
+            width="stretch",
+        )
 
     # ── Strategy Evolution ──
     any_strategy = any(

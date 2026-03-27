@@ -49,7 +49,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(game_config.seed, 12)
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertEqual(game_config.run_dir, Path("runs"))
-        self.assertEqual(game_config.run_tags, ("0.4.0", "dev"))
+        self.assertEqual(game_config.run_tags, ("0.5.0", "dev"))
         self.assertTrue(game_config.public_chat_enabled)
         self.assertEqual(game_config.public_chat_message_chars, 500)
         self.assertEqual(game_config.public_chat_history_limit, 40)
@@ -76,7 +76,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml.write_text(
                 (
                     '[game]\nengine = "catanatron"\nrun_dir = "runs/"\n'
-                    'run_tags = ["0.4.0", "experiment-a"]\n'
+                    'run_tags = ["0.5.0", "experiment-a"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -84,7 +84,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config = load_game_config(game_toml)
 
             self.assertEqual(config.run_dir, Path("runs"))
-            self.assertEqual(config.run_tags, ("0.4.0", "experiment-a"))
+            self.assertEqual(config.run_tags, ("0.5.0", "experiment-a"))
 
     def test_load_player_config_rejects_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -164,7 +164,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     "[game]\n"
                     'engine = "catanatron"\n'
                     'run_dir = "runs/"\n'
-                    'run_tags = ["0.4.0", "dev"]\n'
+                    'run_tags = ["0.5.0", "dev"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -196,14 +196,19 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     )
 
             self.assertEqual(
-                orchestrator_cls.call_args.kwargs["run_tags"], ("0.4.0", "dev")
+                orchestrator_cls.call_args.kwargs["run_tags"], ("0.5.0", "dev")
             )
+            self.assertEqual(
+                orchestrator_cls.call_args.kwargs["run_label"], "players"
+            )
+            self.assertIsNone(orchestrator_cls.call_args.kwargs["game_seed"])
 
     def test_resolve_run_dir_prefixes_tags_into_flat_run_name(self) -> None:
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
-            run_tags=("0.4.0", "dev"),
+            run_tags=("0.5.0", "dev"),
+            run_label="mixed-players",
         )
 
         self.assertIsNotNone(resolved)
@@ -211,7 +216,24 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(resolved.parent, Path("runs"))
         self.assertRegex(
             resolved.name,
-            r"^0\.4\.0-dev-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^0\.5\.0-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+        )
+
+    def test_resolve_run_dir_includes_seed_when_configured(self) -> None:
+        resolved = _resolve_run_dir(
+            Path("runs"),
+            game_id="mock-game",
+            run_tags=("0.5.0", "dev"),
+            run_label="mixed-players",
+            game_seed=12,
+        )
+
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.parent, Path("runs"))
+        self.assertRegex(
+            resolved.name,
+            r"^0\.5\.0-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_runner_uses_debug_reporter_when_requested(self) -> None:

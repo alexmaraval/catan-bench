@@ -158,7 +158,7 @@ run_tags = ["0.5.0", "dev"]
 New runs are created directly under `runs/`, with tags prefixed into the run directory name. For example:
 
 ```text
-runs/0.5.0-dev-seed-<seed>-<game-id>-<timestamp>-<token>/
+runs/0.5.0-dev-mixed-players-seed-<seed>-<game-id>-<timestamp>-<token>/
 ```
 
 Minimal player config:

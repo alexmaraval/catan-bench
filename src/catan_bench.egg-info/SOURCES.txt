@@ -52,6 +52,7 @@ src/catan_bench/templates/partials/game_context.jinja
 src/catan_bench/templates/partials/opening_strategy_contract.jinja
 src/catan_bench/templates/partials/public_chat_context.jinja
 src/catan_bench/templates/partials/public_chat_contract.jinja
+src/catan_bench/templates/partials/public_chat_transcript_readonly.jinja
 src/catan_bench/templates/partials/reactive_contract.jinja
 src/catan_bench/templates/partials/rules.jinja
 src/catan_bench/templates/partials/trade_chat_open_contract.jinja

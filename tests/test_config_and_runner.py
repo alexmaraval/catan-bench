@@ -46,7 +46,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/openai-players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
-        self.assertEqual(game_config.seed, 12)
+        self.assertEqual(game_config.seed, 24)
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertEqual(game_config.run_dir, Path("runs"))
         self.assertEqual(game_config.run_tags, ("0.5.0", "dev"))
@@ -163,6 +163,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 (
                     "[game]\n"
                     'engine = "catanatron"\n'
+                    "vps_to_win = 5\n"
                     'run_dir = "runs/"\n'
                     'run_tags = ["0.5.0", "dev"]\n'
                 ),
@@ -202,6 +203,10 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 orchestrator_cls.call_args.kwargs["run_label"], "players"
             )
             self.assertIsNone(orchestrator_cls.call_args.kwargs["game_seed"])
+            self.assertIn(
+                "The first player to reach 5 victory points wins.",
+                orchestrator_cls.call_args.kwargs["observation_builder"].game_rules,
+            )
 
     def test_resolve_run_dir_prefixes_tags_into_flat_run_name(self) -> None:
         resolved = _resolve_run_dir(

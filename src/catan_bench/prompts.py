@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-CATAN_RULES_SUMMARY = """You are playing Settlers of Catan in a benchmark harness.
+_CATAN_RULES_TEMPLATE = """You are playing Settlers of Catan in a benchmark harness.
 
 Core rules:
 - Players collect WOOD, BRICK, SHEEP, WHEAT, and ORE.
@@ -11,7 +11,7 @@ Core rules:
 - Roads extend your network and contest Longest Road. The first player with a continuous road of at least 5 segments takes Longest Road; a longer road steals it.
 - The first player to play 3 knight cards takes Largest Army; a player with more played knights steals it.
 - New settlements must follow the distance rule: no adjacent settlement/city on neighboring intersections, and outside set-up they must connect to your own road.
-- The first player to reach the configured victory-point target wins.
+- The first player to reach {vps_to_win} victory points wins.
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
 - Tile numbers indicate production frequency: 6 and 8 are strongest, then 5 and 9, then 4 and 10, then 3 and 11, then 2 and 12; 7 produces no resources and instead triggers the robber.
 - Especially in the opening, prefer placements that combine strong production numbers, useful resource diversity, and good expansion routes.
@@ -42,3 +42,10 @@ Tips:
 - Negotiation is key, tactics are essential.
 - It's you against the other, may the best player win.
 """
+
+
+def build_game_rules(vps_to_win: int) -> str:
+    return _CATAN_RULES_TEMPLATE.format(vps_to_win=int(vps_to_win))
+
+
+CATAN_RULES_SUMMARY = build_game_rules(10)

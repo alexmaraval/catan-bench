@@ -11,7 +11,7 @@ from .players import (
     ScriptedPlayer,
 )
 from .prompting import PromptRenderer
-from .prompts import CATAN_RULES_SUMMARY
+from .prompts import CATAN_RULES_SUMMARY, build_game_rules
 from .runner import build_engine, build_players, run_from_config_files
 from .schemas import (
     Action,
@@ -107,6 +107,7 @@ __all__ = [
     "TurnStartObservation",
     "TurnStartResponse",
     "build_engine",
+    "build_game_rules",
     "build_players",
     "load_game_config",
     "load_player_configs",

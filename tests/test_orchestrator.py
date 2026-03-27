@@ -1322,11 +1322,8 @@ class GameOrchestratorTests(unittest.TestCase):
             checkpoint = json.loads(
                 (run_dir / "checkpoint.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(checkpoint["total_decisions"], 1)
-            self.assertEqual(
-                checkpoint["current_history_index"],
-                len(orchestrator.event_log.public_events),
-            )
+            self.assertEqual(checkpoint["total_decisions"], 0)
+            self.assertEqual(checkpoint["current_history_index"], 0)
             self.assertEqual(
                 [event.kind for event in orchestrator.event_log.public_events],
                 [
@@ -1405,7 +1402,7 @@ class GameOrchestratorTests(unittest.TestCase):
             ["opening_strategy", "turn_start", "choose_action"],
         )
 
-    def test_can_resume_mid_turn_from_saved_run_directory(self) -> None:
+    def test_can_resume_from_last_completed_turn_instead_of_mid_turn(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             initial = GameOrchestrator(
                 MockTurnEngine(),
@@ -1433,9 +1430,18 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertTrue(checkpoint_path.exists())
             self.assertTrue(action_trace_path.exists())
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            self.assertEqual(checkpoint["total_decisions"], 2)
+            self.assertEqual(checkpoint["total_decisions"], 0)
+            self.assertEqual(checkpoint["current_history_index"], 0)
 
-            resumed_red = ScriptedPlayer(action_responses=[Action("END_TURN")])
+            resumed_red = ScriptedPlayer(
+                action_responses=[
+                    Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                    ),
+                    Action("END_TURN"),
+                ]
+            )
             resumed = GameOrchestrator(
                 MockTurnEngine(),
                 {
@@ -1450,8 +1456,8 @@ class GameOrchestratorTests(unittest.TestCase):
             self.assertEqual(result.total_decisions, 4)
             self.assertEqual(result.winner_ids, ("RED",))
             self.assertEqual(len(resumed.action_trace_store.entries), 4)
-            self.assertEqual(len(resumed_red.start_turn_observations), 0)
-            self.assertEqual(len(resumed_red.action_observations), 1)
+            self.assertEqual(len(resumed_red.start_turn_observations), 1)
+            self.assertEqual(len(resumed_red.action_observations), 2)
             self.assertEqual(len(resumed_red.end_turn_observations), 1)
 
     def test_resume_rejects_checkpoint_history_index_mismatch(self) -> None:
@@ -1478,10 +1484,22 @@ class GameOrchestratorTests(unittest.TestCase):
             run_dir = Path(initial.run_dir)
             history_path = run_dir / "public_history.jsonl"
             state_path = run_dir / "public_state_trace.jsonl"
+            checkpoint_path = run_dir / "checkpoint.json"
             history_lines = history_path.read_text(encoding="utf-8").splitlines()
             state_lines = state_path.read_text(encoding="utf-8").splitlines()
             history_path.write_text(history_lines[0] + "\n", encoding="utf-8")
-            state_path.write_text("\n".join(state_lines[:2]) + "\n", encoding="utf-8")
+            corrupted_snapshot = json.loads(state_lines[1])
+            corrupted_snapshot["public_state"]["players"]["RED"]["vp"] = 99
+            state_path.write_text(
+                "\n".join([state_lines[0], json.dumps(corrupted_snapshot)]) + "\n",
+                encoding="utf-8",
+            )
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            checkpoint["current_history_index"] = 2
+            checkpoint_path.write_text(
+                json.dumps(checkpoint, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
             resumed = GameOrchestrator(
                 MockTurnEngine(),
@@ -1523,7 +1541,12 @@ class GameOrchestratorTests(unittest.TestCase):
             history_lines = history_path.read_text(encoding="utf-8").splitlines()
             state_lines = state_path.read_text(encoding="utf-8").splitlines()
             history_path.write_text(history_lines[0] + "\n", encoding="utf-8")
-            state_path.write_text("\n".join(state_lines[:2]) + "\n", encoding="utf-8")
+            corrupted_snapshot = json.loads(state_lines[1])
+            corrupted_snapshot["public_state"]["players"]["RED"]["vp"] = 99
+            state_path.write_text(
+                "\n".join([state_lines[0], json.dumps(corrupted_snapshot)]) + "\n",
+                encoding="utf-8",
+            )
 
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
             checkpoint["current_history_index"] = 1

@@ -296,7 +296,10 @@ class GameOrchestrator:
 
     def _completed_step(self, transition: TransitionResult) -> None:
         self._completed_decisions += 1
-        if self.run_dir is not None:
+        should_checkpoint = transition.terminal or any(
+            event.kind == "turn_ended" for event in transition.public_events
+        )
+        if self.run_dir is not None and should_checkpoint:
             self._write_checkpoint(terminal=transition.terminal)
 
     def _prepare_run(self) -> None:
@@ -385,15 +388,16 @@ class GameOrchestrator:
         if self.run_dir is None:
             raise RuntimeError("Resume mode requires a concrete run directory.")
 
+        checkpoint = read_json(self.run_dir / "checkpoint.json") or {}
         self.event_log.hydrate()
         self.public_state_store.hydrate()
         self.memory_store.hydrate(self.engine.player_ids)
         self.prompt_trace_store.hydrate(self.engine.player_ids)
         self.action_trace_store.hydrate()
+        self._restore_checkpoint_state(checkpoint)
+        self._rollback_artifacts_to_checkpoint()
         self._validate_initial_resume_artifacts()
         self._replay_saved_actions()
-        checkpoint = read_json(self.run_dir / "checkpoint.json") or {}
-        self._restore_checkpoint_state(checkpoint)
         self._validate_resumed_artifacts()
 
     def _replay_saved_actions(self) -> None:
@@ -457,54 +461,9 @@ class GameOrchestrator:
             ).items()
             if isinstance(player_id, str)
         }
-        active_turn = checkpoint.get("active_turn")
-        if isinstance(active_turn, dict):
-            self._active_turn = _ActiveTurnSession(
-                owner_player_id=str(active_turn["owner_player_id"]),
-                turn_index=int(active_turn["turn_index"]),
-                start_history_index=int(active_turn["start_history_index"]),
-                start_phase=str(active_turn["start_phase"]),
-                start_decision_index=int(active_turn["start_decision_index"]),
-            )
-        else:
-            self._active_turn = None
-
-        trade_chat_turn_state = checkpoint.get("trade_chat_turn_state")
-        if isinstance(trade_chat_turn_state, dict):
-            self._trade_chat_turn_state = _TradeChatTurnState(
-                owner_player_id=str(trade_chat_turn_state["owner_player_id"]),
-                turn_index=int(trade_chat_turn_state["turn_index"]),
-                opened_attempts=int(
-                    trade_chat_turn_state.get(
-                        "opened_attempts",
-                        trade_chat_turn_state.get("failed_attempts", 0),
-                    )
-                ),
-                failed_attempts=int(trade_chat_turn_state.get("failed_attempts", 0)),
-                opened_room_signatures={
-                    str(signature)
-                    for signature in trade_chat_turn_state.get(
-                        "opened_room_signatures", []
-                    )
-                    if isinstance(signature, str)
-                },
-            )
-        else:
-            self._trade_chat_turn_state = None
-
-        pending_trade_chat_selection = checkpoint.get("pending_trade_chat_selection")
-        if isinstance(pending_trade_chat_selection, dict):
-            self._pending_trade_chat_selection = _PendingTradeChatSelection(
-                owner_player_id=str(pending_trade_chat_selection["owner_player_id"]),
-                counterparty_player_id=str(
-                    pending_trade_chat_selection["counterparty_player_id"]
-                ),
-                owner_gives=dict(pending_trade_chat_selection.get("owner_gives") or {}),
-                owner_gets=dict(pending_trade_chat_selection.get("owner_gets") or {}),
-                turn_index=int(pending_trade_chat_selection["turn_index"]),
-            )
-        else:
-            self._pending_trade_chat_selection = None
+        self._active_turn = None
+        self._trade_chat_turn_state = None
+        self._pending_trade_chat_selection = None
 
         checkpoint_history_index = checkpoint.get("current_history_index")
         if checkpoint_history_index is None:
@@ -524,6 +483,61 @@ class GameOrchestrator:
                 player_id: 0 for player_id in self.engine.player_ids
             }
 
+    def _checkpoint_turn_index(self, history_index: int) -> int:
+        if history_index <= 0:
+            return 0
+        for event in reversed(self.event_log.public_events):
+            if event.history_index <= history_index:
+                return event.turn_index
+        for snapshot in reversed(self.public_state_store.snapshots):
+            if snapshot.history_index <= history_index:
+                return snapshot.turn_index
+        return 0
+
+    def _rollback_artifacts_to_checkpoint(self) -> None:
+        checkpoint_decisions = self._completed_decisions
+        if checkpoint_decisions < 0:
+            raise RuntimeError("Resume checkpoint recorded a negative decision count.")
+        if checkpoint_decisions > len(self.action_trace_store.entries):
+            raise RuntimeError(
+                "Resume checkpoint does not match action trace length: "
+                f"{checkpoint_decisions} decisions recorded in checkpoint versus "
+                f"{len(self.action_trace_store.entries)} actions in trace."
+            )
+
+        checkpoint_history_index = self._resume_checkpoint_history_index
+        if checkpoint_history_index is None:
+            checkpoint_history_index = self.event_log.current_history_index
+            self._resume_checkpoint_history_index = checkpoint_history_index
+        elif checkpoint_history_index < 0:
+            raise RuntimeError(
+                "Resume checkpoint recorded a negative current_history_index."
+            )
+        elif checkpoint_history_index > self.event_log.current_history_index:
+            raise RuntimeError(
+                "Resume checkpoint current_history_index does not match public history "
+                f"length: checkpoint recorded {checkpoint_history_index} "
+                f"events versus {self.event_log.current_history_index} in history."
+            )
+
+        checkpoint_turn_index = self._checkpoint_turn_index(checkpoint_history_index)
+        self.action_trace_store.truncate(checkpoint_decisions)
+        self.event_log.truncate(checkpoint_history_index)
+        self.public_state_store.truncate(
+            checkpoint_history_index,
+            initial_snapshot=self._expected_initial_public_state_snapshot(),
+        )
+        self.memory_store.truncate(
+            history_index=checkpoint_history_index,
+            turn_index=checkpoint_turn_index,
+            player_ids=self.engine.player_ids,
+        )
+        self.prompt_trace_store.truncate(
+            history_index=checkpoint_history_index,
+            turn_index=checkpoint_turn_index,
+            player_ids=self.engine.player_ids,
+        )
+
     def _validate_resumed_artifacts(self) -> None:
         if self._completed_decisions != len(self.action_trace_store.entries):
             raise RuntimeError(
@@ -534,7 +548,7 @@ class GameOrchestrator:
         if (
             self._resume_checkpoint_history_index is not None
             and self._resume_checkpoint_history_index
-            != self.event_log.current_history_index
+            > self.event_log.current_history_index
         ):
             raise RuntimeError(
                 "Resume checkpoint current_history_index does not match public history "
@@ -583,56 +597,21 @@ class GameOrchestrator:
     def _write_checkpoint(self, *, terminal: bool) -> None:
         if self.run_dir is None:
             return
-
-        active_turn: dict[str, JsonValue] | None = None
-        if self._active_turn is not None:
-            active_turn = {
-                "owner_player_id": self._active_turn.owner_player_id,
-                "turn_index": self._active_turn.turn_index,
-                "start_history_index": self._active_turn.start_history_index,
-                "start_phase": self._active_turn.start_phase,
-                "start_decision_index": self._active_turn.start_decision_index,
-            }
-
-        trade_chat_turn_state: dict[str, JsonValue] | None = None
-        if self._trade_chat_turn_state is not None:
-            trade_chat_turn_state = {
-                "owner_player_id": self._trade_chat_turn_state.owner_player_id,
-                "turn_index": self._trade_chat_turn_state.turn_index,
-                "opened_attempts": self._trade_chat_turn_state.opened_attempts,
-                "failed_attempts": self._trade_chat_turn_state.failed_attempts,
-                "opened_room_signatures": sorted(
-                    self._trade_chat_turn_state.opened_room_signatures
-                ),
-            }
-
-        pending_trade_chat_selection: dict[str, JsonValue] | None = None
-        if self._pending_trade_chat_selection is not None:
-            pending_trade_chat_selection = {
-                "owner_player_id": self._pending_trade_chat_selection.owner_player_id,
-                "counterparty_player_id": (
-                    self._pending_trade_chat_selection.counterparty_player_id
-                ),
-                "owner_gives": dict(self._pending_trade_chat_selection.owner_gives),
-                "owner_gets": dict(self._pending_trade_chat_selection.owner_gets),
-                "turn_index": self._pending_trade_chat_selection.turn_index,
-            }
-
         write_json(
             self.run_dir / "checkpoint.json",
             {
-                "artifact_version": 1,
+                "artifact_version": 2,
                 "total_decisions": self._completed_decisions,
                 "current_history_index": self.event_log.current_history_index,
+                "checkpoint_turn_index": self._checkpoint_turn_index(
+                    self.event_log.current_history_index
+                ),
                 "terminal": terminal,
                 "decision_phase_counts": dict(self._decision_phase_counts),
                 "last_turn_history_index_by_player": dict(
                     self._last_turn_history_index_by_player
                 ),
-                "active_turn": active_turn,
                 "opening_strategy_done": self._opening_strategy_done,
-                "trade_chat_turn_state": trade_chat_turn_state,
-                "pending_trade_chat_selection": pending_trade_chat_selection,
             },
         )
 
@@ -2131,9 +2110,7 @@ class GameOrchestrator:
         return self._store_events(events)
 
     def _write_inflight_checkpoint(self) -> None:
-        if self.run_dir is None:
-            return
-        self._write_checkpoint(terminal=False)
+        return
 
     def _record_response_public_chat(
         self,

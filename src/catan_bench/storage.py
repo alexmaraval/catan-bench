@@ -38,6 +38,13 @@ def _write_jsonl(handle: TextIO, payload: dict[str, JsonValue]) -> None:
     handle.flush()
 
 
+def _rewrite_jsonl(path: Path, rows: Iterable[dict[str, JsonValue]]) -> TextIO:
+    handle = _open_jsonl_handle(path, truncate=True)
+    for row in rows:
+        _write_jsonl(handle, row)
+    return handle
+
+
 def read_jsonl(path: Path) -> list[dict[str, JsonValue]]:
     if not path.exists():
         return []
@@ -108,6 +115,17 @@ class EventLog:
                 _write_jsonl(handle, stored_event.to_dict())
         return tuple(stored_events)
 
+    def truncate(self, history_index: int) -> None:
+        self.public_events = [
+            event for event in self.public_events if event.history_index <= history_index
+        ]
+        if self.run_dir is not None:
+            self.close()
+            self._handle = _rewrite_jsonl(
+                self.run_dir / "public_history.jsonl",
+                (event.to_dict() for event in self.public_events),
+            )
+
     def recent(self, limit: int | None = None) -> tuple[Event, ...]:
         if limit is None:
             return tuple(self.public_events)
@@ -175,6 +193,27 @@ class PublicStateStore:
                 )
                 self._handle = handle
             _write_jsonl(handle, snapshot.to_dict())
+
+    def truncate(
+        self,
+        history_index: int,
+        *,
+        initial_snapshot: PublicStateSnapshot | None = None,
+    ) -> None:
+        kept = [
+            snapshot
+            for snapshot in self.snapshots
+            if snapshot.history_index <= history_index
+        ]
+        if not kept and initial_snapshot is not None:
+            kept = [initial_snapshot]
+        self.snapshots = kept
+        if self.run_dir is not None:
+            self.close()
+            self._handle = _rewrite_jsonl(
+                self.run_dir / "public_state_trace.jsonl",
+                (snapshot.to_dict() for snapshot in self.snapshots),
+            )
 
     def close(self) -> None:
         if self._handle is not None:
@@ -362,6 +401,41 @@ class MemoryStore:
     def count(self) -> int:
         return sum(len(snapshots) for snapshots in self._history_by_player.values())
 
+    def truncate(
+        self,
+        *,
+        history_index: int,
+        turn_index: int,
+        player_ids: Iterable[str],
+    ) -> None:
+        player_ids = tuple(player_ids)
+        self.close()
+        for player_id in player_ids:
+            history = [
+                snapshot
+                for snapshot in self._history_by_player.get(player_id, [])
+                if snapshot.history_index < history_index
+                or (
+                    snapshot.history_index == history_index
+                    and snapshot.turn_index <= turn_index
+                )
+            ]
+            self._history_by_player[player_id] = history
+            current = history[-1].memory if history else PlayerMemory()
+            self._current_by_player[player_id] = current
+            if self.run_dir is None:
+                continue
+            player_dir = self.run_dir / "players" / player_id
+            player_dir.mkdir(parents=True, exist_ok=True)
+            if history:
+                write_json(player_dir / "memory.json", history[-1].to_dict())
+            else:
+                write_json(player_dir / "memory.json", {"memory": current.to_dict()})
+            self._trace_handles_by_player[player_id] = _rewrite_jsonl(
+                player_dir / "memory_trace.jsonl",
+                (snapshot.to_dict() for snapshot in history),
+            )
+
     @staticmethod
     def _merge_short_term_notes(
         current_short_term: JsonValue | None,
@@ -451,6 +525,32 @@ class PromptTraceStore:
                 self._handles_by_player[trace.player_id] = handle
             _write_jsonl(handle, trace.to_dict())
 
+    def truncate(
+        self,
+        *,
+        history_index: int,
+        turn_index: int,
+        player_ids: Iterable[str],
+    ) -> None:
+        player_ids = tuple(player_ids)
+        self.close()
+        for player_id in player_ids:
+            traces = [
+                trace
+                for trace in self._traces_by_player.get(player_id, [])
+                if trace.history_index < history_index
+                or (trace.history_index == history_index and trace.turn_index <= turn_index)
+            ]
+            self._traces_by_player[player_id] = traces
+            if self.run_dir is None:
+                continue
+            player_dir = self.run_dir / "players" / player_id
+            player_dir.mkdir(parents=True, exist_ok=True)
+            self._handles_by_player[player_id] = _rewrite_jsonl(
+                player_dir / "prompt_trace.jsonl",
+                (trace.to_dict() for trace in traces),
+            )
+
     def get(self, player_id: str) -> tuple[PromptTrace, ...]:
         return tuple(self._traces_by_player.get(player_id, ()))
 
@@ -504,6 +604,15 @@ class ActionTraceStore:
                 )
                 self._handle = handle
             _write_jsonl(handle, entry.to_dict())
+
+    def truncate(self, count: int) -> None:
+        self.entries = self.entries[:count]
+        if self.run_dir is not None:
+            self.close()
+            self._handle = _rewrite_jsonl(
+                self.run_dir / "action_trace.jsonl",
+                (entry.to_dict() for entry in self.entries),
+            )
 
     def close(self) -> None:
         if self._handle is not None:

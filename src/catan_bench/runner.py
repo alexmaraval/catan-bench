@@ -34,6 +34,7 @@ from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
+from .prompts import build_game_rules
 from .reporter import DebugTerminalReporter, TerminalReporter
 from .storage import read_json
 
@@ -132,6 +133,7 @@ def run_from_config_files(
         players,
         observation_builder=ObservationBuilder(
             recent_event_window=game_config.history_window,
+            game_rules=build_game_rules(game_config.vps_to_win),
         ),
         run_dir=effective_run_dir,
         run_tags=game_config.run_tags,

@@ -219,18 +219,27 @@ def load_dashboard_snapshot(run_dir: str | Path) -> DashboardSnapshot:
     )
 
 
-def discover_run_directories(base_run_dir: str | Path) -> tuple[Path, ...]:
-    base_path = Path(base_run_dir)
-    if _is_run_directory(base_path):
-        return (base_path,)
-    if not base_path.exists() or not base_path.is_dir():
-        return ()
-    candidates = [
-        path
-        for path in base_path.iterdir()
-        if path.is_dir() and _is_run_directory(path)
-    ]
-    return tuple(sorted(candidates, key=_run_sort_key, reverse=True))
+# def discover_run_directories(base_run_dir: str | Path) -> tuple[Path, ...]:
+#     base_path = Path(base_run_dir)
+#     if _is_run_directory(base_path):
+#         return (base_path,)
+#     if not base_path.exists() or not base_path.is_dir():
+#         return ()
+#     candidates = [
+#         path
+#         for path in base_path.iterdir()
+#         if path.is_dir() and _is_run_directory(path)
+#     ]
+#     return tuple(sorted(candidates, key=_run_sort_key, reverse=True))
+def discover_run_directories(base_dir: Path) -> tuple[Path, ...]:
+    """Discover run directories, sorted by modification time (newest first)."""
+    run_dirs = [d for d in base_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()]
+    # Sort by the modification time of public_history.jsonl in descending order (newest first)
+    run_dirs.sort(
+        key=lambda d: (d / "public_history.jsonl").stat().st_mtime,
+        reverse=True  # Add this to sort newest first
+    )
+    return tuple(run_dirs)
 
 
 def build_player_timelines(

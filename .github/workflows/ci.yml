@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen --group dev --group dashboard
 
       - name: Install catanatron
-        run: uv run python -m pip install git+https://github.com/bcollazo/catanatron.git
+        run: uv pip install git+https://github.com/bcollazo/catanatron.git
 
       - name: Run Ruff
         run: uv run ruff check src tests

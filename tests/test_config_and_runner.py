@@ -15,6 +15,7 @@ from catan_bench.orchestrator import _resolve_run_dir
 from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.reporter import DebugTerminalReporter
 from catan_bench.runner import (
+    _AUTO_RESUME_REQUEST,
     _find_dotenv,
     _is_existing_run_directory,
     _load_resume_game_id,
@@ -30,12 +31,16 @@ class _StubEngine:
     player_ids = ("RED", "BLUE")
 
 
-def _write_resume_artifacts(run_dir: Path, *, game_id: str = "saved-game-id") -> None:
+def _write_resume_artifacts(
+    run_dir: Path,
+    *,
+    game_id: str = "saved-game-id",
+    metadata_contents: str | None = None,
+) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "metadata.json").write_text(
-        f'{{"game_id": "{game_id}"}}\n',
-        encoding="utf-8",
-    )
+    if metadata_contents is None:
+        metadata_contents = f'{{"game_id": "{game_id}"}}\n'
+    (run_dir / "metadata.json").write_text(metadata_contents, encoding="utf-8")
     for file_name, contents in (
         ("checkpoint.json", "{}\n"),
         ("public_history.jsonl", ""),
@@ -594,6 +599,28 @@ class ConfigAndRunnerTests(unittest.TestCase):
             debug_trade=False,
         )
 
+    def test_main_resume_run_without_path_requests_auto_detection(self) -> None:
+        with patch("catan_bench.runner.run_from_config_files") as run_mock:
+            run_mock.return_value = GameResult(
+                game_id="mock-game",
+                winner_ids=("RED",),
+                total_decisions=1,
+                public_event_count=0,
+                memory_writes=0,
+                metadata={},
+            )
+            exit_code = main(["--game", "game.toml", "--players", "players.toml", "--resume-run"])
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            game_config_path="game.toml",
+            players_config_path="players.toml",
+            run_dir=_AUTO_RESUME_REQUEST,
+            debug=False,
+            debug_from_setup=False,
+            debug_trade=False,
+        )
+
     def test_resolve_requested_run_dir_uses_config_when_cli_missing(self) -> None:
         configured = Path("runs/default")
 
@@ -617,6 +644,92 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertIsNone(run_dir)
         self.assertEqual(resume_run_dir, run_path)
+
+    def test_resolve_requested_run_dir_auto_detects_unique_matching_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_run_dir = Path(tmpdir) / "runs"
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
+
+            matching_run = base_run_dir / "match"
+            _write_resume_artifacts(
+                matching_run,
+                metadata_contents=(
+                    "{\n"
+                    '  "game_id": "saved-game-id",\n'
+                    f'  "players_config_path": "{players_toml.resolve()}",\n'
+                    '  "run_label": "players",\n'
+                    '  "game_seed": 777,\n'
+                    '  "run_tags": ["1.0.0"]\n'
+                    "}\n"
+                ),
+            )
+            _write_resume_artifacts(
+                base_run_dir / "other",
+                metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
+            )
+
+            run_dir, resume_run_dir = _resolve_requested_run_dir(
+                requested_run_dir=_AUTO_RESUME_REQUEST,
+                configured_run_dir=base_run_dir,
+                players_config_path=players_toml.resolve(),
+                run_label="players",
+                game_seed=777,
+                run_tags=("1.0.0",),
+            )
+
+        self.assertIsNone(run_dir)
+        self.assertEqual(resume_run_dir, matching_run)
+
+    def test_resolve_requested_run_dir_auto_resume_rejects_multiple_matches(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_run_dir = Path(tmpdir) / "runs"
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
+
+            metadata_contents = (
+                "{\n"
+                '  "game_id": "saved-game-id",\n'
+                f'  "players_config_path": "{players_toml.resolve()}",\n'
+                '  "run_label": "players",\n'
+                '  "game_seed": 777,\n'
+                '  "run_tags": ["1.0.0"]\n'
+                "}\n"
+            )
+            _write_resume_artifacts(base_run_dir / "match-a", metadata_contents=metadata_contents)
+            _write_resume_artifacts(base_run_dir / "match-b", metadata_contents=metadata_contents)
+
+            with self.assertRaisesRegex(ValueError, "Multiple matching run directories"):
+                _resolve_requested_run_dir(
+                    requested_run_dir=_AUTO_RESUME_REQUEST,
+                    configured_run_dir=base_run_dir,
+                    players_config_path=players_toml.resolve(),
+                    run_label="players",
+                    game_seed=777,
+                    run_tags=("1.0.0",),
+                )
+
+    def test_resolve_requested_run_dir_auto_resume_rejects_when_no_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_run_dir = Path(tmpdir) / "runs"
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
+            _write_resume_artifacts(
+                base_run_dir / "other",
+                metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
+            )
+
+            with self.assertRaisesRegex(ValueError, "No matching run directory found"):
+                _resolve_requested_run_dir(
+                    requested_run_dir=_AUTO_RESUME_REQUEST,
+                    configured_run_dir=base_run_dir,
+                    players_config_path=players_toml.resolve(),
+                    run_label="players",
+                    game_seed=777,
+                    run_tags=("1.0.0",),
+                )
 
     def test_is_existing_run_directory_checks_artifact_markers(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

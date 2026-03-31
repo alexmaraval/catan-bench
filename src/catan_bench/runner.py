@@ -51,6 +51,7 @@ _RESUME_ARTIFACT_FILES = (
     "public_state_trace.jsonl",
     "action_trace.jsonl",
 )
+_AUTO_RESUME_REQUEST = "__auto_resume__"
 
 try:
     from .catanatron_adapter import CatanatronEngineAdapter
@@ -133,6 +134,10 @@ def run_from_config_files(
     effective_run_dir, resume_run_dir = _resolve_requested_run_dir(
         requested_run_dir=run_dir,
         configured_run_dir=game_config.run_dir,
+        players_config_path=players_config_path.resolve(),
+        run_label=players_config_path.stem,
+        game_seed=game_config.seed,
+        run_tags=game_config.run_tags,
     )
     resume_game_id = _load_resume_game_id(resume_run_dir)
     engine = build_engine(game_config, player_configs, game_id=resume_game_id)
@@ -185,9 +190,21 @@ def _resolve_requested_run_dir(
     *,
     requested_run_dir: str | Path | None,
     configured_run_dir: Path | None,
+    players_config_path: Path | None = None,
+    run_label: str | None = None,
+    game_seed: int | None = None,
+    run_tags: tuple[str, ...] = (),
 ) -> tuple[Path | None, Path | None]:
     if requested_run_dir is None:
         return configured_run_dir, None
+    if requested_run_dir == _AUTO_RESUME_REQUEST:
+        return None, _find_matching_resume_run_dir(
+            configured_run_dir=configured_run_dir,
+            players_config_path=players_config_path,
+            run_label=run_label,
+            game_seed=game_seed,
+            run_tags=run_tags,
+        )
     requested_path = Path(requested_run_dir)
     missing_resume_artifacts = _missing_resume_artifact_files(requested_path)
     if missing_resume_artifacts and len(missing_resume_artifacts) < len(
@@ -205,6 +222,94 @@ def _resolve_requested_run_dir(
 
 def _is_existing_run_directory(path: Path) -> bool:
     return not _missing_resume_artifact_files(path)
+
+
+def _find_matching_resume_run_dir(
+    *,
+    configured_run_dir: Path | None,
+    players_config_path: Path | None,
+    run_label: str | None,
+    game_seed: int | None,
+    run_tags: tuple[str, ...],
+) -> Path:
+    if configured_run_dir is None:
+        raise ValueError(
+            "Cannot auto-resume without a configured `run_dir` in the game config."
+        )
+    if players_config_path is None:
+        raise ValueError(
+            "Cannot auto-resume without a concrete players config path to match."
+        )
+    if not configured_run_dir.exists() or not configured_run_dir.is_dir():
+        raise ValueError(
+            "Cannot auto-resume because the configured run directory does not exist: "
+            f"{configured_run_dir}"
+        )
+
+    matching_runs: list[Path] = []
+    for child in sorted(Path(configured_run_dir).iterdir()):
+        if not child.is_dir() or not _is_existing_run_directory(child):
+            continue
+        metadata = read_json(child / "metadata.json") or {}
+        if _resume_run_matches_config(
+            metadata=metadata,
+            players_config_path=players_config_path,
+            run_label=run_label,
+            game_seed=game_seed,
+            run_tags=run_tags,
+        ):
+            matching_runs.append(child)
+
+    if not matching_runs:
+        raise ValueError(
+            "No matching run directory found under "
+            f"{configured_run_dir} for players config {players_config_path}."
+        )
+    if len(matching_runs) > 1:
+        matching_list = ", ".join(str(path) for path in matching_runs)
+        raise ValueError(
+            "Multiple matching run directories found for this config: "
+            f"{matching_list}"
+        )
+    return matching_runs[0]
+
+
+def _resume_run_matches_config(
+    *,
+    metadata: dict,
+    players_config_path: Path,
+    run_label: str | None,
+    game_seed: int | None,
+    run_tags: tuple[str, ...],
+) -> bool:
+    matched = False
+
+    metadata_players_config_path = metadata.get("players_config_path")
+    if isinstance(metadata_players_config_path, str):
+        if Path(metadata_players_config_path) != players_config_path:
+            return False
+        matched = True
+
+    metadata_run_label = metadata.get("run_label")
+    if isinstance(metadata_run_label, str):
+        if run_label is not None and metadata_run_label != run_label:
+            return False
+        matched = True
+
+    metadata_game_seed = metadata.get("game_seed")
+    if metadata_game_seed is not None or game_seed is not None:
+        if metadata_game_seed != game_seed:
+            return False
+        matched = True
+
+    metadata_run_tags = metadata.get("run_tags")
+    if isinstance(metadata_run_tags, list):
+        normalized_run_tags = tuple(str(tag) for tag in metadata_run_tags)
+        if normalized_run_tags != tuple(str(tag) for tag in run_tags):
+            return False
+        matched = True
+
+    return matched
 
 
 def _missing_resume_artifact_files(path: Path) -> tuple[str, ...]:
@@ -250,7 +355,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "If it points to an existing run directory, resume that run in place."
         ),
     )
-    parser.add_argument("--resume-run", dest="run_dir", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--resume-run",
+        dest="run_dir",
+        nargs="?",
+        const=_AUTO_RESUME_REQUEST,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--debug",
         action="store_true",

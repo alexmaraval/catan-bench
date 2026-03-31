@@ -5,7 +5,7 @@ seed = 123
 [[players]]
 id = "RED"
 type = "llm"
-model = "z-ai/glm-4.5-air:free"
+model = "z-ai/glm-5-turbo"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300

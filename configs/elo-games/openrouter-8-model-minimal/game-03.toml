@@ -16,13 +16,13 @@ reasoning_enabled = false
 [[players]]
 id = "BLUE"
 type = "llm"
-model = "qwen/qwen3-235b-a22b-thinking-2507"
+model = "qwen/qwen3-235b-a22b-2507"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_effort = "minimal"
+reasoning_enabled = false
 
 [[players]]
 id = "ORANGE"

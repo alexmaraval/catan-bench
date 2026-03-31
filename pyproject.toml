@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catan-bench"
-version = "0.5.0"
+version = "1.0.0"
 description = "Harness for benchmarking LLM players in multi-player Settlers of Catan."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Alexandre Maraval" }
 ]

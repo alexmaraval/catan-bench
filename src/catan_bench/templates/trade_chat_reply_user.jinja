@@ -21,8 +21,10 @@ Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
 {% if payload.public_state.players %}
 ### Standings
 {% for pid, info in payload.public_state.players.items() %}
-- {{ pid }}: {{ info.vp }}VP  {{ info.res_cards }}res  {{ info.dev_cards }}dev
+- {{ fmt_player_standing(pid, info) }}
 {% endfor %}
+Public Longest Road status: {{ fmt_longest_road_status(payload.public_state.players, payload.player_id) }}
+Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.players, payload.player_id) }}
 {% endif %}
 
 ### Trade negotiation
@@ -55,5 +57,9 @@ Message character limit: {{ payload.message_char_limit }}
 {% else %}
 (no concrete proposals yet)
 {% endif %}
+
+### Proposal checklist
+- Your resources: {{ fmt_resources(payload.private_state.resources) }}. You may only offer resources from this list.
+- `owner_gives` = what {{ payload.owner_player_id }} sends to you; `owner_gets` = what you send to {{ payload.owner_player_id }}.
 
 {% include "partials/trade_chat_reply_contract.jinja" %}

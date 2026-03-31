@@ -1,35 +1,22 @@
+# Copy this file and change `model`, `api_base`, and `api_key_env`
+# to target a different OpenAI-compatible provider.
+
 [[players]]
 id = "RED"
 type = "llm"
-api_key_env = "OPENAI_API_KEY"
-model = "gpt-5.4-nano"
-timeout_seconds = 300
-temperature = 0.6
-top_p = 0.95
+model = "gpt-4o-mini"
 
 [[players]]
 id = "BLUE"
 type = "llm"
 model = "gpt-4o-mini"
-api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
-temperature = 0.6
-top_p = 0.95
 
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "gpt-4.1-nano"
-api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
-temperature = 0.6
-top_p = 0.95
+model = "gpt-4o-mini"
 
 [[players]]
 id = "WHITE"
 type = "llm"
-model = "gpt-5-nano"
-api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
-temperature = 1.0
-top_p = 1.0
+model = "gpt-4o-mini"

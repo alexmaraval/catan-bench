@@ -493,7 +493,9 @@ def compute_head_to_head(
 def _benchmark_summary_payload(
     games: list[GameRecord], elo: EloState, rubrics: dict[str, RubricScores]
 ) -> dict[str, Any]:
-    ranked_models = sorted(elo.ratings.keys(), key=lambda model: elo.ratings[model], reverse=True)
+    ranked_models = sorted(
+        elo.ratings.keys(), key=lambda model: elo.ratings[model], reverse=True
+    )
     leaderboard = []
     for model in ranked_models:
         games_played = elo.games_played.get(model, 0)

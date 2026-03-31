@@ -72,6 +72,10 @@ def _normalize_offer_trade_payload(payload: dict) -> dict:
         result["request"] = result.pop("take")
     if "request" not in result and "want" in result:
         result["request"] = result.pop("want")
+    if "offer" in result and not isinstance(result["offer"], dict):
+        result["offer"] = {}
+    if "request" in result and not isinstance(result["request"], dict):
+        result["request"] = {}
     # Drop extraneous keys the LLM sometimes adds (e.g. "player").
     return {k: v for k, v in result.items() if k in {"offer", "request"}}
 
@@ -341,6 +345,7 @@ class LLMPlayer:
         temperature: float = 0.2,
         top_p: float | None = None,
         reasoning_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
         prompt_history_limit: int | None = 12,
         invalid_response_retries: int = 1,
         renderer: PromptRenderer | None = None,
@@ -350,6 +355,7 @@ class LLMPlayer:
         self.temperature = temperature
         self.top_p = top_p
         self.reasoning_enabled = reasoning_enabled
+        self.reasoning_effort = reasoning_effort
         self.prompt_history_limit = prompt_history_limit
         self.invalid_response_retries = max(0, invalid_response_retries)
         self.renderer = renderer or PromptRenderer()
@@ -1656,6 +1662,7 @@ class LLMPlayer:
                     messages=messages,
                     top_p=self.top_p,
                     reasoning_enabled=self.reasoning_enabled,
+                    reasoning_effort=self.reasoning_effort,
                 )
             except LLMRequestTooLargeError:
                 raise

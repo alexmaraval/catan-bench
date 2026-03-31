@@ -1393,9 +1393,9 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_discover_completed_run_directories_from_base_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            completed = base_dir / "0.5.0-dev-game-a"
-            other_completed = base_dir / "0.5.0-dev-game-b"
-            incomplete = base_dir / "0.5.0-dev-game-c"
+            completed = base_dir / "1.0.0-dev-game-a"
+            other_completed = base_dir / "1.0.0-dev-game-b"
+            incomplete = base_dir / "1.0.0-dev-game-c"
             self._make_minimal_run(completed)
             self._make_minimal_run(other_completed)
             _write_json(
@@ -1415,8 +1415,8 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_analysis_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            run_a = base_dir / "0.5.0-dev-game-a"
-            run_b = base_dir / "0.5.0-dev-game-b"
+            run_a = base_dir / "1.0.0-dev-game-a"
+            run_b = base_dir / "1.0.0-dev-game-b"
             self._make_minimal_run(run_a)
             self._make_minimal_run(run_b)
 

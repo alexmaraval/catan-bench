@@ -667,6 +667,10 @@ class CatanatronEngineAdapter:
     def _public_player_prompt_summary(self, color: Color) -> dict[str, JsonValue]:
         key = player_key(self.game.state, color)
         state = self.game.state
+        longest_road = bool(state.player_state[f"{key}_HAS_ROAD"])
+        largest_army = bool(state.player_state[f"{key}_HAS_ARMY"])
+        longest_road_length = int(state.player_state[f"{key}_LONGEST_ROAD_LENGTH"])
+        played_knights = int(state.player_state[f"{key}_PLAYED_KNIGHT"])
         return {
             "vp": int(state.player_state[f"{key}_VICTORY_POINTS"]),
             "res_cards": sum(
@@ -682,8 +686,12 @@ class CatanatronEngineAdapter:
                 - int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
             ),
             "cities": TOTAL_CITIES - int(state.player_state[f"{key}_CITIES_AVAILABLE"]),
-            "longest_road": bool(state.player_state[f"{key}_HAS_ROAD"]),
-            "largest_army": bool(state.player_state[f"{key}_HAS_ARMY"]),
+            "longest_road_length": longest_road_length,
+            "played_knights": played_knights,
+            "longest_road": longest_road,
+            "largest_army": largest_army,
+            "has_longest_road": longest_road,
+            "has_largest_army": largest_army,
         }
 
     def _resource_counts(self, key: str) -> dict[str, int]:

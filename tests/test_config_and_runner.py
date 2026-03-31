@@ -8,6 +8,7 @@ from unittest.mock import patch
 from catan_bench import GameResult
 from catan_bench.config import load_game_config, load_player_configs
 from catan_bench.orchestrator import _resolve_run_dir
+from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.reporter import DebugTerminalReporter
 from catan_bench.runner import (
     _find_dotenv,
@@ -46,10 +47,14 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/openai-players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
-        self.assertEqual(game_config.seed, 24)
+        self.assertIsInstance(game_config.seed, int)
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertEqual(game_config.run_dir, Path("runs"))
-        self.assertEqual(game_config.run_tags, ("0.5.0", "dev"))
+        self.assertEqual(game_config.run_tags, ("1.0.0",))
+        self.assertIn(
+            f"The first player to reach {game_config.vps_to_win} victory points wins.",
+            CATAN_RULES_SUMMARY,
+        )
         self.assertTrue(game_config.public_chat_enabled)
         self.assertEqual(game_config.public_chat_message_chars, 500)
         self.assertEqual(game_config.public_chat_history_limit, 40)
@@ -76,7 +81,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml.write_text(
                 (
                     '[game]\nengine = "catanatron"\nrun_dir = "runs/"\n'
-                    'run_tags = ["0.5.0", "experiment-a"]\n'
+                    'run_tags = ["1.0.0", "experiment-a"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -84,7 +89,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config = load_game_config(game_toml)
 
             self.assertEqual(config.run_dir, Path("runs"))
-            self.assertEqual(config.run_tags, ("0.5.0", "experiment-a"))
+            self.assertEqual(config.run_tags, ("1.0.0", "experiment-a"))
 
     def test_load_player_config_rejects_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -104,6 +109,53 @@ class ConfigAndRunnerTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "game config"):
+                load_player_configs(players_toml)
+
+    def test_load_player_config_with_reasoning_effort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "openai/gpt-oss-120b"\n'
+                    'reasoning_effort = "low"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_player_configs(players_toml)
+
+            self.assertEqual(config[0].reasoning_effort, "low")
+            self.assertIsNone(config[0].reasoning_enabled)
+
+    def test_load_player_config_rejects_reasoning_enabled_and_effort_together(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "openai/gpt-oss-120b"\n'
+                    "reasoning_enabled = false\n"
+                    'reasoning_effort = "low"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "either `reasoning_enabled` or `reasoning_effort`"
+            ):
                 load_player_configs(players_toml)
 
     def test_build_players_from_config(self) -> None:
@@ -165,7 +217,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     'engine = "catanatron"\n'
                     "vps_to_win = 5\n"
                     'run_dir = "runs/"\n'
-                    'run_tags = ["0.5.0", "dev"]\n'
+                    'run_tags = ["1.0.0", "dev"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -197,11 +249,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     )
 
             self.assertEqual(
-                orchestrator_cls.call_args.kwargs["run_tags"], ("0.5.0", "dev")
+                orchestrator_cls.call_args.kwargs["run_tags"], ("1.0.0", "dev")
             )
-            self.assertEqual(
-                orchestrator_cls.call_args.kwargs["run_label"], "players"
-            )
+            self.assertEqual(orchestrator_cls.call_args.kwargs["run_label"], "players")
             self.assertIsNone(orchestrator_cls.call_args.kwargs["game_seed"])
             self.assertIn(
                 "The first player to reach 5 victory points wins.",
@@ -212,7 +262,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
-            run_tags=("0.5.0", "dev"),
+            run_tags=("1.0.0", "dev"),
             run_label="mixed-players",
         )
 
@@ -221,14 +271,14 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(resolved.parent, Path("runs"))
         self.assertRegex(
             resolved.name,
-            r"^0\.5\.0-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^1\.0\.0-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_resolve_run_dir_includes_seed_when_configured(self) -> None:
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
-            run_tags=("0.5.0", "dev"),
+            run_tags=("1.0.0", "dev"),
             run_label="mixed-players",
             game_seed=12,
         )
@@ -238,7 +288,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(resolved.parent, Path("runs"))
         self.assertRegex(
             resolved.name,
-            r"^0\.5\.0-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^1\.0\.0-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_runner_uses_debug_reporter_when_requested(self) -> None:

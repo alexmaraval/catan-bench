@@ -1273,6 +1273,18 @@ class MockPublicChatEngine:
 
 
 class GameOrchestratorTests(unittest.TestCase):
+    def test_normalize_resource_map_ignores_non_mapping_values(self) -> None:
+        orchestrator = GameOrchestrator(
+            MockTurnEngine(),
+            {
+                "RED": ScriptedPlayer(action_responses=[Action("END_TURN")]),
+                "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+            },
+        )
+
+        self.assertEqual(orchestrator._normalize_resource_map("ORE"), {})
+        self.assertEqual(orchestrator._normalize_resource_map(None), {})
+
     def test_can_resume_after_timeout_during_trade_chat_owner_decision(self) -> None:
         class TimeoutOwnerDecisionPlayer(ScriptedPlayer):
             def decide_trade_chat(self, observation):
@@ -1745,7 +1757,9 @@ class GameOrchestratorTests(unittest.TestCase):
                 Path(run_dir, "players", "RED", "private_history.jsonl").exists()
             )
 
-    def test_trade_chat_observations_include_recent_persistent_public_chat(self) -> None:
+    def test_trade_chat_observations_include_recent_persistent_public_chat(
+        self,
+    ) -> None:
         red = ScriptedPlayer(
             start_turn_responses=[
                 TurnStartResponse(
@@ -2074,12 +2088,20 @@ class GameOrchestratorTests(unittest.TestCase):
                     "dice_rolled",
                     "trade_chat_opened",
                     "trade_chat_message",
+                    "trade_chat_proposal_rejected",
                     "trade_chat_message",
                     "trade_chat_no_deal",
                     "trade_chat_closed",
                     "turn_ended",
                 ],
             )
+            rejection_events = [
+                event
+                for event in orchestrator.event_log.public_events
+                if event.kind == "trade_chat_proposal_rejected"
+            ]
+            self.assertEqual(len(rejection_events), 1)
+            self.assertIn("reason", rejection_events[0].payload)
             self.assertFalse(
                 any(
                     event.kind == "trade_confirmed"

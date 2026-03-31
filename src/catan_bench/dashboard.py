@@ -2532,7 +2532,9 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
     gs = analysis_data.get("game_summary", {})
     players = analysis_data.get("players", {})
     if analysis_data.get("live"):
-        st.caption("Live analysis is provisional and may change until the run finishes.")
+        st.caption(
+            "Live analysis is provisional and may change until the run finishes."
+        )
 
     # ── Game summary metrics ──
     st.subheader("Game Summary")
@@ -2841,8 +2843,8 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             with interaction_cols[2]:
                 heat_rows = []
                 for speaker_id in _player_ids:
-                    outgoing = players[speaker_id].get("public_chat", {}).get(
-                        "targets", {}
+                    outgoing = (
+                        players[speaker_id].get("public_chat", {}).get("targets", {})
                     )
                     for target_id in _player_ids:
                         heat_rows.append(

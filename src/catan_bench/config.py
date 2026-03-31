@@ -37,6 +37,7 @@ class PlayerConfig:
     temperature: float = 0.2
     top_p: float | None = None
     reasoning_enabled: bool | None = None
+    reasoning_effort: str | None = None
     timeout_seconds: float = 60.0
 
 
@@ -123,9 +124,7 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
 
     players_payload = data.get("players")
     if not isinstance(players_payload, list) or not players_payload:
-        raise ValueError(
-            "openai-players.toml must define a non-empty [[players]] list."
-        )
+        raise ValueError("Players config must define a non-empty [[players]] list.")
 
     seen_ids: set[str] = set()
     configs: list[PlayerConfig] = []
@@ -164,6 +163,25 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
         reasoning_enabled = entry.get("reasoning_enabled")
         if reasoning_enabled is not None:
             reasoning_enabled = bool(reasoning_enabled)
+        reasoning_effort = entry.get("reasoning_effort")
+        if reasoning_effort is not None:
+            reasoning_effort = str(reasoning_effort).strip().lower()
+            if reasoning_effort not in {
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+            }:
+                raise ValueError(
+                    "`reasoning_effort` must be one of "
+                    "'none', 'minimal', 'low', 'medium', 'high', or 'xhigh'."
+                )
+        if reasoning_enabled is not None and reasoning_effort is not None:
+            raise ValueError(
+                "Choose either `reasoning_enabled` or `reasoning_effort` in a player config, not both."
+            )
         timeout_seconds = float(entry.get("timeout_seconds", 60.0))
         configs.append(
             PlayerConfig(
@@ -176,6 +194,7 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
                 temperature=temperature,
                 top_p=top_p,
                 reasoning_enabled=reasoning_enabled,
+                reasoning_effort=reasoning_effort,
                 timeout_seconds=timeout_seconds,
             )
         )

@@ -168,7 +168,10 @@ class DashboardTests(unittest.TestCase):
             _render_analysis_tab(st, snapshot)
 
             self.assertTrue(
-                any("live provisional analysis" in body.lower() for body in st.info_calls)
+                any(
+                    "live provisional analysis" in body.lower()
+                    for body in st.info_calls
+                )
             )
             self.assertTrue(
                 any("provisional" in body.lower() for body in st.caption_calls)

@@ -174,10 +174,16 @@ def load_live_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
     )
     players_meta: dict[str, dict[str, Any]] = {}
     for player_id in player_ids:
-        summary = public_players.get(player_id, {}) if isinstance(public_players, dict) else {}
+        summary = (
+            public_players.get(player_id, {})
+            if isinstance(public_players, dict)
+            else {}
+        )
         if not isinstance(summary, dict):
             summary = {}
-        visible_vp = int(summary.get("visible_victory_points", summary.get("vp", 0)) or 0)
+        visible_vp = int(
+            summary.get("visible_victory_points", summary.get("vp", 0)) or 0
+        )
         dev_vp = int(summary.get("dev_victory_points", 0) or 0)
         players_meta[player_id] = {
             "actual_victory_points": visible_vp + dev_vp,
@@ -189,16 +195,24 @@ def load_live_analysis_artifacts(run_dir: Path) -> dict[str, Any]:
             "has_largest_army": bool(summary.get("has_largest_army")),
         }
 
-    total_decisions = max(
-        (trace.decision_index or 0) for traces in prompt_traces_by_player.values() for trace in traces
-    ) if any(prompt_traces_by_player.values()) else 0
+    total_decisions = (
+        max(
+            (trace.decision_index or 0)
+            for traces in prompt_traces_by_player.values()
+            for trace in traces
+        )
+        if any(prompt_traces_by_player.values())
+        else 0
+    )
     num_turns = latest_snapshot.turn_index if latest_snapshot is not None else 0
     result = {
         "game_id": str(metadata.get("game_id", run_dir.name)),
         "winner_ids": [],
         "total_decisions": total_decisions,
         "public_event_count": len(events),
-        "memory_writes": sum(len(traces) for traces in memory_traces_by_player.values()),
+        "memory_writes": sum(
+            len(traces) for traces in memory_traces_by_player.values()
+        ),
         "metadata": {
             "num_turns": int(num_turns),
             "players": players_meta,
@@ -673,7 +687,9 @@ def compute_public_chat_analysis(player_id: str, events: list[Event]) -> dict[st
         turn_index = int(event.turn_index)
         if speaker == player_id:
             messages_sent += 1
-            messages_sent_by_turn[turn_index] = messages_sent_by_turn.get(turn_index, 0) + 1
+            messages_sent_by_turn[turn_index] = (
+                messages_sent_by_turn.get(turn_index, 0) + 1
+            )
             spoken_turns.add(turn_index)
             if isinstance(target, str):
                 targeted_messages_sent += 1
@@ -704,7 +720,9 @@ def compute_public_chat_analysis(player_id: str, events: list[Event]) -> dict[st
         "unique_targets": len(targets),
         "unique_targets_by_turn": unique_targets_by_turn,
         "speaking_turns": len(spoken_turns),
-        "speaking_turns_by_turn": {turn_index: 1 for turn_index in sorted(spoken_turns)},
+        "speaking_turns_by_turn": {
+            turn_index: 1 for turn_index in sorted(spoken_turns)
+        },
         "targets": targets,
         "incoming_sources": incoming_sources,
     }

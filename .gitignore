@@ -14,19 +14,25 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.hypothesis/
 .mypy_cache/
 .ruff_cache/
 .venv/
 venv/
+.python-version
 
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Build and test artifacts
 build/
 dist/
+*.egg-info/
+pip-wheel-metadata/
 htmlcov/
+coverage.xml
 runs/
 .coverage
 .coverage.*

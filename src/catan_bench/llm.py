@@ -18,6 +18,7 @@ class LLMClient(Protocol):
         temperature: float,
         top_p: float | None = None,
         reasoning_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -41,13 +42,14 @@ class OpenAICompatibleChatClient:
         temperature: float,
         top_p: float | None = None,
         reasoning_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, object]:
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError(
                 "Missing API key for LLM player. "
                 f"Set environment variable {self.api_key_env!r} before running, "
-                "or change `api_key_env` in configs/openai-players.toml to point at the "
+                "or change `api_key_env` in your players config to point at the "
                 "variable you want to use. Example: "
                 f"export {self.api_key_env}=<your_api_key>"
             )
@@ -65,6 +67,7 @@ class OpenAICompatibleChatClient:
                     temperature=temperature,
                     top_p=top_p,
                     reasoning_enabled=reasoning_enabled,
+                    reasoning_effort=reasoning_effort,
                     use_json_response_format=use_json_response_format,
                 ),
             )
@@ -92,14 +95,16 @@ class OpenAICompatibleChatClient:
                     time.sleep(self._retry_delay(exc, attempt_index))
                     continue
                 raise RuntimeError(
-                    f"LLM request failed with HTTP {exc.code}: {details}"
+                    f"LLM request failed for model {model!r} with HTTP {exc.code}: {details}"
                 ) from exc
             except error.URLError as exc:  # pragma: no cover - network dependency.
                 attempt_index += 1
                 if attempt_index < self.max_attempts:
                     time.sleep(self.retry_backoff_seconds * (2**attempt_index))
                     continue
-                raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
+                raise RuntimeError(
+                    f"LLM request failed for model {model!r}: {exc.reason}"
+                ) from exc
 
         raise RuntimeError("LLM request failed after exhausting retry attempts.")
 
@@ -111,6 +116,7 @@ class OpenAICompatibleChatClient:
         temperature: float,
         top_p: float | None,
         reasoning_enabled: bool | None,
+        reasoning_effort: str | None,
         use_json_response_format: bool,
     ) -> dict[str, object]:
         body: dict[str, object] = {
@@ -122,6 +128,12 @@ class OpenAICompatibleChatClient:
             body["response_format"] = {"type": "json_object"}
         if top_p is not None:
             body["top_p"] = top_p
+        if reasoning_enabled is not None and reasoning_effort is not None:
+            raise ValueError(
+                "Pass either `reasoning_enabled` or `reasoning_effort`, not both."
+            )
+        if reasoning_effort is not None:
+            body.update(self._reasoning_effort_request_fields(reasoning_effort))
         if reasoning_enabled is not None:
             body.update(
                 self._reasoning_request_fields(
@@ -144,7 +156,7 @@ class OpenAICompatibleChatClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "catan-bench/0.5.0",
+                "User-Agent": "catan-bench/1.0.0",
             },
             method="POST",
         )
@@ -172,6 +184,14 @@ class OpenAICompatibleChatClient:
         if provider == "together":
             return {}
         return {"reasoning": {"enabled": reasoning_enabled}}
+
+    def _reasoning_effort_request_fields(
+        self, reasoning_effort: str
+    ) -> dict[str, object]:
+        provider = self._provider_name()
+        if provider == "openrouter":
+            return {"reasoning": {"effort": reasoning_effort}}
+        return {"reasoning_effort": reasoning_effort}
 
     @staticmethod
     def _google_supports_reasoning_effort_none(model: str) -> bool:

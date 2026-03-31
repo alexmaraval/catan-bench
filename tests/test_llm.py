@@ -205,6 +205,47 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", captured_body)
         self.assertNotIn("include_reasoning", captured_body)
 
+    def test_complete_uses_explicit_reasoning_effort_for_openrouter(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="openai/gpt-oss-120b",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_effort="low",
+                )
+
+        self.assertEqual(captured_body["reasoning"], {"effort": "low"})
+        self.assertNotIn("reasoning_effort", captured_body)
+        self.assertNotIn("include_reasoning", captured_body)
+
+    def test_complete_rejects_reasoning_enabled_and_effort_together(self) -> None:
+        client = OpenAICompatibleChatClient(api_key_env="OPENAI_API_KEY")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with self.assertRaisesRegex(
+                ValueError, "either `reasoning_enabled` or `reasoning_effort`"
+            ):
+                client.complete(
+                    model="fake-model",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                    reasoning_enabled=False,
+                    reasoning_effort="low",
+                )
+
     def test_complete_retries_retryable_http_errors(self) -> None:
         attempts: list[str] = []
 

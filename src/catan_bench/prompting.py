@@ -78,6 +78,68 @@ def fmt_memory(value: object) -> str:
     return json.dumps(value, sort_keys=True)
 
 
+def fmt_player_standing(player_id: object, info: object) -> str:
+    if not isinstance(info, dict):
+        return str(player_id)
+    parts = [
+        f"{player_id}: {info.get('vp', '?')}VP",
+        f"{info.get('res_cards', '?')}res",
+        f"{info.get('dev_cards', '?')}dev",
+        f"{info.get('roads', '?')}R/{info.get('settlements', '?')}S/{info.get('cities', '?')}C",
+        f"longest road {info.get('longest_road_length', 0)}",
+        f"played knights {info.get('played_knights', 0)}",
+    ]
+    if info.get("has_longest_road", info.get("longest_road")):
+        parts.append("[Longest Road]")
+    if info.get("has_largest_army", info.get("largest_army")):
+        parts.append("[Largest Army]")
+    return "  ".join(str(part) for part in parts)
+
+
+def fmt_longest_road_status(players: object, player_id: object) -> str:
+    if not isinstance(players, dict):
+        return "Longest Road status unavailable."
+    own = players.get(player_id, {}) if isinstance(player_id, str) else {}
+    own_len = (
+        int(dict(own).get("longest_road_length", 0)) if isinstance(own, dict) else 0
+    )
+    for pid, info in players.items():
+        if isinstance(info, dict) and info.get(
+            "has_longest_road", info.get("longest_road")
+        ):
+            return (
+                f"{pid} currently holds Longest Road at length "
+                f"{int(info.get('longest_road_length', 0))}. "
+                f"Your current longest road is {own_len}."
+            )
+    return (
+        f"No one currently holds Longest Road. Your current longest road is {own_len}."
+    )
+
+
+def fmt_largest_army_status(players: object, player_id: object) -> str:
+    if not isinstance(players, dict):
+        return "Largest Army status unavailable."
+    own = players.get(player_id, {}) if isinstance(player_id, str) else {}
+    own_knights = (
+        int(dict(own).get("played_knights", 0)) if isinstance(own, dict) else 0
+    )
+    for pid, info in players.items():
+        if isinstance(info, dict) and info.get(
+            "has_largest_army", info.get("largest_army")
+        ):
+            return (
+                f"{pid} currently holds Largest Army with "
+                f"{int(info.get('played_knights', 0))} played knights. "
+                f"Your played knights count is {own_knights}. "
+                "Unused knights in hand do not count yet."
+            )
+    return (
+        f"No one currently holds Largest Army. Your played knights count is {own_knights}. "
+        "Unused knights in hand do not count yet."
+    )
+
+
 def fmt_event(event: object) -> str:
     """Single-line prose description of a public event dict."""
     if not isinstance(event, dict):
@@ -144,7 +206,16 @@ def fmt_event(event: object) -> str:
         return f"{actor} opened trade chat requesting {req}"
     if kind == "trade_chat_message":
         msg = p.get("message", "")
+        offer = p.get("offer")
+        request = p.get("request")
+        if offer or request:
+            terms = f" [proposal: owner gives {fmt_resources(offer)}, gets {fmt_resources(request)}]"
+            return f"{actor}: {msg}{terms}" if msg else f"{actor} proposed trade{terms}"
         return f"{actor}: {msg}" if msg else f"{actor} sent trade quote"
+    if kind == "trade_chat_proposal_rejected":
+        speaker = p.get("speaker_player_id", actor)
+        reason = p.get("reason", "invalid proposal")
+        return f"SYSTEM: {speaker}'s proposal was rejected ({reason})"
     if kind == "trade_chat_closed":
         outcome = p.get("outcome", "?")
         return f"{actor} closed trade chat (outcome: {outcome})"
@@ -171,6 +242,9 @@ class PromptRenderer:
             env.globals["fmt_vp"] = fmt_vp
             env.globals["fmt_payload"] = fmt_payload
             env.globals["fmt_memory"] = fmt_memory
+            env.globals["fmt_player_standing"] = fmt_player_standing
+            env.globals["fmt_longest_road_status"] = fmt_longest_road_status
+            env.globals["fmt_largest_army_status"] = fmt_largest_army_status
             env.globals["fmt_event"] = fmt_event
             self._env = env
 

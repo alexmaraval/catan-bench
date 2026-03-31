@@ -1,8 +1,11 @@
 Return strict JSON with keys:
 - `message`: optional public chat message.
-- `owner_gives`: optional resource-count map from the owner's perspective: what the owner would pay if you are making a concrete proposal.
-- `owner_gets`: optional resource-count map from the owner's perspective: what the owner would receive from you.
+- `owner_gives`: optional resource-count map — what **{{ payload.owner_player_id }}** (the room owner) would send **to you**.
+- `owner_gets`: optional resource-count map — what **{{ payload.owner_player_id }}** (the room owner) would receive **from you**. You may only offer resources you currently hold.
 - `private_reasoning`: optional concise private note under 30 words.
 
-Example:
-- If the owner would give `1×WOOD` and receive `1×BRICK` from you, return `{"owner_gives": {"WOOD": 1}, "owner_gets": {"BRICK": 1}}`.
+Direction reminder: `owner_gives` is from the owner's hand; `owner_gets` comes from yours. Only propose resources you actually hold.
+
+Examples:
+- You want to give the owner `1×BRICK` and receive `1×WOOD` from them → `{"owner_gives": {"WOOD": 1}, "owner_gets": {"BRICK": 1}}`
+- You want to give the owner `1×ORE` and receive `1×SHEEP` from them → `{"owner_gives": {"SHEEP": 1}, "owner_gets": {"ORE": 1}}`

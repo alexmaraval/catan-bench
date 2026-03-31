@@ -100,6 +100,7 @@ def build_players(
                 temperature=player_config.temperature,
                 top_p=player_config.top_p,
                 reasoning_enabled=player_config.reasoning_enabled,
+                reasoning_effort=player_config.reasoning_effort,
                 prompt_history_limit=effective_game_config.prompt_history_limit,
             )
         else:  # pragma: no cover - validated in config loading.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from catan_bench.players import LLMPlayer
+from catan_bench.players import LLMPlayer, _normalize_offer_trade_payload
 from catan_bench.prompting import PromptRenderer
 from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.schemas import (
@@ -26,7 +26,14 @@ class FakeLLMClient:
         self._payloads = list(payloads)
 
     def complete(
-        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+        self,
+        *,
+        model,
+        messages,
+        temperature,
+        top_p=None,
+        reasoning_enabled=None,
+        reasoning_effort=None,
     ):
         payload = self._payloads.pop(0)
         return {"choices": [{"message": {"content": json.dumps(payload)}}]}
@@ -37,7 +44,14 @@ class FailingLLMClient:
         self._error = error
 
     def complete(
-        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+        self,
+        *,
+        model,
+        messages,
+        temperature,
+        top_p=None,
+        reasoning_enabled=None,
+        reasoning_effort=None,
     ):
         raise self._error
 
@@ -47,7 +61,14 @@ class RawCompletionClient:
         self._contents = list(contents)
 
     def complete(
-        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+        self,
+        *,
+        model,
+        messages,
+        temperature,
+        top_p=None,
+        reasoning_enabled=None,
+        reasoning_effort=None,
     ):
         content = self._contents.pop(0)
         return {"choices": [{"message": {"content": content}}]}
@@ -58,7 +79,14 @@ class StructuredCompletionClient:
         self._completions = list(completions)
 
     def complete(
-        self, *, model, messages, temperature, top_p=None, reasoning_enabled=None
+        self,
+        *,
+        model,
+        messages,
+        temperature,
+        top_p=None,
+        reasoning_enabled=None,
+        reasoning_effort=None,
     ):
         return self._completions.pop(0)
 
@@ -1011,6 +1039,63 @@ class LLMPlayerTests(unittest.TestCase):
         )
         self.assertIn('{"goal": "contest longest road"}', rendered)
 
+    def test_game_context_renders_longest_road_and_largest_army_status(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/game_context.jinja",
+            payload={
+                "turn_index": 6,
+                "player_id": "WHITE",
+                "private_state": {
+                    "resources": {"WOOD": 2},
+                    "development_cards": {"KNIGHT": 2},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "players": {
+                        "WHITE": {
+                            "vp": 2,
+                            "res_cards": 4,
+                            "dev_cards": 2,
+                            "roads": 2,
+                            "settlements": 2,
+                            "cities": 0,
+                            "longest_road_length": 4,
+                            "played_knights": 1,
+                            "has_longest_road": False,
+                            "has_largest_army": False,
+                        },
+                        "BLUE": {
+                            "vp": 4,
+                            "res_cards": 5,
+                            "dev_cards": 1,
+                            "roads": 5,
+                            "settlements": 2,
+                            "cities": 1,
+                            "longest_road_length": 6,
+                            "played_knights": 3,
+                            "has_longest_road": True,
+                            "has_largest_army": True,
+                        },
+                    },
+                    "board": {},
+                    "bank": {},
+                },
+                "memory": {"short_term": None, "long_term": None},
+            },
+        )
+
+        self.assertIn("Public Longest Road status:", rendered)
+        self.assertIn("BLUE currently holds Longest Road at length 6.", rendered)
+        self.assertIn("Your current longest road is 4.", rendered)
+        self.assertIn("Public Largest Army status:", rendered)
+        self.assertIn(
+            "BLUE currently holds Largest Army with 3 played knights.", rendered
+        )
+        self.assertIn("Your played knights count is 1.", rendered)
+        self.assertIn("Unused knights in hand do not count yet.", rendered)
+
     def test_turn_start_contract_asks_for_plain_text_memory(self) -> None:
         renderer = PromptRenderer()
         rendered = renderer.render("partials/turn_start_contract.jinja")
@@ -1062,6 +1147,13 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("Good uses: warnings, promises, requests", rendered)
         self.assertIn("Avoid using it just to narrate your internal strategy", rendered)
         self.assertIn("Nobody should feed ORANGE ore right now.", rendered)
+
+    def test_normalize_offer_trade_payload_drops_non_mapping_request(self) -> None:
+        normalized = _normalize_offer_trade_payload(
+            {"offer": {"WOOD": 1}, "request": "ORE"}
+        )
+
+        self.assertEqual(normalized, {"offer": {"WOOD": 1}, "request": {}})
 
     def test_start_turn_raises_runtime_error_and_records_failed_attempt(self) -> None:
         player = LLMPlayer(

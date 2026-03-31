@@ -117,7 +117,9 @@ class EventLog:
 
     def truncate(self, history_index: int) -> None:
         self.public_events = [
-            event for event in self.public_events if event.history_index <= history_index
+            event
+            for event in self.public_events
+            if event.history_index <= history_index
         ]
         if self.run_dir is not None:
             self.close()
@@ -539,7 +541,10 @@ class PromptTraceStore:
                 trace
                 for trace in self._traces_by_player.get(player_id, [])
                 if trace.history_index < history_index
-                or (trace.history_index == history_index and trace.turn_index <= turn_index)
+                or (
+                    trace.history_index == history_index
+                    and trace.turn_index <= turn_index
+                )
             ]
             self._traces_by_player[player_id] = traces
             if self.run_dir is None:

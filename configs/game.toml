@@ -1,18 +1,7 @@
 [game]
-engine = "catanatron"
-seed = 24
-discard_limit = 7
-vps_to_win = 10
-history_window = 100
+seed = 12
 public_chat_enabled = true
-public_chat_message_chars = 500
-public_chat_history_limit = 40
 trading_chat_enabled = true
-trading_chat_max_failed_attempts_per_turn = 5
-trading_chat_max_rooms_per_turn = 5
-trading_chat_max_rounds_per_attempt = 3
-trading_chat_message_chars = 500
-trading_chat_history_limit = 40
 prompt_history_limit = 30
 run_dir = "runs/"
-run_tags = ["0.5.0", "dev"]
+run_tags = ["1.0.0"]

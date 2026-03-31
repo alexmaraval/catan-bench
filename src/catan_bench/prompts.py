@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from .config import GameConfig, load_game_config
+
 
 _CATAN_RULES_TEMPLATE = """You are playing Settlers of Catan in a benchmark harness.
 
@@ -48,4 +52,12 @@ def build_game_rules(vps_to_win: int) -> str:
     return _CATAN_RULES_TEMPLATE.format(vps_to_win=int(vps_to_win))
 
 
-CATAN_RULES_SUMMARY = build_game_rules(10)
+def _default_vps_to_win() -> int:
+    config_path = Path(__file__).resolve().parents[2] / "configs" / "game.toml"
+    try:
+        return load_game_config(config_path).vps_to_win
+    except Exception:
+        return GameConfig().vps_to_win
+
+
+CATAN_RULES_SUMMARY = build_game_rules(_default_vps_to_win())

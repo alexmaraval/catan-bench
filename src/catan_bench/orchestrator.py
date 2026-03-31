@@ -563,9 +563,8 @@ class GameOrchestrator:
                 raise RuntimeError(
                     "Resume run has inconsistent public history and public state traces."
                 )
-        if (
-            self.public_state_store.snapshots[-1].public_state
-            != dict(self.engine.public_state())
+        if self.public_state_store.snapshots[-1].public_state != dict(
+            self.engine.public_state()
         ):
             raise RuntimeError(
                 "Resume run final public state snapshot does not match the rebuilt "
@@ -1756,11 +1755,15 @@ class GameOrchestrator:
                         )
                         proposals.append(proposal)
                     else:
+                        rejection_reasons: list[str] = []
                         if not counterparty_can_pay:
                             logger.debug(
                                 "Skipping proposal from %s: insufficient resources for %s",
                                 other_player_id,
                                 reply.owner_gets,
+                            )
+                            rejection_reasons.append(
+                                f"{other_player_id} lacks proposed resources"
                             )
                         if not owner_can_pay:
                             logger.debug(
@@ -1769,6 +1772,26 @@ class GameOrchestrator:
                                 decision.acting_player_id,
                                 reply.owner_gives,
                             )
+                            rejection_reasons.append("owner lacks proposed resources")
+                        rejection_event = Event(
+                            kind="trade_chat_proposal_rejected",
+                            payload={
+                                "speaker_player_id": other_player_id,
+                                "owner_player_id": decision.acting_player_id,
+                                "reason": "; ".join(rejection_reasons),
+                                "attempted_owner_gives": dict(reply.owner_gives),
+                                "attempted_owner_gets": dict(reply.owner_gets),
+                                "attempt_index": attempt_index,
+                                "round_index": round_index,
+                            },
+                            turn_index=decision.turn_index,
+                            phase=decision.phase,
+                            decision_index=decision.decision_index,
+                            actor_player_id=other_player_id,
+                        )
+                        events.append(rejection_event)
+                        self._record_public_events((rejection_event,))
+                        self._write_inflight_checkpoint()
                 if reply.message is None and proposal is None:
                     continue
                 message_event = self._trade_chat_message_event(
@@ -2326,10 +2349,10 @@ class GameOrchestrator:
         except Exception:
             return True
 
-    def _normalize_resource_map(
-        self, value: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def _normalize_resource_map(self, value: object) -> dict[str, JsonValue]:
         result: dict[str, JsonValue] = {}
+        if not isinstance(value, Mapping):
+            return result
         for resource, amount in value.items():
             if not isinstance(resource, str):
                 continue

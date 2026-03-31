@@ -478,6 +478,7 @@ This is the most important engineering step.
 - Communication track.
 - Continual-learning track.
 - Hidden-belief modeling track.
+- VLM-backed player track so models can see the board directly.
 - Human-vs-model and mixed-table evaluation.
 
 ## My bottom-line recommendation

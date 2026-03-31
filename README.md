@@ -1,5 +1,7 @@
 # catan-bench
 
+[![CI](https://github.com/alexmaraval/catan-bench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alexmaraval/catan-bench/actions/workflows/ci.yml)
+
 `catan-bench` runs multiplayer Settlers of Catan benchmarks for OpenAI-compatible LLM players on top of [`catanatron`](https://github.com/bcollazo/catanatron).
 
 It includes player-scoped observations, structured run artifacts, replay and analysis commands, and a Streamlit dashboard.
@@ -63,8 +65,6 @@ uv run pytest tests
 - Strengthen baselines and tournament workflows.
 - Add VLM-backed players so models can see the board.
 - Extend the benchmark with communication and continual-learning tracks.
-
-More design notes live in [docs/PROJECT_NOTES.md](docs/PROJECT_NOTES.md).
 
 ## License
 

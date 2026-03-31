@@ -117,6 +117,113 @@ def load_game_config(path: str | Path) -> GameConfig:
     )
 
 
+def load_game_config_overrides(
+    path: str | Path,
+    base_config: GameConfig,
+) -> GameConfig:
+    config_path = Path(path)
+    with config_path.open("rb") as handle:
+        data = tomllib.load(handle)
+
+    payload = data.get("game")
+    if not isinstance(payload, dict):
+        return base_config
+
+    engine = str(payload.get("engine", base_config.engine))
+    if engine != "catanatron":
+        raise ValueError(
+            f"Unsupported engine {engine!r}. Only 'catanatron' is supported."
+        )
+
+    seed = payload.get("seed", base_config.seed)
+    discard_limit = int(payload.get("discard_limit", base_config.discard_limit))
+    vps_to_win = int(payload.get("vps_to_win", base_config.vps_to_win))
+    run_dir = payload.get("run_dir", base_config.run_dir)
+    run_tags = payload.get("run_tags", base_config.run_tags)
+    history_window = payload.get("history_window", base_config.history_window)
+    prompt_history_limit = payload.get(
+        "prompt_history_limit", base_config.prompt_history_limit
+    )
+    public_chat_enabled = bool(
+        payload.get("public_chat_enabled", base_config.public_chat_enabled)
+    )
+    public_chat_message_chars = int(
+        payload.get("public_chat_message_chars", base_config.public_chat_message_chars)
+    )
+    public_chat_history_limit = payload.get(
+        "public_chat_history_limit", base_config.public_chat_history_limit
+    )
+    trading_chat_enabled = bool(
+        payload.get("trading_chat_enabled", base_config.trading_chat_enabled)
+    )
+    trading_chat_max_failed_attempts_per_turn = int(
+        payload.get(
+            "trading_chat_max_failed_attempts_per_turn",
+            base_config.trading_chat_max_failed_attempts_per_turn,
+        )
+    )
+    trading_chat_max_rooms_per_turn = int(
+        payload.get(
+            "trading_chat_max_rooms_per_turn",
+            base_config.trading_chat_max_rooms_per_turn,
+        )
+    )
+    trading_chat_max_rounds_per_attempt = int(
+        payload.get(
+            "trading_chat_max_rounds_per_attempt",
+            base_config.trading_chat_max_rounds_per_attempt,
+        )
+    )
+    trading_chat_message_chars = int(
+        payload.get(
+            "trading_chat_message_chars", base_config.trading_chat_message_chars
+        )
+    )
+    trading_chat_history_limit = payload.get(
+        "trading_chat_history_limit", base_config.trading_chat_history_limit
+    )
+    if history_window is not None:
+        history_window = int(history_window)
+    if prompt_history_limit is not None:
+        prompt_history_limit = int(prompt_history_limit)
+        if prompt_history_limit < 0:
+            raise ValueError(
+                "`prompt_history_limit` must be non-negative when provided."
+            )
+    if public_chat_history_limit is not None:
+        public_chat_history_limit = int(public_chat_history_limit)
+    if trading_chat_history_limit is not None:
+        trading_chat_history_limit = int(trading_chat_history_limit)
+    if run_dir is not None:
+        run_dir = Path(run_dir)
+    if run_tags is None:
+        run_tags = ()
+    elif isinstance(run_tags, (list, tuple)):
+        run_tags = tuple(str(tag).strip() for tag in run_tags if str(tag).strip())
+    else:
+        raise ValueError("`run_tags` must be a list of strings when provided.")
+
+    return GameConfig(
+        engine=engine,
+        seed=None if seed is None else int(seed),
+        discard_limit=discard_limit,
+        vps_to_win=vps_to_win,
+        run_dir=run_dir,
+        run_tags=run_tags,
+        history_window=history_window,
+        prompt_history_limit=prompt_history_limit,
+        public_chat_enabled=public_chat_enabled,
+        public_chat_message_chars=public_chat_message_chars,
+        public_chat_history_limit=public_chat_history_limit,
+        trading_chat_enabled=trading_chat_enabled,
+        trading_chat_max_failed_attempts_per_turn=trading_chat_max_failed_attempts_per_turn,
+        trading_chat_max_rooms_per_turn=trading_chat_max_rooms_per_turn,
+        trading_chat_max_rounds_per_attempt=trading_chat_max_rounds_per_attempt,
+        trading_chat_message_chars=trading_chat_message_chars,
+        trading_chat_history_limit=trading_chat_history_limit,
+    )
+
+
 def load_player_configs(path: str | Path) -> list[PlayerConfig]:
     config_path = Path(path)
     with config_path.open("rb") as handle:

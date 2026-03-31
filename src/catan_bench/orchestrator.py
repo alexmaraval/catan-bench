@@ -127,6 +127,8 @@ class GameOrchestrator:
         run_tags: tuple[str, ...] = (),
         run_label: str | None = None,
         game_seed: int | None = None,
+        players_config_path: str | Path | None = None,
+        players_config_toml: str | None = None,
         resume_run_dir: str | Path | None = None,
         max_decisions: int = 10_000,
         public_chat_enabled: bool = False,
@@ -172,6 +174,10 @@ class GameOrchestrator:
         self._run_tags = tuple(str(tag) for tag in run_tags)
         self._run_label = None if run_label is None else str(run_label)
         self._game_seed = game_seed
+        self._players_config_path = (
+            None if players_config_path is None else str(players_config_path)
+        )
+        self._players_config_toml = players_config_toml
         self.max_decisions = max_decisions
         self.public_chat_enabled = public_chat_enabled
         self.public_chat_message_chars = public_chat_message_chars
@@ -347,6 +353,8 @@ class GameOrchestrator:
                     "run_tags": list(self._run_tags),
                     "run_label": self._run_label,
                     "game_seed": self._game_seed,
+                    "players_config_path": self._players_config_path,
+                    "players_config_toml": self._players_config_toml,
                     "player_ids": list(self.engine.player_ids),
                     "player_adapter_types": {
                         player_id: type(self.players[player_id]).__name__

@@ -6,7 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from catan_bench import GameResult
-from catan_bench.config import load_game_config, load_player_configs
+from catan_bench.config import (
+    load_game_config,
+    load_game_config_overrides,
+    load_player_configs,
+)
 from catan_bench.orchestrator import _resolve_run_dir
 from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.reporter import DebugTerminalReporter
@@ -90,6 +94,41 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
             self.assertEqual(config.run_dir, Path("runs"))
             self.assertEqual(config.run_tags, ("1.0.0", "experiment-a"))
+
+    def test_load_game_config_overrides_from_players_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    'engine = "catanatron"\n'
+                    "seed = 12\n"
+                    'run_dir = "runs/elo"\n'
+                    "prompt_history_limit = 15\n"
+                ),
+                encoding="utf-8",
+            )
+            players_toml.write_text(
+                (
+                    "[game]\nseed = 777\n\n"
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            base_config = load_game_config(game_toml)
+            merged = load_game_config_overrides(players_toml, base_config)
+
+            self.assertEqual(base_config.seed, 12)
+            self.assertEqual(merged.seed, 777)
+            self.assertEqual(merged.run_dir, Path("runs/elo"))
+            self.assertEqual(merged.prompt_history_limit, 15)
 
     def test_load_player_config_rejects_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -257,6 +296,49 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 "The first player to reach 5 victory points wins.",
                 orchestrator_cls.call_args.kwargs["observation_builder"].game_rules,
             )
+
+    def test_runner_uses_game_seed_override_from_players_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            game_toml = Path(tmpdir) / "game.toml"
+            players_toml = Path(tmpdir) / "players.toml"
+            game_toml.write_text(
+                (
+                    "[game]\n"
+                    'engine = "catanatron"\n'
+                    "seed = 12\n"
+                    'run_dir = "runs/"\n'
+                ),
+                encoding="utf-8",
+            )
+            players_toml.write_text(
+                (
+                    "[game]\nseed = 777\n\n"
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "random"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("catan_bench.runner.build_engine", return_value=_StubEngine()):
+                with patch("catan_bench.runner.GameOrchestrator") as orchestrator_cls:
+                    orchestrator_cls.return_value.run.return_value = GameResult(
+                        game_id="mock-game",
+                        winner_ids=("RED",),
+                        total_decisions=1,
+                        public_event_count=0,
+                        memory_writes=0,
+                        metadata={},
+                    )
+                    run_from_config_files(
+                        game_config_path=game_toml,
+                        players_config_path=players_toml,
+                    )
+
+            self.assertEqual(orchestrator_cls.call_args.kwargs["game_seed"], 777)
 
     def test_resolve_run_dir_prefixes_tags_into_flat_run_name(self) -> None:
         resolved = _resolve_run_dir(

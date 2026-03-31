@@ -29,7 +29,13 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency in lean te
         return loaded
 
 
-from .config import GameConfig, PlayerConfig, load_game_config, load_player_configs
+from .config import (
+    GameConfig,
+    PlayerConfig,
+    load_game_config,
+    load_game_config_overrides,
+    load_player_configs,
+)
 from .llm import OpenAICompatibleChatClient
 from .observations import ObservationBuilder
 from .orchestrator import GameOrchestrator
@@ -121,7 +127,9 @@ def run_from_config_files(
     players_config_path = Path(players_config_path)
     _load_local_env(players_config_path.resolve().parent)
     game_config = load_game_config(game_config_path)
+    game_config = load_game_config_overrides(players_config_path, game_config)
     player_configs = load_player_configs(players_config_path)
+    players_config_toml = players_config_path.read_text(encoding="utf-8")
     effective_run_dir, resume_run_dir = _resolve_requested_run_dir(
         requested_run_dir=run_dir,
         configured_run_dir=game_config.run_dir,
@@ -140,6 +148,8 @@ def run_from_config_files(
         run_tags=game_config.run_tags,
         run_label=players_config_path.stem,
         game_seed=game_config.seed,
+        players_config_path=str(players_config_path.resolve()),
+        players_config_toml=players_config_toml,
         resume_run_dir=resume_run_dir,
         public_chat_enabled=game_config.public_chat_enabled,
         public_chat_message_chars=game_config.public_chat_message_chars,

@@ -1,13 +1,14 @@
 # OpenRouter 8-model Elo schedule
 
 This directory contains the 6 player configs for the minimum practical 8-model Elo schedule.
+Use them together with the shared game config at `configs/elo-games/game-common.toml`.
 
 Model mapping:
 
 - `M1` = `nvidia/nemotron-3-super-120b-a12b:free`
 - `M2` = `z-ai/glm-4.5-air:free`
 - `M3` = `xiaomi/mimo-v2-flash`
-- `M4` = `openai/gpt-oss-120b`
+- `M4` = `arcee-ai/trinity-large-preview:free`
 - `M5` = `x-ai/grok-4.1-fast`
 - `M6` = `qwen/qwen3-235b-a22b-thinking-2507`
 - `M7` = `deepseek/deepseek-v3.2`
@@ -24,8 +25,12 @@ Game schedule:
 
 The seat assignments were chosen so each model appears in 3 distinct colors across its 3 games, and each color is used exactly 6 times overall.
 
+For `qwen/qwen3-235b-a22b-thinking-2507`, these configs use `reasoning_effort = "minimal"` because the thinking variant does not allow reasoning to be disabled.
+
+For `minimax/minimax-m2.7`, these configs also use `reasoning_effort = "minimal"` because live runs showed the endpoint rejects requests that try to disable reasoning.
+
 Run a game with:
 
 ```bash
-python -m catan_bench --game configs/game.toml --players configs/elo-games/openrouter-8-model-minimal/game-01.toml
+python -m catan_bench --game configs/elo-games/game-common.toml --players configs/elo-games/openrouter-8-model-minimal/game-01.toml
 ```

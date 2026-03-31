@@ -1,4 +1,6 @@
 # Game 06 of 06 in the 8-model minimum practical Elo schedule.
+[game]
+seed = 42069
 
 [[players]]
 id = "RED"
@@ -9,7 +11,7 @@ api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"
 
 [[players]]
 id = "BLUE"
@@ -31,7 +33,7 @@ api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"
 
 [[players]]
 id = "WHITE"

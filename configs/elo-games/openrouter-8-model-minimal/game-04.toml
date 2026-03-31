@@ -1,4 +1,6 @@
 # Game 04 of 06 in the 8-model minimum practical Elo schedule.
+[game]
+seed = 123
 
 [[players]]
 id = "RED"
@@ -14,7 +16,7 @@ reasoning_enabled = false
 [[players]]
 id = "BLUE"
 type = "llm"
-model = "openai/gpt-oss-120b"
+model = "arcee-ai/trinity-large-preview:free"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300

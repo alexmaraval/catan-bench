@@ -1579,6 +1579,45 @@ class GameOrchestratorTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "public state snapshot"):
                 resumed.step()
 
+    def test_orchestrator_writes_players_config_into_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_config_toml = (
+                "[[players]]\n"
+                'id = "RED"\n'
+                'type = "random"\n\n'
+                "[[players]]\n"
+                'id = "BLUE"\n'
+                'type = "random"\n'
+            )
+            orchestrator = GameOrchestrator(
+                MockTurnEngine(),
+                {
+                    "RED": ScriptedPlayer(
+                        action_responses=[
+                            Action(
+                                "OFFER_TRADE",
+                                payload={"offer": {"WOOD": 1}, "request": {"BRICK": 1}},
+                            ),
+                            Action("END_TURN"),
+                        ]
+                    ),
+                    "BLUE": ScriptedPlayer(reactive_responses=[Action("REJECT_TRADE")]),
+                },
+                run_dir=tmpdir,
+                players_config_path="/tmp/players.toml",
+                players_config_toml=players_config_toml,
+            )
+
+            orchestrator.step()
+
+            metadata = json.loads(
+                (Path(orchestrator.run_dir) / "metadata.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(metadata["players_config_path"], "/tmp/players.toml")
+            self.assertEqual(metadata["players_config_toml"], players_config_toml)
+
     def test_orchestrator_persists_two_slot_memory_without_private_history(
         self,
     ) -> None:

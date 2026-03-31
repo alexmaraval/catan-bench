@@ -1,0 +1,17 @@
+[game]
+engine = "catanatron"
+discard_limit = 7
+vps_to_win = 10
+history_window = 100
+public_chat_enabled = true
+public_chat_message_chars = 500
+public_chat_history_limit = 15
+trading_chat_enabled = true
+trading_chat_max_failed_attempts_per_turn = 5
+trading_chat_max_rooms_per_turn = 5
+trading_chat_max_rounds_per_attempt = 3
+trading_chat_message_chars = 500
+trading_chat_history_limit = 40
+prompt_history_limit = 15
+run_dir = "runs/elo-games"
+run_tags = ["1.0.0"]

@@ -1,4 +1,6 @@
 # Game 02 of 06 in the 8-model minimum practical Elo schedule.
+[game]
+seed = 24
 
 [[players]]
 id = "RED"

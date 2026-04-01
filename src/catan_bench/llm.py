@@ -167,7 +167,7 @@ class OpenAICompatibleChatClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "catan-bench/1.0.0",
+                "User-Agent": "catan-bench/1.1.0",
             },
             method="POST",
         )

@@ -277,6 +277,11 @@ class CatanatronAdapterTests(unittest.TestCase):
         current_player = public_state["players"][decision.acting_player_id]
         self.assertIn("vp", current_player)
         self.assertIn("roads", current_player)
+        self.assertIn("resource_card_count", current_player)
+        self.assertIn("development_card_count", current_player)
+        self.assertIn("roads_left", current_player)
+        self.assertIn("settlements_left", current_player)
+        self.assertIn("cities_left", current_player)
         self.assertNotIn("seat_index", current_player)
         self.assertNotIn("development_cards_remaining", public_state["bank"])
         self.assertIn("your_network", public_state["board"])

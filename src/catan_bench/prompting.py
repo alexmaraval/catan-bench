@@ -81,11 +81,21 @@ def fmt_memory(value: object) -> str:
 def fmt_player_standing(player_id: object, info: object) -> str:
     if not isinstance(info, dict):
         return str(player_id)
+    vp = info.get("vp", info.get("visible_victory_points", "?"))
+    resource_cards = info.get("resource_card_count", info.get("res_cards", "?"))
+    development_cards = info.get("development_card_count", info.get("dev_cards", "?"))
+    resource_card_noun = "card" if resource_cards == 1 else "cards"
+    development_card_noun = "card" if development_cards == 1 else "cards"
+    roads_left = info.get("roads_left", info.get("roads_available", "?"))
+    settlements_left = info.get(
+        "settlements_left", info.get("settlements_available", "?")
+    )
+    cities_left = info.get("cities_left", info.get("cities_available", "?"))
     parts = [
-        f"{player_id}: {info.get('vp', '?')}VP",
-        f"{info.get('res_cards', '?')}res",
-        f"{info.get('dev_cards', '?')}dev",
-        f"{info.get('roads', '?')}R/{info.get('settlements', '?')}S/{info.get('cities', '?')}C",
+        f"{player_id}: {vp}VP",
+        f"{resource_cards} resource {resource_card_noun}",
+        f"{development_cards} unused development {development_card_noun}",
+        f"pieces left {roads_left}R/{settlements_left}S/{cities_left}C",
         f"longest road {info.get('longest_road_length', 0)}",
         f"played knights {info.get('played_knights', 0)}",
     ]

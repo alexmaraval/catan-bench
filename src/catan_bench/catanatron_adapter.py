@@ -671,21 +671,27 @@ class CatanatronEngineAdapter:
         largest_army = bool(state.player_state[f"{key}_HAS_ARMY"])
         longest_road_length = int(state.player_state[f"{key}_LONGEST_ROAD_LENGTH"])
         played_knights = int(state.player_state[f"{key}_PLAYED_KNIGHT"])
+        resource_card_count = sum(
+            state.player_state[f"{key}_{resource}_IN_HAND"] for resource in RESOURCE_ORDER
+        )
+        development_card_count = sum(
+            state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
+        )
+        roads_left = int(state.player_state[f"{key}_ROADS_AVAILABLE"])
+        settlements_left = int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
+        cities_left = int(state.player_state[f"{key}_CITIES_AVAILABLE"])
         return {
             "vp": int(state.player_state[f"{key}_VICTORY_POINTS"]),
-            "res_cards": sum(
-                state.player_state[f"{key}_{resource}_IN_HAND"]
-                for resource in RESOURCE_ORDER
-            ),
-            "dev_cards": sum(
-                state.player_state[f"{key}_{card}_IN_HAND"] for card in DEV_CARD_ORDER
-            ),
-            "roads": TOTAL_ROADS - int(state.player_state[f"{key}_ROADS_AVAILABLE"]),
-            "settlements": (
-                TOTAL_SETTLEMENTS
-                - int(state.player_state[f"{key}_SETTLEMENTS_AVAILABLE"])
-            ),
-            "cities": TOTAL_CITIES - int(state.player_state[f"{key}_CITIES_AVAILABLE"]),
+            "res_cards": resource_card_count,
+            "resource_card_count": resource_card_count,
+            "dev_cards": development_card_count,
+            "development_card_count": development_card_count,
+            "roads": TOTAL_ROADS - roads_left,
+            "settlements": TOTAL_SETTLEMENTS - settlements_left,
+            "cities": TOTAL_CITIES - cities_left,
+            "roads_left": roads_left,
+            "settlements_left": settlements_left,
+            "cities_left": cities_left,
             "longest_road_length": longest_road_length,
             "played_knights": played_knights,
             "longest_road": longest_road,

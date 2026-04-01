@@ -1100,11 +1100,11 @@ class LLMPlayerTests(unittest.TestCase):
                     "players": {
                         "WHITE": {
                             "vp": 2,
-                            "res_cards": 4,
-                            "dev_cards": 2,
-                            "roads": 2,
-                            "settlements": 2,
-                            "cities": 0,
+                            "resource_card_count": 4,
+                            "development_card_count": 2,
+                            "roads_left": 13,
+                            "settlements_left": 3,
+                            "cities_left": 4,
                             "longest_road_length": 4,
                             "played_knights": 1,
                             "has_longest_road": False,
@@ -1112,11 +1112,11 @@ class LLMPlayerTests(unittest.TestCase):
                         },
                         "BLUE": {
                             "vp": 4,
-                            "res_cards": 5,
-                            "dev_cards": 1,
-                            "roads": 5,
-                            "settlements": 2,
-                            "cities": 1,
+                            "resource_card_count": 5,
+                            "development_card_count": 1,
+                            "roads_left": 10,
+                            "settlements_left": 3,
+                            "cities_left": 3,
                             "longest_road_length": 6,
                             "played_knights": 3,
                             "has_longest_road": True,
@@ -1131,6 +1131,14 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertIn("Public Longest Road status:", rendered)
+        self.assertIn(
+            "WHITE: 2VP  4 resource cards  2 unused development cards  pieces left 13R/3S/4C",
+            rendered,
+        )
+        self.assertIn(
+            "BLUE: 4VP  5 resource cards  1 unused development card  pieces left 10R/3S/3C",
+            rendered,
+        )
         self.assertIn("BLUE currently holds Longest Road at length 6.", rendered)
         self.assertIn("Your current longest road is 4.", rendered)
         self.assertIn("Public Largest Army status:", rendered)

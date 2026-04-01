@@ -17,6 +17,8 @@ from .schemas import (
     JsonValue,
     OpeningStrategyObservation,
     OpeningStrategyResponse,
+    PostGameChatObservation,
+    PostGameChatResponse,
     PublicChatDraft,
     PromptTrace,
     PromptTraceAttempt,
@@ -44,6 +46,10 @@ class Player(Protocol):
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse: ...
 
     def respond_reactive(self, observation: ReactiveObservation) -> ActionDecision: ...
+
+    def post_game_chat(
+        self, observation: PostGameChatObservation
+    ) -> PostGameChatResponse: ...
 
 
 def _is_resource_swap_template(action: Action) -> bool:
@@ -122,6 +128,9 @@ class ScriptedPlayer:
         start_turn_responses: Iterable[TurnStartResponse | JsonValue | None] = (),
         action_responses: Iterable[ActionDecision | Action] = (),
         end_turn_responses: Iterable[TurnEndResponse | JsonValue | None] = (),
+        post_game_chat_responses: Iterable[
+            PostGameChatResponse | PublicChatDraft | None
+        ] = (),
         reactive_responses: Iterable[ActionDecision | Action] = (),
         trade_chat_open_responses: Iterable[TradeChatOpenResponse] = (),
         trade_chat_reply_responses: Iterable[TradeChatReplyResponse] = (),
@@ -133,6 +142,7 @@ class ScriptedPlayer:
         self._start_turn_responses = deque(start_turn_responses)
         self._action_responses = deque(action_responses)
         self._end_turn_responses = deque(end_turn_responses)
+        self._post_game_chat_responses = deque(post_game_chat_responses)
         self._reactive_responses = deque(reactive_responses)
         self._trade_chat_open_responses = deque(trade_chat_open_responses)
         self._trade_chat_reply_responses = deque(trade_chat_reply_responses)
@@ -143,6 +153,7 @@ class ScriptedPlayer:
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
+        self.post_game_chat_observations: list[PostGameChatObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
         self.trade_chat_observations: list[TradeChatObservation] = []
 
@@ -193,6 +204,17 @@ class ScriptedPlayer:
             return response
         return ActionDecision(action=response, short_term=None)
 
+    def post_game_chat(
+        self, observation: PostGameChatObservation
+    ) -> PostGameChatResponse:
+        self.post_game_chat_observations.append(observation)
+        if not self._post_game_chat_responses:
+            return PostGameChatResponse()
+        response = self._post_game_chat_responses.popleft()
+        if isinstance(response, PostGameChatResponse):
+            return response
+        return PostGameChatResponse(public_chat=response)
+
     def open_trade_chat(
         self, observation: TradeChatObservation
     ) -> TradeChatOpenResponse:
@@ -232,6 +254,7 @@ class FirstLegalPlayer:
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
+        self.post_game_chat_observations: list[PostGameChatObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
 
     def plan_opening_strategy(
@@ -266,6 +289,13 @@ class FirstLegalPlayer:
             action=self._first_legal_action(observation.legal_actions),
             short_term=None,
         )
+
+    def post_game_chat(
+        self, observation: PostGameChatObservation
+    ) -> PostGameChatResponse:
+        if self.record_observations:
+            self.post_game_chat_observations.append(observation)
+        return PostGameChatResponse()
 
     @staticmethod
     def _first_legal_action(legal_actions: tuple[Action, ...]) -> Action:
@@ -290,6 +320,7 @@ class RandomLegalPlayer:
         self.start_turn_observations: list[TurnStartObservation] = []
         self.action_observations: list[ActionObservation] = []
         self.end_turn_observations: list[TurnEndObservation] = []
+        self.post_game_chat_observations: list[PostGameChatObservation] = []
         self.reactive_observations: list[ReactiveObservation] = []
 
     def plan_opening_strategy(
@@ -324,6 +355,13 @@ class RandomLegalPlayer:
             action=self._sample_action(observation.legal_actions),
             short_term=None,
         )
+
+    def post_game_chat(
+        self, observation: PostGameChatObservation
+    ) -> PostGameChatResponse:
+        if self.record_observations:
+            self.post_game_chat_observations.append(observation)
+        return PostGameChatResponse()
 
     def _sample_action(self, legal_actions: tuple[Action, ...]) -> Action:
         concrete_actions = [
@@ -507,6 +545,20 @@ class LLMPlayer:
             trace_attempts=attempts,
             stage="reactive_action",
             parse_decision=self._reactive_decision_from_payload,
+        )
+
+    def post_game_chat(
+        self, observation: PostGameChatObservation
+    ) -> PostGameChatResponse:
+        payload = self._traced_call_and_record(
+            observation=observation,
+            stage="post_game_chat",
+            build_messages=self._messages_for_post_game_chat,
+            compact_retry=False,
+        )
+        return PostGameChatResponse(
+            public_chat=self._coerce_public_chat_draft(payload),
+            reasoning=self._coerce_reasoning(payload),
         )
 
     def open_trade_chat(
@@ -782,6 +834,48 @@ class LLMPlayer:
         return self.renderer.render_messages(
             system_template="reactive_action_system.jinja",
             user_template="reactive_action_user.jinja",
+            payload=payload,
+            game_rules=observation.game_rules,
+        )
+
+    def _messages_for_post_game_chat(
+        self,
+        observation: PostGameChatObservation,
+        *,
+        compact: bool = False,
+    ) -> list[dict[str, object]]:
+        payload = {
+            "history_index": observation.history_index,
+            "player_id": observation.player_id,
+            "turn_index": observation.turn_index,
+            "phase": observation.phase,
+            "decision_index": observation.decision_index,
+            "public_state": observation.public_state,
+            "private_state": observation.private_state,
+            "public_history": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_history, compact=compact
+                )
+            ],
+            "memory": observation.memory.to_dict(),
+            "public_chat_enabled": observation.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict()
+                for event in self._tail_events(
+                    observation.public_chat_transcript, compact=compact
+                )
+            ],
+            "public_chat_message_char_limit": observation.public_chat_message_char_limit,
+            "result": dict(observation.result),
+            "context_window": {
+                "compact_retry": compact,
+                "history_limit": self._effective_history_limit(compact=compact),
+            },
+        }
+        return self.renderer.render_messages(
+            system_template="post_game_chat_system.jinja",
+            user_template="post_game_chat_user.jinja",
             payload=payload,
             game_rules=observation.game_rules,
         )

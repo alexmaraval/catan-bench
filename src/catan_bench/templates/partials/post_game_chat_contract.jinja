@@ -1,0 +1,18 @@
+Return strict JSON.
+
+Required key:
+- `public_chat`: `null` or an object with:
+  `message`: string
+  `target_player_id`: optional string
+
+Optional keys:
+- `private_reasoning`: concise private note under 30 words.
+
+Guidance:
+- Use `null` if you have nothing worth saying.
+- This is post-game table talk, so do not describe future actions as if they still matter mechanically.
+
+Examples:
+- `{"public_chat": {"message": "Good game everyone. BLUE, that late city race was nasty."}}`
+- `{"public_chat": {"message": "RED, well played. That robber block sealed it.", "target_player_id": "RED"}}`
+- `{"public_chat": null}`

@@ -20,6 +20,7 @@ from .schemas import (
     Event,
     GameResult,
     JsonValue,
+    PostGameChatResponse,
     PublicStateSnapshot,
     TradeChatOpenResponse,
     TradeChatOwnerDecisionResponse,
@@ -225,6 +226,7 @@ class GameOrchestrator:
 
         self._finalize_active_turn_if_needed()
         metadata = dict(self.engine.result())
+        self._run_post_game_chat_round_if_enabled(result_metadata=metadata)
         metadata["benchmark"] = self._benchmark_metadata(
             total_decisions=self._completed_decisions
         )
@@ -1513,6 +1515,66 @@ class GameOrchestrator:
         if public_chat_event is not None:
             self._write_inflight_checkpoint()
 
+    def _run_post_game_chat_round_if_enabled(
+        self, *, result_metadata: dict[str, JsonValue]
+    ) -> None:
+        if not self.public_chat_enabled:
+            return
+
+        post_game_turn_index = self._post_game_chat_turn_index(result_metadata)
+        for decision_index, player_id in enumerate(self.engine.player_ids):
+            player = self.players[player_id]
+            observation = self.observation_builder.build_post_game_chat(
+                engine=self.engine,
+                player_id=player_id,
+                turn_index=post_game_turn_index,
+                decision_index=decision_index,
+                event_log=self.event_log,
+                memory_store=self.memory_store,
+                result_metadata=result_metadata,
+                public_chat_enabled=self.public_chat_enabled,
+                public_chat_history_limit=self.public_chat_history_limit,
+                public_chat_message_chars=self.public_chat_message_chars,
+            )
+            response = self._post_game_chat_response(
+                player=player,
+                observation=observation,
+            )
+            self._append_player_prompt_traces(player)
+            self._record_response_public_chat(
+                acting_player_id=player_id,
+                turn_index=post_game_turn_index,
+                phase="post_game_chat",
+                decision_index=decision_index,
+                stage="post_game_chat",
+                response=response,
+            )
+
+    def _post_game_chat_turn_index(
+        self, result_metadata: Mapping[str, JsonValue]
+    ) -> int:
+        turn_candidates = [0]
+        num_turns = result_metadata.get("num_turns")
+        if isinstance(num_turns, int):
+            turn_candidates.append(num_turns)
+        turn_candidates.extend(event.turn_index for event in self.event_log.public_events)
+        turn_candidates.extend(
+            snapshot.turn_index for snapshot in self.public_state_store.snapshots
+        )
+        return max(turn_candidates) + 1
+
+    @staticmethod
+    def _post_game_chat_response(
+        *, player: Player, observation: object
+    ) -> PostGameChatResponse:
+        hook = getattr(player, "post_game_chat", None)
+        if not callable(hook):
+            return PostGameChatResponse()
+        response = hook(observation)
+        if isinstance(response, PostGameChatResponse):
+            return response
+        return PostGameChatResponse()
+
     def _turn_owner_id(self, decision: DecisionPoint) -> str:
         turn_owner_id_prop = getattr(self.engine, "turn_owner_id", None)
         if isinstance(turn_owner_id_prop, str):
@@ -2155,6 +2217,7 @@ class GameOrchestrator:
         | TradeChatOpenResponse
         | TradeChatReplyResponse
         | TradeChatOwnerDecisionResponse
+        | PostGameChatResponse
         | object,
     ) -> Event | None:
         if not self.public_chat_enabled:

@@ -1,0 +1,29 @@
+Stage: Post-game chat.
+The game is over. You may optionally post one final message in the main public chat as {{ payload.player_id }}.
+This message does not affect mechanics, scoring, or ELO.
+Keep it concise, table-facing, and in character from your seat at the table.
+
+{% include "partials/game_context.jinja" %}
+
+### Final result
+{% if payload.result.winner_ids %}
+Winners: {{ payload.result.winner_ids | join(", ") }}
+{% else %}
+Winners: none recorded
+{% endif %}
+{% if payload.result.num_turns is not none %}
+Completed turns: {{ payload.result.num_turns }}
+{% endif %}
+
+### Recent public history
+{% if payload.public_history %}
+{% for event in payload.public_history %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
+{% include "partials/public_chat_context.jinja" %}
+
+{% include "partials/post_game_chat_contract.jinja" %}

@@ -14,6 +14,7 @@ from catan_bench.dashboard import (
     _event_body,
     _infer_turn_owner_player_id,
     _public_chat_panel_html,
+    _render_public_chat_panel,
     _render_analysis_tab,
     _render_player_summary_table,
     build_board_svg,
@@ -239,6 +240,69 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("BLUE \u2192 RED", html)
         self.assertIn("Hold your wheat for me.", html)
         self.assertNotIn("To RED (public):", html)
+
+    def test_render_public_chat_panel_renders_turn_sections_incrementally(self) -> None:
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.markdown_calls: list[tuple[str, bool]] = []
+                self.caption_calls: list[str] = []
+                self.container_calls: list[dict[str, object]] = []
+
+            def markdown(self, body: str, unsafe_allow_html: bool = False) -> None:
+                self.markdown_calls.append((body, unsafe_allow_html))
+
+            def caption(self, body: str) -> None:
+                self.caption_calls.append(body)
+
+            def container(self, **kwargs):
+                self.container_calls.append(kwargs)
+                return self
+
+        st = FakeStreamlit()
+
+        _render_public_chat_panel(
+            st,
+            (
+                Event(
+                    kind="public_chat_message",
+                    payload={
+                        "speaker_player_id": "RED",
+                        "message": "I can help on this roll.",
+                    },
+                    history_index=5,
+                    turn_index=2,
+                    phase="play_turn",
+                    decision_index=1,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="public_chat_message",
+                    payload={
+                        "speaker_player_id": "BLUE",
+                        "target_player_id": "RED",
+                        "message": "Hold your wheat for me.",
+                    },
+                    history_index=8,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=2,
+                    actor_player_id="BLUE",
+                ),
+            ),
+            current_turn=3,
+        )
+
+        self.assertEqual(st.caption_calls, ["2 message(s) through history 8"])
+        self.assertEqual(st.markdown_calls[0], ("**📣 Table Chat**", False))
+        self.assertEqual(st.container_calls, [{"height": 576, "border": True}])
+        self.assertEqual(len(st.markdown_calls), 3)
+        self.assertTrue(st.markdown_calls[1][1])
+        self.assertIn("Turn 2", st.markdown_calls[1][0])
+        self.assertIn("I can help on this roll.", st.markdown_calls[1][0])
+        self.assertTrue(st.markdown_calls[2][1])
+        self.assertIn("Turn 3", st.markdown_calls[2][0])
+        self.assertIn("public-chat-group-current", st.markdown_calls[2][0])
+        self.assertIn("BLUE → RED", st.markdown_calls[2][0])
 
     def test_infer_turn_owner_prefers_earliest_turn_event_actor(self) -> None:
         snapshot = DashboardSnapshot(

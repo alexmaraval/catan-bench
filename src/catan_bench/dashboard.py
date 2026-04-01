@@ -93,7 +93,8 @@ STAGE_ORDER: dict[str, int] = {
     "reactive_action": 7,
     "repair_action": 8,
     "turn_end": 9,
-    "turn_cleanup": 10,
+    "post_game_chat": 10,
+    "turn_cleanup": 11,
 }
 TRADE_EMOJI = "🤝"
 RESOURCE_TILE_COLORS = {
@@ -1088,10 +1089,22 @@ def _render_public_chat_panel(
         st.caption("No public table chat yet.")
         return
     st.caption(f"{len(events)} message(s) through history {events[-1].history_index}")
-    st.markdown(
-        _public_chat_panel_html(events, current_turn=current_turn),
-        unsafe_allow_html=True,
-    )
+    chat_host = st
+    if hasattr(st, "container"):
+        try:
+            chat_host = st.container(height=576, border=True)
+        except TypeError:
+            chat_host = st.container()
+    for turn_index, label, turn_events in _public_chat_sections(events):
+        chat_host.markdown(
+            _public_chat_section_html(
+                turn_index,
+                label,
+                turn_events,
+                current_turn=current_turn,
+            ),
+            unsafe_allow_html=True,
+        )
 
 
 def _public_chat_panel_html(
@@ -1101,19 +1114,34 @@ def _public_chat_panel_html(
 ) -> str:
     html_parts = ["<div class='public-chat-shell'><div class='public-chat-panel'>"]
     for turn_index, label, turn_events in _public_chat_sections(events):
-        group_class = (
-            "public-chat-group public-chat-group-current"
-            if current_turn is not None and turn_index == current_turn
-            else "public-chat-group"
-        )
-        html_parts.append(f"<section class='{group_class}'>")
         html_parts.append(
-            f"<div class='public-chat-divider'><span>{_escape_html(label)}</span></div>"
+            _public_chat_section_html(
+                turn_index, label, turn_events, current_turn=current_turn
+            )
         )
-        for event in turn_events:
-            html_parts.append(_public_chat_bubble_html(event))
-        html_parts.append("</section>")
     html_parts.append("</div></div>")
+    return "".join(html_parts)
+
+
+def _public_chat_section_html(
+    turn_index: int,
+    label: str,
+    turn_events: tuple[Event, ...],
+    *,
+    current_turn: int | None,
+) -> str:
+    group_class = (
+        "public-chat-group public-chat-group-current"
+        if current_turn is not None and turn_index == current_turn
+        else "public-chat-group"
+    )
+    html_parts = [f"<section class='{group_class}'>"]
+    html_parts.append(
+        f"<div class='public-chat-divider'><span>{_escape_html(label)}</span></div>"
+    )
+    for event in turn_events:
+        html_parts.append(_public_chat_bubble_html(event))
+    html_parts.append("</section>")
     return "".join(html_parts)
 
 

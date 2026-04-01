@@ -6,6 +6,7 @@ from .prompts import CATAN_RULES_SUMMARY
 from .schemas import (
     ActionObservation,
     OpeningStrategyObservation,
+    PostGameChatObservation,
     ReactiveObservation,
     TradeChatObservation,
     TradeChatProposal,
@@ -232,6 +233,47 @@ class ObservationBuilder:
             public_chat_message_char_limit=public_chat_message_chars,
             legal_actions=tuple(decision.legal_actions),
             decision_prompt=decision.prompt,
+            game_rules=self.game_rules,
+            memory=memory_store.get(player_id),
+        )
+
+    def build_post_game_chat(
+        self,
+        *,
+        engine: EngineAdapter,
+        player_id: str,
+        turn_index: int,
+        decision_index: int,
+        event_log: EventLog,
+        memory_store: MemoryStore,
+        result_metadata: dict,
+        public_chat_enabled: bool = False,
+        public_chat_history_limit: int | None = None,
+        public_chat_message_chars: int = 500,
+    ) -> PostGameChatObservation:
+        phase = "post_game_chat"
+        return PostGameChatObservation(
+            game_id=engine.game_id,
+            player_id=player_id,
+            history_index=event_log.current_history_index,
+            turn_index=turn_index,
+            phase=phase,
+            decision_index=decision_index,
+            public_state=self._compact_public_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
+            private_state=self._compact_private_state(
+                engine=engine, player_id=player_id, phase=phase
+            ),
+            public_history=self._tail_events(event_log.recent()),
+            public_chat_enabled=public_chat_enabled,
+            public_chat_transcript=self._public_chat_transcript(
+                event_log, limit=public_chat_history_limit
+            )
+            if public_chat_enabled
+            else (),
+            public_chat_message_char_limit=public_chat_message_chars,
+            result=dict(result_metadata),
             game_rules=self.game_rules,
             memory=memory_store.get(player_id),
         )

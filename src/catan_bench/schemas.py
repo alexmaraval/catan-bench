@@ -378,6 +378,46 @@ class TurnEndObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class PostGameChatObservation:
+    game_id: str
+    player_id: str
+    history_index: int
+    turn_index: int
+    phase: str
+    decision_index: int
+    public_state: dict[str, JsonValue]
+    private_state: dict[str, JsonValue]
+    public_history: tuple[Event, ...] = ()
+    public_chat_enabled: bool = False
+    public_chat_transcript: tuple[Event, ...] = ()
+    public_chat_message_char_limit: int = 500
+    result: dict[str, JsonValue] = field(default_factory=dict)
+    game_rules: str | None = None
+    memory: PlayerMemory = field(default_factory=PlayerMemory)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "game_id": self.game_id,
+            "player_id": self.player_id,
+            "history_index": self.history_index,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "decision_index": self.decision_index,
+            "public_state": self.public_state,
+            "private_state": self.private_state,
+            "public_history": [event.to_dict() for event in self.public_history],
+            "public_chat_enabled": self.public_chat_enabled,
+            "public_chat_transcript": [
+                event.to_dict() for event in self.public_chat_transcript
+            ],
+            "public_chat_message_char_limit": self.public_chat_message_char_limit,
+            "result": self.result,
+            "game_rules": self.game_rules,
+            "memory": self.memory.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ReactiveObservation:
     game_id: str
     player_id: str
@@ -570,6 +610,20 @@ class TurnEndResponse:
         payload: dict[str, JsonValue] = {"long_term": self.long_term}
         if self.public_chat is not None:
             payload["public_chat"] = self.public_chat.to_dict()
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class PostGameChatResponse:
+    public_chat: PublicChatDraft | None = None
+    reasoning: str | None = None
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        payload: dict[str, JsonValue] = {}
+        if self.public_chat is not None:
+            payload["public_chat"] = self.public_chat.to_dict()
+        if self.reasoning is not None:
+            payload["reasoning"] = self.reasoning
         return payload
 
 

@@ -12,6 +12,7 @@ from catan_bench.schemas import (
     Event,
     OpeningStrategyObservation,
     PlayerMemory,
+    PostGameChatObservation,
     PublicChatDraft,
     ReactiveObservation,
     TradeChatObservation,
@@ -222,6 +223,83 @@ class LLMPlayerTests(unittest.TestCase):
             ["turn_start", "choose_action", "turn_end"],
         )
         self.assertEqual([trace.history_index for trace in traces], [2, 2, 3])
+
+    def test_llm_player_post_game_chat_records_trace_and_payload(self) -> None:
+        renderer = CapturingRenderer()
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "public_chat": {
+                        "message": "Good game, BLUE. That city timing was sharp.",
+                        "target_player_id": "blue",
+                    }
+                }
+            ),
+            model="fake-model",
+            renderer=renderer,
+        )
+
+        response = player.post_game_chat(
+            PostGameChatObservation(
+                game_id="game-1",
+                player_id="RED",
+                history_index=7,
+                turn_index=4,
+                phase="post_game_chat",
+                decision_index=1,
+                public_state={"turn": {"turn_player_id": "RED"}},
+                private_state={"resources": {"WOOD": 1}},
+                public_history=(
+                    Event(
+                        kind="turn_ended",
+                        payload={},
+                        history_index=7,
+                        turn_index=3,
+                        phase="play_turn",
+                        decision_index=6,
+                        actor_player_id="RED",
+                    ),
+                ),
+                public_chat_enabled=True,
+                public_chat_transcript=(
+                    Event(
+                        kind="public_chat_message",
+                        payload={
+                            "speaker_player_id": "BLUE",
+                            "message": "Well played.",
+                        },
+                        history_index=6,
+                        turn_index=3,
+                        phase="turn_end",
+                        actor_player_id="BLUE",
+                    ),
+                ),
+                public_chat_message_char_limit=500,
+                result={"winner_ids": ["RED"], "num_turns": 3},
+                game_rules="Rules",
+                memory=PlayerMemory(long_term={"goal": "Win the race cleanly"}),
+            )
+        )
+
+        self.assertEqual(
+            response.public_chat,
+            PublicChatDraft(
+                message="Good game, BLUE. That city timing was sharp.",
+                target_player_id="BLUE",
+            ),
+        )
+        assert renderer.last_payload is not None
+        self.assertEqual(renderer.last_payload["result"]["winner_ids"], ["RED"])
+        self.assertEqual(renderer.last_payload["public_history"][0]["kind"], "turn_ended")
+        self.assertEqual(
+            renderer.last_payload["public_chat_transcript"][0]["kind"],
+            "public_chat_message",
+        )
+        trace = player.take_last_prompt_trace()
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace.stage, "post_game_chat")
+        self.assertEqual(trace.phase, "post_game_chat")
 
     def test_llm_player_parses_optional_public_chat(self) -> None:
         player = LLMPlayer(

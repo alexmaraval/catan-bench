@@ -12,6 +12,7 @@ from catan_bench import (
     Event,
     GameOrchestrator,
     OpeningStrategyResponse,
+    PostGameChatResponse,
     PublicChatDraft,
     ScriptedPlayer,
     TradeChatOpenResponse,
@@ -1776,6 +1777,83 @@ class GameOrchestratorTests(unittest.TestCase):
             "public_chat_message",
         )
         self.assertEqual(len(red.end_turn_observations[0].public_chat_transcript), 2)
+
+    def test_orchestrator_runs_post_game_chat_round_after_terminal_state(self) -> None:
+        red = ScriptedPlayer(
+            action_responses=[ActionDecision(action=Action("END_TURN"))],
+            post_game_chat_responses=[
+                PostGameChatResponse(
+                    public_chat=PublicChatDraft(message="Good game everyone.")
+                )
+            ],
+        )
+        blue = ScriptedPlayer(
+            post_game_chat_responses=[
+                PostGameChatResponse(
+                    public_chat=PublicChatDraft(
+                        message="GG RED. Nice finish.",
+                        target_player_id="RED",
+                    )
+                )
+            ]
+        )
+
+        orchestrator = GameOrchestrator(
+            MockPublicChatEngine(),
+            {"RED": red, "BLUE": blue},
+            public_chat_enabled=True,
+        )
+
+        result = orchestrator.run()
+
+        self.assertEqual(result.winner_ids, ("RED",))
+        self.assertEqual(result.total_decisions, 2)
+        self.assertEqual(result.public_event_count, 4)
+        self.assertEqual(
+            [event.kind for event in orchestrator.event_log.public_events],
+            [
+                "dice_rolled",
+                "turn_ended",
+                "public_chat_message",
+                "public_chat_message",
+            ],
+        )
+        self.assertEqual(
+            [event.turn_index for event in orchestrator.event_log.public_events[-2:]],
+            [2, 2],
+        )
+        self.assertTrue(
+            all(
+                event.phase == "post_game_chat"
+                for event in orchestrator.event_log.public_events[-2:]
+            )
+        )
+        self.assertEqual(
+            orchestrator.event_log.public_events[-2].payload["source_stage"],
+            "post_game_chat",
+        )
+        self.assertEqual(
+            orchestrator.event_log.public_events[-1].payload["target_player_id"],
+            "RED",
+        )
+        self.assertEqual(len(red.post_game_chat_observations), 1)
+        self.assertEqual(len(blue.post_game_chat_observations), 1)
+        self.assertEqual(
+            red.post_game_chat_observations[0].result["winner_ids"],
+            ["RED"],
+        )
+        self.assertEqual(
+            blue.post_game_chat_observations[0].public_chat_transcript[-1].payload[
+                "message"
+            ],
+            "Good game everyone.",
+        )
+        self.assertFalse(
+            any(
+                snapshot.stage == "post_game_chat"
+                for snapshot in orchestrator.memory_store.history("RED")
+            )
+        )
 
     def test_orchestrator_handles_invalid_selected_trade_without_crashing(self) -> None:
         red = ScriptedPlayer(

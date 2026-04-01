@@ -54,7 +54,7 @@ class OpenAICompatibleChatClient:
                 f"export {self.api_key_env}=<your_api_key>"
             )
 
-        endpoint = self.api_base.rstrip("/") + "/chat/completions"
+        endpoint = self._chat_completions_endpoint()
         use_json_response_format = True
         attempt_index = 0
         while attempt_index < self.max_attempts:
@@ -107,6 +107,17 @@ class OpenAICompatibleChatClient:
                 ) from exc
 
         raise RuntimeError("LLM request failed after exhausting retry attempts.")
+
+    def _chat_completions_endpoint(self) -> str:
+        parsed = urlparse(self.api_base)
+        hostname = (parsed.hostname or "").lower()
+        if hostname in {"openai.com", "www.openai.com"}:
+            raise RuntimeError(
+                "Invalid OpenAI `api_base`: the players config points at the website "
+                f"{self.api_base!r} instead of the API. Use "
+                "'https://api.openai.com/v1'."
+            )
+        return self.api_base.rstrip("/") + "/chat/completions"
 
     def _request_body(
         self,

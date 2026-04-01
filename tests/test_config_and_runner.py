@@ -56,9 +56,9 @@ class ConfigAndRunnerTests(unittest.TestCase):
         player_configs = load_player_configs("configs/openai-players.toml")
 
         self.assertEqual(game_config.engine, "catanatron")
-        self.assertIsInstance(game_config.seed, int)
+        self.assertIsNone(game_config.seed)
         self.assertEqual(game_config.prompt_history_limit, 30)
-        self.assertEqual(game_config.run_dir, Path("runs"))
+        self.assertEqual(game_config.run_dir, Path("runs/desloppify"))
         self.assertEqual(game_config.run_tags, ("1.0.0",))
         self.assertIn(
             f"The first player to reach {game_config.vps_to_win} victory points wins.",
@@ -66,11 +66,17 @@ class ConfigAndRunnerTests(unittest.TestCase):
         )
         self.assertTrue(game_config.public_chat_enabled)
         self.assertEqual(game_config.public_chat_message_chars, 500)
-        self.assertEqual(game_config.public_chat_history_limit, 40)
+        self.assertEqual(game_config.public_chat_history_limit, 15)
         self.assertTrue(game_config.trading_chat_enabled)
         self.assertEqual(game_config.trading_chat_max_rooms_per_turn, 5)
         self.assertEqual(len(player_configs), 4)
         self.assertEqual(player_configs[0].id, "RED")
+        self.assertTrue(
+            all(
+                config.api_base == "https://api.openai.com/v1"
+                for config in player_configs
+            )
+        )
 
     def test_load_game_config_with_prompt_history_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

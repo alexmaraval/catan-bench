@@ -1156,10 +1156,77 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'Current turn scratchpad: {"action": "build road", "target_edge": "[17, 18]"}',
+            "### Short-term strategy",
             rendered,
         )
-        self.assertIn('{"goal": "contest longest road"}', rendered)
+        self.assertIn(
+            '- {"action": "build road", "target_edge": "[17, 18]"}',
+            rendered,
+        )
+        self.assertIn("### Long-term strategy", rendered)
+        self.assertIn('- {"goal": "contest longest road"}', rendered)
+
+    def test_game_context_renders_explicit_hand_visibility_and_vp_goal(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/game_context.jinja",
+            payload={
+                "turn_index": 9,
+                "player_id": "WHITE",
+                "private_state": {
+                    "resources": {
+                        "WOOD": 4,
+                        "BRICK": 3,
+                        "SHEEP": 2,
+                        "WHEAT": 6,
+                        "ORE": 2,
+                    },
+                    "development_cards": {"KNIGHT": 1, "VICTORY_POINT": 1},
+                    "pieces": {"roads": 0, "settlements": 0, "cities": 3},
+                    "victory_points": {"visible": 9, "actual": 9},
+                    "ports": ["ANY", "BRICK", "ORE"],
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "WHITE", "vps_to_win": 10},
+                    "players": {
+                        "WHITE": {
+                            "vp": 9,
+                            "resource_card_count": 17,
+                            "development_card_count": 2,
+                            "roads_left": 0,
+                            "settlements_left": 0,
+                            "cities_left": 3,
+                            "longest_road_length": 6,
+                            "played_knights": 2,
+                            "has_longest_road": True,
+                            "has_largest_army": False,
+                        }
+                    },
+                    "board": {},
+                    "bank": {},
+                },
+                "memory": {"short_term": None, "long_term": None},
+            },
+        )
+
+        self.assertIn(
+            "Resources (17 cards total; count public, exact types private): 4×WOOD, 3×BRICK, 2×SHEEP, 6×WHEAT, 2×ORE",
+            rendered,
+        )
+        self.assertIn(
+            "Development (played knights public; unplayed cards private, including VP cards): 2 played knights; 1×KNIGHT, 1×VICTORY_POINT",
+            rendered,
+        )
+        self.assertIn(
+            "Pieces left to play (public): 0 Roads / 0 Settlements / 3 Cities",
+            rendered,
+        )
+        self.assertIn("VP: 9 (9 public, 0 private)", rendered)
+        self.assertIn("VP remaining to win: 1 to reach 10 VP", rendered)
+        self.assertIn(
+            "Ports (public): ANY (3:1), BRICK (2:1), ORE (2:1)",
+            rendered,
+        )
 
     def test_game_context_renders_longest_road_and_largest_army_status(self) -> None:
         renderer = PromptRenderer()

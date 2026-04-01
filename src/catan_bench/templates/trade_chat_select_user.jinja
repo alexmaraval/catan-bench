@@ -3,12 +3,7 @@ Review the quotes and choose exactly one player to trade with, or no deal.
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
-### Your hand
-Resources: {{ fmt_resources(payload.private_state.resources) }}
-VP: {{ fmt_vp(payload.private_state) }}
-{% if payload.memory.short_term %}
-Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
-{% endif %}
+{% include "partials/your_hand.jinja" %}
 
 {% if payload.public_state.players %}
 ### Standings
@@ -39,10 +34,6 @@ Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.play
 {% else %}
 (no quotes)
 {% endif %}
-{% if payload.memory.long_term %}
-
-### Long-term memory
-{{ fmt_memory(payload.memory.long_term) }}
-{% endif %}
+{% include "partials/strategy_memory.jinja" %}
 
 {% include "partials/trade_chat_select_contract.jinja" %}

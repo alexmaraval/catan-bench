@@ -1,0 +1,20 @@
+{% set short_term = fmt_memory(payload.memory.short_term) %}
+{% if short_term %}
+
+### Short-term strategy
+{% for line in short_term.splitlines() %}
+{% if line.strip() %}
+- {{ line }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% set long_term = fmt_memory(payload.memory.long_term) %}
+{% if long_term %}
+
+### Long-term strategy
+{% for line in long_term.splitlines() %}
+{% if line.strip() %}
+- {{ line }}
+{% endif %}
+{% endfor %}
+{% endif %}

@@ -279,6 +279,7 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertIn("roads", current_player)
         self.assertIn("resource_card_count", current_player)
         self.assertIn("development_card_count", current_player)
+        self.assertIn("vps_to_win", public_state["turn"])
         self.assertIn("roads_left", current_player)
         self.assertIn("settlements_left", current_player)
         self.assertIn("cities_left", current_player)

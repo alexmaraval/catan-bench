@@ -5,15 +5,7 @@ Prefer proposals that improve your build tempo at a better rate than your likely
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
-### Your hand
-Resources: {{ fmt_resources(payload.private_state.resources) }}
-VP: {{ fmt_vp(payload.private_state) }}
-{% if payload.private_state.ports %}
-Ports: {{ payload.private_state.ports | join(", ") }}
-{% endif %}
-{% if payload.memory.short_term %}
-Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
-{% endif %}
+{% include "partials/your_hand.jinja" %}
 
 {% if payload.public_state.players %}
 ### Standings
@@ -48,10 +40,6 @@ Message character limit: {{ payload.message_char_limit }}
 {% else %}
 (no concrete proposals)
 {% endif %}
-{% if payload.memory.long_term %}
-
-### Long-term memory
-{{ fmt_memory(payload.memory.long_term) }}
-{% endif %}
+{% include "partials/strategy_memory.jinja" %}
 
 {% include "partials/trade_chat_owner_decision_contract.jinja" %}

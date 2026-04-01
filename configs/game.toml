@@ -14,4 +14,4 @@ trading_chat_message_chars = 500
 trading_chat_history_limit = 15
 prompt_history_limit = 30
 run_dir = "runs/test"
-run_tags = ["1.1.0"]
+run_tags = ["1.1.1"]

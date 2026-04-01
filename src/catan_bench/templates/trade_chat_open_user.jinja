@@ -6,19 +6,7 @@ If a domestic deal could beat your bank or port rate, open the room first. Marit
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
-### Your hand
-Resources: {{ fmt_resources(payload.private_state.resources) }}
-{% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
-{% if dc != "none" %}
-Dev cards: {{ dc }}
-{% endif %}
-VP: {{ fmt_vp(payload.private_state) }}
-{% if payload.private_state.ports %}
-Ports: {{ payload.private_state.ports | join(", ") }}
-{% endif %}
-{% if payload.memory.short_term %}
-Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
-{% endif %}
+{% include "partials/your_hand.jinja" %}
 
 {% if payload.public_state.players %}
 ### Standings
@@ -35,10 +23,6 @@ Other players: {{ payload.other_player_ids | join(", ") }}
 Message character limit: {{ payload.message_char_limit }}
 
 {% include "partials/public_chat_transcript_readonly.jinja" %}
-{% if payload.memory.long_term %}
-
-### Long-term memory
-{{ fmt_memory(payload.memory.long_term) }}
-{% endif %}
+{% include "partials/strategy_memory.jinja" %}
 
 {% include "partials/trade_chat_open_contract.jinja" %}

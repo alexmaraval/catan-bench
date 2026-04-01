@@ -33,12 +33,39 @@ def fmt_resources(resources: object) -> str:
     return ", ".join(parts) or "none"
 
 
+def fmt_resource_card_count(resources: object) -> str:
+    """Total number of resource cards represented by a resource-count mapping."""
+    if not isinstance(resources, dict):
+        return "?"
+    total = 0
+    for amount in resources.values():
+        if not isinstance(amount, int):
+            return "?"
+        total += amount
+    return str(total)
+
+
 def fmt_dev_cards(dev_cards: object) -> str:
     """Compact non-zero dev card summary, e.g. '2×KNIGHT, 1×MONOPOLY'."""
     if not isinstance(dev_cards, dict):
         return "none"
     parts = [f"{dev_cards[c]}×{c}" for c in _DEV_CARD_ORDER if dev_cards.get(c)]
     return ", ".join(parts) or "none"
+
+
+def fmt_ports(ports: object) -> str:
+    """Human-readable port summary with trade rates."""
+    if not isinstance(ports, (list, tuple)):
+        return "none"
+    formatted: list[str] = []
+    for port in ports:
+        if not isinstance(port, str):
+            continue
+        if port == "ANY":
+            formatted.append("ANY (3:1)")
+        else:
+            formatted.append(f"{port} (2:1)")
+    return ", ".join(formatted) or "none"
 
 
 def fmt_pieces(private_state: object) -> str:
@@ -52,14 +79,48 @@ def fmt_pieces(private_state: object) -> str:
     return f"{roads}R / {settlements}S / {cities}C"
 
 
+def fmt_pieces_long(private_state: object) -> str:
+    """'10 Roads / 3 Settlements / 4 Cities' from private_state dict."""
+    if not isinstance(private_state, dict):
+        return ""
+    pieces = private_state.get("pieces") or {}
+    roads = pieces.get("roads", pieces.get("roads_available", "?"))
+    settlements = pieces.get("settlements", pieces.get("settlements_available", "?"))
+    cities = pieces.get("cities", pieces.get("cities_available", "?"))
+    return f"{roads} Roads / {settlements} Settlements / {cities} Cities"
+
+
 def fmt_vp(private_state: object) -> str:
-    """'5 (4 visible)' from private_state dict."""
+    """'5 (4 public, 1 private)' from private_state dict."""
     if not isinstance(private_state, dict):
         return "?"
     vp = private_state.get("victory_points") or {}
     actual = vp.get("actual", "?")
     visible = vp.get("visible", "?")
-    return f"{actual} ({visible} visible)"
+    private = "?"
+    if isinstance(actual, int) and isinstance(visible, int):
+        private = max(actual - visible, 0)
+    return f"{actual} ({visible} public, {private} private)"
+
+
+def fmt_vp_remaining(private_state: object, public_state: object) -> str:
+    if not isinstance(private_state, dict):
+        return "?"
+    target = 10
+    if isinstance(public_state, dict):
+        turn = public_state.get("turn")
+        if isinstance(turn, dict):
+            maybe_target = turn.get("vps_to_win")
+            if isinstance(maybe_target, int):
+                target = maybe_target
+        maybe_target = public_state.get("vps_to_win")
+        if isinstance(maybe_target, int):
+            target = maybe_target
+    vp = private_state.get("victory_points") or {}
+    actual = vp.get("actual")
+    if not isinstance(actual, int):
+        return f"? to reach {target} VP"
+    return f"{max(target - actual, 0)} to reach {target} VP"
 
 
 def fmt_payload(payload: object) -> str:
@@ -247,9 +308,13 @@ class PromptRenderer:
                 lstrip_blocks=True,
             )
             env.globals["fmt_resources"] = fmt_resources
+            env.globals["fmt_resource_card_count"] = fmt_resource_card_count
             env.globals["fmt_dev_cards"] = fmt_dev_cards
+            env.globals["fmt_ports"] = fmt_ports
             env.globals["fmt_pieces"] = fmt_pieces
+            env.globals["fmt_pieces_long"] = fmt_pieces_long
             env.globals["fmt_vp"] = fmt_vp
+            env.globals["fmt_vp_remaining"] = fmt_vp_remaining
             env.globals["fmt_payload"] = fmt_payload
             env.globals["fmt_memory"] = fmt_memory
             env.globals["fmt_player_standing"] = fmt_player_standing

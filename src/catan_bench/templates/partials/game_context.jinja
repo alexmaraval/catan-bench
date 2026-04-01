@@ -1,26 +1,6 @@
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
 
-### Your hand
-Resources: {{ fmt_resources(payload.private_state.resources) }}
-{% if payload.private_state.discard_requirement %}
-Must discard: {{ payload.private_state.discard_requirement.count }} cards
-Legal discard options: {{ payload.private_state.discard_requirement.legal_options }}
-{% endif %}
-{% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
-{% if dc != "none" %}
-Dev cards: {{ dc }}
-{% endif %}
-{% set pieces_str = fmt_pieces(payload.private_state) %}
-{% if pieces_str %}
-Pieces left: {{ pieces_str }}
-{% endif %}
-VP: {{ fmt_vp(payload.private_state) }}
-{% if payload.private_state.ports %}
-Ports: {{ payload.private_state.ports | join(", ") }}
-{% endif %}
-{% if payload.memory.short_term %}
-Current turn scratchpad: {{ fmt_memory(payload.memory.short_term) }}
-{% endif %}
+{% include "partials/your_hand.jinja" %}
 {% if payload.public_state.players %}
 
 ### Standings
@@ -78,8 +58,4 @@ Robber targets:
 Bank: {{ fmt_resources(payload.public_state.bank.resources) }}
 {% endif %}
 {% endif %}
-{% if payload.memory.long_term %}
-
-### Long-term memory
-{{ fmt_memory(payload.memory.long_term) }}
-{% endif %}
+{% include "partials/strategy_memory.jinja" %}

@@ -59,7 +59,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertIsNone(game_config.seed)
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertEqual(game_config.run_dir, Path("runs/test"))
-        self.assertEqual(game_config.run_tags, ("1.1.0",))
+        self.assertEqual(game_config.run_tags, ("1.1.1",))
         self.assertIn(
             f"The first player to reach {game_config.vps_to_win} victory points wins.",
             CATAN_RULES_SUMMARY,
@@ -96,7 +96,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             game_toml.write_text(
                 (
                     '[game]\nengine = "catanatron"\nrun_dir = "runs/"\n'
-                    'run_tags = ["1.1.0", "experiment-a"]\n'
+                    'run_tags = ["1.1.1", "experiment-a"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -104,7 +104,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             config = load_game_config(game_toml)
 
             self.assertEqual(config.run_dir, Path("runs"))
-            self.assertEqual(config.run_tags, ("1.1.0", "experiment-a"))
+            self.assertEqual(config.run_tags, ("1.1.1", "experiment-a"))
 
     def test_load_game_config_overrides_from_players_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -267,7 +267,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     'engine = "catanatron"\n'
                     "vps_to_win = 5\n"
                     'run_dir = "runs/"\n'
-                    'run_tags = ["1.1.0", "dev"]\n'
+                    'run_tags = ["1.1.1", "dev"]\n'
                 ),
                 encoding="utf-8",
             )
@@ -299,7 +299,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     )
 
             self.assertEqual(
-                orchestrator_cls.call_args.kwargs["run_tags"], ("1.1.0", "dev")
+                orchestrator_cls.call_args.kwargs["run_tags"], ("1.1.1", "dev")
             )
             self.assertEqual(orchestrator_cls.call_args.kwargs["run_label"], "players")
             self.assertIsNone(orchestrator_cls.call_args.kwargs["game_seed"])
@@ -355,7 +355,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
-            run_tags=("1.1.0", "dev"),
+            run_tags=("1.1.1", "dev"),
             run_label="mixed-players",
         )
 
@@ -364,14 +364,14 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(resolved.parent, Path("runs"))
         self.assertRegex(
             resolved.name,
-            r"^1\.1\.0-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^1\.1\.1-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_resolve_run_dir_includes_seed_when_configured(self) -> None:
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
-            run_tags=("1.1.0", "dev"),
+            run_tags=("1.1.1", "dev"),
             run_label="mixed-players",
             game_seed=12,
         )
@@ -381,7 +381,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(resolved.parent, Path("runs"))
         self.assertRegex(
             resolved.name,
-            r"^1\.1\.0-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^1\.1\.1-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_runner_uses_debug_reporter_when_requested(self) -> None:
@@ -666,7 +666,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     f'  "players_config_path": "{players_toml.resolve()}",\n'
                     '  "run_label": "players",\n'
                     '  "game_seed": 777,\n'
-                    '  "run_tags": ["1.1.0"]\n'
+                    '  "run_tags": ["1.1.1"]\n'
                     "}\n"
                 ),
             )
@@ -681,7 +681,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 players_config_path=players_toml.resolve(),
                 run_label="players",
                 game_seed=777,
-                run_tags=("1.1.0",),
+                run_tags=("1.1.1",),
             )
 
         self.assertIsNone(run_dir)
@@ -701,7 +701,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 f'  "players_config_path": "{players_toml.resolve()}",\n'
                 '  "run_label": "players",\n'
                 '  "game_seed": 777,\n'
-                '  "run_tags": ["1.1.0"]\n'
+                '  "run_tags": ["1.1.1"]\n'
                 "}\n"
             )
             _write_resume_artifacts(base_run_dir / "match-a", metadata_contents=metadata_contents)
@@ -714,7 +714,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     players_config_path=players_toml.resolve(),
                     run_label="players",
                     game_seed=777,
-                    run_tags=("1.1.0",),
+                    run_tags=("1.1.1",),
                 )
 
     def test_resolve_requested_run_dir_auto_resume_rejects_when_no_match(self) -> None:
@@ -734,7 +734,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     players_config_path=players_toml.resolve(),
                     run_label="players",
                     game_seed=777,
-                    run_tags=("1.1.0",),
+                    run_tags=("1.1.1",),
                 )
 
     def test_is_existing_run_directory_checks_artifact_markers(self) -> None:

@@ -371,6 +371,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="opening_strategy",
             )
         except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
@@ -384,6 +386,8 @@ class LLMPlayer:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
+                    player_id=observation.player_id,
+                    stage="opening_strategy",
                 )
             except RuntimeError:
                 self._append_prompt_trace_entry(
@@ -429,6 +433,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="turn_start",
             )
         except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
@@ -442,6 +448,8 @@ class LLMPlayer:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
+                    player_id=observation.player_id,
+                    stage="turn_start",
                 )
             except RuntimeError:
                 self._append_prompt_trace_entry(
@@ -488,6 +496,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="choose_action",
             )
         except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
@@ -501,6 +511,8 @@ class LLMPlayer:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
+                    player_id=observation.player_id,
+                    stage="choose_action",
                 )
             except RuntimeError:
                 if not self._should_salvage_invalid_response(trace_attempts):
@@ -543,6 +555,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="turn_end",
             )
         except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
@@ -556,6 +570,8 @@ class LLMPlayer:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
+                    player_id=observation.player_id,
+                    stage="turn_end",
                 )
             except RuntimeError:
                 self._append_prompt_trace_entry(
@@ -602,6 +618,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="reactive_action",
             )
         except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
@@ -615,6 +633,8 @@ class LLMPlayer:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
+                    player_id=observation.player_id,
+                    stage="reactive_action",
                 )
             except RuntimeError:
                 if not self._should_salvage_invalid_response(trace_attempts):
@@ -658,6 +678,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="trade_chat_open",
             )
         except RuntimeError:
             self._append_prompt_trace_entry(
@@ -691,6 +713,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="trade_chat_reply",
             )
         except RuntimeError:
             self._append_prompt_trace_entry(
@@ -727,6 +751,8 @@ class LLMPlayer:
             response_payload = self._complete_and_trace(
                 messages=messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage="trade_chat_owner_decision",
             )
         except RuntimeError:
             self._append_prompt_trace_entry(
@@ -1570,6 +1596,8 @@ class LLMPlayer:
             repaired_payload = self._complete_and_trace(
                 messages=repair_messages,
                 trace_attempts=trace_attempts,
+                player_id=observation.player_id,
+                stage=f"{stage}_repair",
             )
             repaired_decision = self._parse_action_decision(
                 parse_decision,
@@ -1652,6 +1680,8 @@ class LLMPlayer:
         *,
         messages: list[dict[str, object]],
         trace_attempts: list[PromptTraceAttempt],
+        player_id: str,
+        stage: str,
     ) -> dict[str, object]:
         last_error: RuntimeError | None = None
         for attempt_index in range(self.invalid_response_retries + 1):
@@ -1675,7 +1705,34 @@ class LLMPlayer:
                 )
                 raise
 
-            raw_response_text = self._extract_response_text(completion)
+            try:
+                raw_response_text = self._extract_response_text(
+                    completion,
+                    player_id=player_id,
+                    stage=stage,
+                )
+            except RuntimeError as exc:
+                trace_attempts.append(
+                    PromptTraceAttempt(
+                        messages=tuple(
+                            self._json_safe_message(message) for message in messages
+                        ),
+                        response=self._json_safe_object(
+                            {
+                                "error": {
+                                    "type": "invalid_response",
+                                    "message": str(exc),
+                                    "retry_attempt": attempt_index + 1,
+                                }
+                            }
+                        ),
+                        response_text=None,
+                    )
+                )
+                last_error = exc
+                if attempt_index < self.invalid_response_retries:
+                    continue
+                raise
             try:
                 response_payload = self._parse_response_json(
                     raw_response_text=raw_response_text,
@@ -1813,21 +1870,66 @@ class LLMPlayer:
             raise RuntimeError("Expected a JSON object while recording prompt traces.")
         return safe_payload
 
-    @staticmethod
-    def _extract_response_text(completion: dict[str, object]) -> str:
+    def _extract_response_text(
+        self,
+        completion: dict[str, object],
+        *,
+        player_id: str,
+        stage: str,
+    ) -> str:
         choices = completion.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise RuntimeError("LLM completion did not include any choices.")
+            raise RuntimeError(
+                self._completion_shape_error(
+                    player_id=player_id,
+                    stage=stage,
+                    detail="did not include any choices.",
+                )
+            )
         first_choice = choices[0]
         if not isinstance(first_choice, dict):
-            raise RuntimeError("LLM completion choice payload had an unexpected shape.")
+            raise RuntimeError(
+                self._completion_shape_error(
+                    player_id=player_id,
+                    stage=stage,
+                    detail=(
+                        "had a first choice payload with unexpected type "
+                        f"{type(first_choice).__name__}."
+                    ),
+                )
+            )
         message = first_choice.get("message")
         if not isinstance(message, dict):
-            raise RuntimeError("LLM completion did not include a message payload.")
+            raise RuntimeError(
+                self._completion_shape_error(
+                    player_id=player_id,
+                    stage=stage,
+                    detail="did not include a message payload.",
+                )
+            )
         content = message.get("content")
         if not isinstance(content, str):
-            raise RuntimeError("LLM completion message content must be a string.")
+            raise RuntimeError(
+                self._completion_shape_error(
+                    player_id=player_id,
+                    stage=stage,
+                    detail=f"returned non-string `message.content` ({type(content).__name__}).",
+                )
+            )
         return content
+
+    def _completion_shape_error(
+        self,
+        *,
+        player_id: str,
+        stage: str,
+        detail: str,
+    ) -> str:
+        return (
+            "LLM completion for "
+            f"player {player_id!r} using model {self.model!r} during stage {stage!r} "
+            f"{detail}"
+        )
 
     @staticmethod
     def _parse_response_json(

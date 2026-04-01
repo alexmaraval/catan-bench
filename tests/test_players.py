@@ -608,6 +608,50 @@ class LLMPlayerTests(unittest.TestCase):
             select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
         )
 
+    def test_trade_chat_reply_error_identifies_player_model_and_stage(self) -> None:
+        player = LLMPlayer(
+            client=StructuredCompletionClient(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": {"type": "text", "text": "{}"},
+                            }
+                        }
+                    ]
+                }
+            ),
+            model="openrouter/fake-model",
+            invalid_response_retries=0,
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="RED",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="reply",
+            attempt_index=1,
+            round_index=1,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"WOOD": 1}},
+            transcript=(),
+            requested_resources={"BRICK": 1},
+            other_player_ids=("BLUE",),
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "player 'RED'.*model 'openrouter/fake-model'.*stage 'trade_chat_reply'.*content.*dict",
+        ):
+            player.respond_trade_chat(observation)
+
     def test_llm_player_trade_chat_select_recovers_invalid_proposal_hint(self) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(

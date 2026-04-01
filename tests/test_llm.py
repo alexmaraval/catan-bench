@@ -246,6 +246,23 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
                     reasoning_effort="low",
                 )
 
+    def test_complete_rejects_openai_website_api_base_with_helpful_error(self) -> None:
+        client = OpenAICompatibleChatClient(
+            api_base="https://www.openai.com/completions/v1",
+            api_key_env="OPENAI_API_KEY",
+        )
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Invalid OpenAI `api_base`.*https://api.openai.com/v1",
+            ):
+                client.complete(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
     def test_complete_retries_retryable_http_errors(self) -> None:
         attempts: list[str] = []
 

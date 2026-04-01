@@ -361,11 +361,17 @@ class LLMPlayer:
         self.renderer = renderer or PromptRenderer()
         self._prompt_traces: deque[PromptTrace] = deque()
 
-    def plan_opening_strategy(
-        self, observation: OpeningStrategyObservation
-    ) -> OpeningStrategyResponse:
+    def _traced_llm_call(
+        self,
+        *,
+        observation,
+        stage: str,
+        build_messages: Callable,
+        compact_retry: bool = True,
+        salvage_on_error: bool = False,
+    ) -> tuple[dict[str, object], list[dict[str, object]], list[PromptTraceAttempt]]:
         trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_opening_strategy(observation)
+        messages = build_messages(observation)
         response_payload: dict[str, object] = {}
         try:
             response_payload = self._complete_and_trace(
@@ -373,278 +379,128 @@ class LLMPlayer:
                 trace_attempts=trace_attempts,
             )
         except LLMRequestTooLargeError as exc:
-            self._record_failed_attempt(
-                messages=messages,
-                trace_attempts=trace_attempts,
-                error_type="request_too_large",
-                error_message=str(exc),
-            )
-            messages = self._messages_for_opening_strategy(observation, compact=True)
-            try:
-                response_payload = self._complete_and_trace(
-                    messages=messages,
-                    trace_attempts=trace_attempts,
-                )
-            except RuntimeError:
-                self._append_prompt_trace_entry(
-                    player_id=observation.player_id,
-                    history_index=observation.history_index,
-                    turn_index=observation.turn_index,
-                    phase=observation.phase,
-                    decision_index=observation.decision_index,
-                    stage="opening_strategy",
-                    attempts=trace_attempts,
-                )
+            if not compact_retry:
                 raise
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="opening_strategy",
-                attempts=trace_attempts,
-            )
-            raise
-        response = OpeningStrategyResponse(
-            long_term=self._coerce_memory_field(response_payload, "long_term")
-        )
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="opening_strategy",
-            attempts=trace_attempts,
-        )
-        return response
-
-    def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_turn_start(observation)
-        response_payload: dict[str, object] = {}
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except LLMRequestTooLargeError as exc:
             self._record_failed_attempt(
                 messages=messages,
                 trace_attempts=trace_attempts,
                 error_type="request_too_large",
                 error_message=str(exc),
             )
-            messages = self._messages_for_turn_start(observation, compact=True)
+            messages = build_messages(observation, compact=True)
             try:
                 response_payload = self._complete_and_trace(
                     messages=messages,
                     trace_attempts=trace_attempts,
                 )
             except RuntimeError:
-                self._append_prompt_trace_entry(
-                    player_id=observation.player_id,
-                    history_index=observation.history_index,
-                    turn_index=observation.turn_index,
-                    phase=observation.phase,
-                    decision_index=observation.decision_index,
-                    stage="turn_start",
-                    attempts=trace_attempts,
-                )
-                raise
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="turn_start",
-                attempts=trace_attempts,
-            )
-            raise
-        response = TurnStartResponse(
-            short_term=self._coerce_memory_field(response_payload, "short_term"),
-            public_chat=self._coerce_public_chat_draft(response_payload),
-        )
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="turn_start",
-            attempts=trace_attempts,
-        )
-        return response
-
-    def choose_action(self, observation: ActionObservation) -> ActionDecision:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_action(observation)
-        response_payload: dict[str, object] = {}
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except LLMRequestTooLargeError as exc:
-            self._record_failed_attempt(
-                messages=messages,
-                trace_attempts=trace_attempts,
-                error_type="request_too_large",
-                error_message=str(exc),
-            )
-            messages = self._messages_for_action(observation, compact=True)
-            try:
-                response_payload = self._complete_and_trace(
-                    messages=messages,
-                    trace_attempts=trace_attempts,
-                )
-            except RuntimeError:
-                if not self._should_salvage_invalid_response(trace_attempts):
+                if not (salvage_on_error and self._should_salvage_invalid_response(trace_attempts)):
                     self._append_prompt_trace_entry(
                         player_id=observation.player_id,
                         history_index=observation.history_index,
                         turn_index=observation.turn_index,
                         phase=observation.phase,
                         decision_index=observation.decision_index,
-                        stage="choose_action",
+                        stage=stage,
                         attempts=trace_attempts,
                     )
                     raise
         except RuntimeError:
-            if not self._should_salvage_invalid_response(trace_attempts):
+            if not (salvage_on_error and self._should_salvage_invalid_response(trace_attempts)):
                 self._append_prompt_trace_entry(
                     player_id=observation.player_id,
                     history_index=observation.history_index,
                     turn_index=observation.turn_index,
                     phase=observation.phase,
                     decision_index=observation.decision_index,
-                    stage="choose_action",
+                    stage=stage,
                     attempts=trace_attempts,
                 )
                 raise
+        return response_payload, messages, trace_attempts
+
+    def _traced_call_and_record(
+        self,
+        *,
+        observation,
+        stage: str,
+        build_messages: Callable,
+        compact_retry: bool = True,
+    ) -> dict[str, object]:
+        payload, _, attempts = self._traced_llm_call(
+            observation=observation,
+            stage=stage,
+            build_messages=build_messages,
+            compact_retry=compact_retry,
+        )
+        self._append_prompt_trace_entry(
+            player_id=observation.player_id,
+            history_index=observation.history_index,
+            turn_index=observation.turn_index,
+            phase=observation.phase,
+            decision_index=observation.decision_index,
+            stage=stage,
+            attempts=attempts,
+        )
+        return payload
+
+    def plan_opening_strategy(
+        self, observation: OpeningStrategyObservation
+    ) -> OpeningStrategyResponse:
+        payload = self._traced_call_and_record(
+            observation=observation, stage="opening_strategy",
+            build_messages=self._messages_for_opening_strategy,
+        )
+        return OpeningStrategyResponse(
+            long_term=self._coerce_memory_field(payload, "long_term")
+        )
+
+    def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
+        payload = self._traced_call_and_record(
+            observation=observation, stage="turn_start",
+            build_messages=self._messages_for_turn_start,
+        )
+        return TurnStartResponse(
+            short_term=self._coerce_memory_field(payload, "short_term"),
+            public_chat=self._coerce_public_chat_draft(payload),
+        )
+
+    def choose_action(self, observation: ActionObservation) -> ActionDecision:
+        payload, messages, attempts = self._traced_llm_call(
+            observation=observation, stage="choose_action",
+            build_messages=self._messages_for_action,
+            salvage_on_error=True,
+        )
         return self._resolve_action_decision(
             observation=observation,
             initial_messages=messages,
-            initial_payload=response_payload,
-            trace_attempts=trace_attempts,
+            initial_payload=payload,
+            trace_attempts=attempts,
             stage="choose_action",
             parse_decision=self._action_decision_from_payload,
         )
 
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_turn_end(observation)
-        response_payload: dict[str, object] = {}
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except LLMRequestTooLargeError as exc:
-            self._record_failed_attempt(
-                messages=messages,
-                trace_attempts=trace_attempts,
-                error_type="request_too_large",
-                error_message=str(exc),
-            )
-            messages = self._messages_for_turn_end(observation, compact=True)
-            try:
-                response_payload = self._complete_and_trace(
-                    messages=messages,
-                    trace_attempts=trace_attempts,
-                )
-            except RuntimeError:
-                self._append_prompt_trace_entry(
-                    player_id=observation.player_id,
-                    history_index=observation.history_index,
-                    turn_index=observation.turn_index,
-                    phase=observation.phase,
-                    decision_index=observation.decision_index,
-                    stage="turn_end",
-                    attempts=trace_attempts,
-                )
-                raise
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="turn_end",
-                attempts=trace_attempts,
-            )
-            raise
-        response = TurnEndResponse(
-            long_term=self._coerce_memory_field(response_payload, "long_term"),
-            public_chat=self._coerce_public_chat_draft(response_payload),
+        payload = self._traced_call_and_record(
+            observation=observation, stage="turn_end",
+            build_messages=self._messages_for_turn_end,
         )
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="turn_end",
-            attempts=trace_attempts,
+        return TurnEndResponse(
+            long_term=self._coerce_memory_field(payload, "long_term"),
+            public_chat=self._coerce_public_chat_draft(payload),
         )
-        return response
 
     def respond_reactive(self, observation: ReactiveObservation) -> ActionDecision:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_reactive(observation)
-        response_payload: dict[str, object] = {}
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except LLMRequestTooLargeError as exc:
-            self._record_failed_attempt(
-                messages=messages,
-                trace_attempts=trace_attempts,
-                error_type="request_too_large",
-                error_message=str(exc),
-            )
-            messages = self._messages_for_reactive(observation, compact=True)
-            try:
-                response_payload = self._complete_and_trace(
-                    messages=messages,
-                    trace_attempts=trace_attempts,
-                )
-            except RuntimeError:
-                if not self._should_salvage_invalid_response(trace_attempts):
-                    self._append_prompt_trace_entry(
-                        player_id=observation.player_id,
-                        history_index=observation.history_index,
-                        turn_index=observation.turn_index,
-                        phase=observation.phase,
-                        decision_index=observation.decision_index,
-                        stage="reactive_action",
-                        attempts=trace_attempts,
-                    )
-                    raise
-        except RuntimeError:
-            if not self._should_salvage_invalid_response(trace_attempts):
-                self._append_prompt_trace_entry(
-                    player_id=observation.player_id,
-                    history_index=observation.history_index,
-                    turn_index=observation.turn_index,
-                    phase=observation.phase,
-                    decision_index=observation.decision_index,
-                    stage="reactive_action",
-                    attempts=trace_attempts,
-                )
-                raise
+        payload, messages, attempts = self._traced_llm_call(
+            observation=observation, stage="reactive_action",
+            build_messages=self._messages_for_reactive,
+            salvage_on_error=True,
+        )
         return self._resolve_action_decision(
             observation=observation,
             initial_messages=messages,
-            initial_payload=response_payload,
-            trace_attempts=trace_attempts,
+            initial_payload=payload,
+            trace_attempts=attempts,
             stage="reactive_action",
             parse_decision=self._reactive_decision_from_payload,
         )
@@ -652,107 +508,38 @@ class LLMPlayer:
     def open_trade_chat(
         self, observation: TradeChatObservation
     ) -> TradeChatOpenResponse:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_trade_chat_open(observation)
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="trade_chat_open",
-                attempts=trace_attempts,
-            )
-            raise
-        response = self._trade_chat_open_response_from_payload(response_payload)
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="trade_chat_open",
-            attempts=trace_attempts,
+        payload = self._traced_call_and_record(
+            observation=observation, stage="trade_chat_open",
+            build_messages=self._messages_for_trade_chat_open,
+            compact_retry=False,
         )
-        return response
+        return self._trade_chat_open_response_from_payload(payload)
 
     def respond_trade_chat(
         self, observation: TradeChatObservation
     ) -> TradeChatReplyResponse:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_trade_chat_reply(observation)
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="trade_chat_reply",
-                attempts=trace_attempts,
-            )
-            raise
-        response = self._trade_chat_reply_response_from_payload(
+        payload = self._traced_call_and_record(
+            observation=observation, stage="trade_chat_reply",
+            build_messages=self._messages_for_trade_chat_reply,
+            compact_retry=False,
+        )
+        return self._trade_chat_reply_response_from_payload(
             observation=observation,
-            response_payload=response_payload,
+            response_payload=payload,
         )
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="trade_chat_reply",
-            attempts=trace_attempts,
-        )
-        return response
 
     def decide_trade_chat(
         self, observation: TradeChatObservation
     ) -> TradeChatOwnerDecisionResponse:
-        trace_attempts: list[PromptTraceAttempt] = []
-        messages = self._messages_for_trade_chat_owner_decision(observation)
-        try:
-            response_payload = self._complete_and_trace(
-                messages=messages,
-                trace_attempts=trace_attempts,
-            )
-        except RuntimeError:
-            self._append_prompt_trace_entry(
-                player_id=observation.player_id,
-                history_index=observation.history_index,
-                turn_index=observation.turn_index,
-                phase=observation.phase,
-                decision_index=observation.decision_index,
-                stage="trade_chat_owner_decision",
-                attempts=trace_attempts,
-            )
-            raise
-        response = self._trade_chat_owner_decision_response_from_payload(
+        payload = self._traced_call_and_record(
+            observation=observation, stage="trade_chat_owner_decision",
+            build_messages=self._messages_for_trade_chat_owner_decision,
+            compact_retry=False,
+        )
+        return self._trade_chat_owner_decision_response_from_payload(
             observation=observation,
-            response_payload=response_payload,
+            response_payload=payload,
         )
-        self._append_prompt_trace_entry(
-            player_id=observation.player_id,
-            history_index=observation.history_index,
-            turn_index=observation.turn_index,
-            phase=observation.phase,
-            decision_index=observation.decision_index,
-            stage="trade_chat_owner_decision",
-            attempts=trace_attempts,
-        )
-        return response
 
     def select_trade_chat_offer(
         self, observation: TradeChatObservation

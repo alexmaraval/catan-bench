@@ -8,19 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from catan_bench.benchmark import collect_game_records, main as benchmark_main
-
-
-def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(row) + "\n" for row in rows),
-        encoding="utf-8",
-    )
+from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
 
 
 class BenchmarkCliTests(unittest.TestCase):

@@ -1700,7 +1700,7 @@ class GameOrchestrator:
                 payload={
                     "owner_player_id": decision.acting_player_id,
                     "requested_resources": requested_resources,
-                    "message": self._truncate_chat_message(open_response.message),
+                    "message": self._truncate_message(open_response.message, self.trading_chat_message_chars),
                     "attempt_index": attempt_index,
                 },
                 turn_index=decision.turn_index,
@@ -1757,7 +1757,7 @@ class GameOrchestrator:
                             ),
                             player_id=other_player_id,
                             round_index=round_index,
-                            message=self._truncate_chat_message(reply.message),
+                            message=self._truncate_message(reply.message, self.trading_chat_message_chars),
                             owner_gives=reply.owner_gives,
                             owner_gets=reply.owner_gets,
                         )
@@ -1874,7 +1874,7 @@ class GameOrchestrator:
                         "owner_player_id": decision.acting_player_id,
                         "attempt_index": attempt_index,
                         "round_index": round_index,
-                        "message": self._truncate_chat_message(owner_decision.message),
+                        "message": self._truncate_message(owner_decision.message, self.trading_chat_message_chars),
                     },
                     turn_index=decision.turn_index,
                     phase=decision.phase,
@@ -1908,7 +1908,7 @@ class GameOrchestrator:
                     "selected_proposal_id": selected_proposal.proposal_id,
                     "offer": selected_proposal.owner_gives,
                     "request": selected_proposal.owner_gets,
-                    "message": self._truncate_chat_message(owner_decision.message),
+                    "message": self._truncate_message(owner_decision.message, self.trading_chat_message_chars),
                     "attempt_index": attempt_index,
                     "round_index": round_index,
                 },
@@ -2026,7 +2026,7 @@ class GameOrchestrator:
         self._append_player_prompt_traces(player)
         return TradeChatOpenResponse(
             open_chat=True,
-            message=self._truncate_chat_message(response.message),
+            message=self._truncate_message(response.message, self.trading_chat_message_chars),
             requested_resources=(
                 self._normalize_resource_map(response.requested_resources)
                 if response.requested_resources
@@ -2069,7 +2069,7 @@ class GameOrchestrator:
         response = respond_trade_chat(observation)
         self._append_player_prompt_traces(player)
         return TradeChatReplyResponse(
-            message=self._truncate_chat_message(response.message),
+            message=self._truncate_message(response.message, self.trading_chat_message_chars),
             owner_gives=self._normalize_resource_map(response.owner_gives),
             owner_gets=self._normalize_resource_map(response.owner_gets),
             reasoning=response.reasoning,
@@ -2131,7 +2131,7 @@ class GameOrchestrator:
         return TradeChatOwnerDecisionResponse(
             decision=decision_value,
             selected_proposal_id=selected_proposal_id,
-            message=self._truncate_chat_message(getattr(response, "message", None)),
+            message=self._truncate_message(getattr(response, "message", None), self.trading_chat_message_chars),
             reasoning=getattr(response, "reasoning", None),
         )
 
@@ -2162,8 +2162,9 @@ class GameOrchestrator:
         public_chat = getattr(response, "public_chat", None)
         if public_chat is None:
             return None
-        message = self._truncate_public_chat_message(
-            getattr(public_chat, "message", None)
+        message = self._truncate_message(
+            getattr(public_chat, "message", None),
+            self.public_chat_message_chars,
         )
         if message is None:
             return None
@@ -2218,7 +2219,7 @@ class GameOrchestrator:
             "round_index": round_index,
         }
         if message is not None:
-            payload["message"] = self._truncate_chat_message(message)
+            payload["message"] = self._truncate_message(message, self.trading_chat_message_chars)
         if proposal is not None and proposal.owner_gives and proposal.owner_gets:
             payload["proposal_id"] = proposal.proposal_id
             payload["offer"] = dict(proposal.owner_gives)
@@ -2369,21 +2370,12 @@ class GameOrchestrator:
             result[resource] = amount
         return result
 
-    def _truncate_chat_message(self, message: str | None) -> str | None:
+    @staticmethod
+    def _truncate_message(message: str | None, max_chars: int) -> str | None:
         if message is None:
             return None
         stripped = message.strip()
-        if not stripped:
-            return None
-        return stripped[: self.trading_chat_message_chars]
-
-    def _truncate_public_chat_message(self, message: str | None) -> str | None:
-        if message is None:
-            return None
-        stripped = message.strip()
-        if not stripped:
-            return None
-        return stripped[: self.public_chat_message_chars]
+        return stripped[:max_chars] if stripped else None
 
     def _normalize_public_chat_target(
         self,

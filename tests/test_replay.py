@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 
 from catan_bench.replay import build_replay_timeline, export_replay_html
+from conftest import write_test_jsonl
+
+_write_jsonl = partial(write_test_jsonl, sort_keys=True)
 
 
 class ReplayTests(unittest.TestCase):
@@ -59,11 +63,7 @@ class ReplayTests(unittest.TestCase):
 
     @classmethod
     def _write_jsonl(cls, path: Path, payloads: list[dict]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "".join(json.dumps(payload, sort_keys=True) + "\n" for payload in payloads),
-            encoding="utf-8",
-        )
+        _write_jsonl(path, payloads)
 
 
 if __name__ == "__main__":

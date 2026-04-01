@@ -58,7 +58,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(game_config.engine, "catanatron")
         self.assertIsNone(game_config.seed)
         self.assertEqual(game_config.prompt_history_limit, 30)
-        self.assertEqual(game_config.run_dir, Path("runs/desloppify"))
+        self.assertEqual(game_config.run_dir, Path("runs/test"))
         self.assertEqual(game_config.run_tags, ("1.0.0",))
         self.assertIn(
             f"The first player to reach {game_config.vps_to_win} victory points wins.",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -467,16 +468,13 @@ def compute_head_to_head(
 
     Returns ``{model_a: {model_b: {"wins": W, "losses": L, "draws": D}}}``.
     """
-    h2h: dict[str, dict[str, dict[str, int]]] = {}
+    _record = lambda: {"wins": 0, "losses": 0, "draws": 0}
+    h2h: defaultdict[str, defaultdict[str, dict[str, int]]] = defaultdict(
+        lambda: defaultdict(_record)
+    )
 
     for record in games:
-        outcomes = _generate_pairwise_outcomes(record)
-        for model_a, model_b, score_a in outcomes:
-            for m in (model_a, model_b):
-                h2h.setdefault(m, {})
-            h2h[model_a].setdefault(model_b, {"wins": 0, "losses": 0, "draws": 0})
-            h2h[model_b].setdefault(model_a, {"wins": 0, "losses": 0, "draws": 0})
-
+        for model_a, model_b, score_a in _generate_pairwise_outcomes(record):
             if score_a == 1.0:
                 h2h[model_a][model_b]["wins"] += 1
                 h2h[model_b][model_a]["losses"] += 1
@@ -487,7 +485,7 @@ def compute_head_to_head(
                 h2h[model_a][model_b]["draws"] += 1
                 h2h[model_b][model_a]["draws"] += 1
 
-    return h2h
+    return {k: dict(v) for k, v in h2h.items()}
 
 
 def _benchmark_summary_payload(

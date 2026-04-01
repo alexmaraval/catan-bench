@@ -99,14 +99,7 @@ def _prompt_trace(player_id: str, *, attempts: int = 1, turn: int = 0) -> Prompt
     )
 
 
-def _write_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
-
-
-def _write_jsonl(path: Path, records: list) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
 
 
 # ── Game summary tests ────────────────────────────────────────────────────────

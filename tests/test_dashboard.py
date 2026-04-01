@@ -4,7 +4,13 @@ import json
 import os
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
+
+from conftest import write_test_json, write_test_jsonl
+
+_write_json = partial(write_test_json, indent=2, sort_keys=True)
+_write_jsonl = partial(write_test_jsonl, sort_keys=True)
 
 from catan_bench.dashboard import (
     DashboardSnapshot,
@@ -887,18 +893,11 @@ class DashboardTests(unittest.TestCase):
 
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        _write_json(path, payload)
 
     @classmethod
     def _write_jsonl(cls, path: Path, payloads: list[dict]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "".join(json.dumps(payload, sort_keys=True) + "\n" for payload in payloads),
-            encoding="utf-8",
-        )
+        _write_jsonl(path, payloads)
 
 
 if __name__ == "__main__":

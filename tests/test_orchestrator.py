@@ -23,10 +23,13 @@ from catan_bench import (
 )
 
 
-class MockTurnEngine:
+class BaseMockEngine:
+    _game_id: str = "mock-game"
+    _default_player_ids: tuple[str, ...] = ("RED", "BLUE")
+    _default_result: dict = {"winner_ids": ["RED"], "num_turns": 1}
+
     def __init__(self) -> None:
-        self._game_id = "mock-game"
-        self._player_ids = ("RED", "BLUE")
+        self._player_ids = self._default_player_ids
         self._step = 0
         self._terminal = False
 
@@ -35,11 +38,17 @@ class MockTurnEngine:
         return self._game_id
 
     @property
-    def player_ids(self) -> tuple[str, str]:
+    def player_ids(self) -> tuple[str, ...]:
         return self._player_ids
 
     def is_terminal(self) -> bool:
         return self._terminal
+
+    def result(self):
+        return dict(self._default_result)
+
+
+class MockTurnEngine(BaseMockEngine):
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -181,27 +190,11 @@ class MockTurnEngine:
             case _:
                 raise RuntimeError("Unexpected action.")
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
 
-
-class MockResolveActionValueErrorEngine:
-    def __init__(self) -> None:
-        self._game_id = "mock-resolve-error-game"
-        self._player_ids = ("ORANGE",)
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, ...]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockResolveActionValueErrorEngine(BaseMockEngine):
+    _game_id = "mock-resolve-error-game"
+    _default_player_ids = ("ORANGE",)
+    _default_result = {"winner_ids": ["ORANGE"], "num_turns": 133}
 
     def current_decision(self) -> DecisionPoint:
         if self._step == 0:
@@ -262,27 +255,9 @@ class MockResolveActionValueErrorEngine:
             result_metadata={"winner_ids": ["ORANGE"], "num_turns": 133},
         )
 
-    def result(self):
-        return {"winner_ids": ["ORANGE"], "num_turns": 133}
 
-
-class MockTradeChatEngine:
-    def __init__(self) -> None:
-        self._game_id = "trade-chat-game"
-        self._player_ids = ("RED", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockTradeChatEngine(BaseMockEngine):
+    _game_id = "trade-chat-game"
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -426,14 +401,9 @@ class MockTradeChatEngine:
             case _:
                 raise RuntimeError("Unexpected action.")
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
-
 
 class MockTradeChatResumeTimeoutEngine(MockTradeChatEngine):
-    def __init__(self) -> None:
-        super().__init__()
-        self._game_id = "trade-chat-resume-timeout-game"
+    _game_id = "trade-chat-resume-timeout-game"
 
     def apply_action(self, action: Action) -> TransitionResult:
         if self._step == 1 and action.action_type == "END_TURN":
@@ -456,23 +426,8 @@ class MockTradeChatResumeTimeoutEngine(MockTradeChatEngine):
         return super().apply_action(action)
 
 
-class MockTradeChatInvalidSelectionEngine:
-    def __init__(self) -> None:
-        self._game_id = "trade-chat-invalid-selection-game"
-        self._player_ids = ("RED", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockTradeChatInvalidSelectionEngine(BaseMockEngine):
+    _game_id = "trade-chat-invalid-selection-game"
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -610,27 +565,9 @@ class MockTradeChatInvalidSelectionEngine:
             case _:
                 raise RuntimeError("Unexpected action.")
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
 
-
-class MockTradeChatInsufficientOwnerResourcesEngine:
-    def __init__(self) -> None:
-        self._game_id = "trade-chat-insufficient-owner-resources-game"
-        self._player_ids = ("RED", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockTradeChatInsufficientOwnerResourcesEngine(BaseMockEngine):
+    _game_id = "trade-chat-insufficient-owner-resources-game"
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -717,27 +654,10 @@ class MockTradeChatInsufficientOwnerResourcesEngine:
             case _:
                 raise RuntimeError("Unexpected action.")
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
 
-
-class MockMultiEventEngine:
-    def __init__(self) -> None:
-        self._game_id = "multi-event-game"
-        self._player_ids = ("RED",)
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, ...]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockMultiEventEngine(BaseMockEngine):
+    _game_id = "multi-event-game"
+    _default_player_ids = ("RED",)
 
     def current_decision(self) -> DecisionPoint:
         if self._step == 0:
@@ -792,31 +712,15 @@ class MockMultiEventEngine:
             result_metadata={"winner_ids": ["RED"], "num_turns": 1},
         )
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
 
-
-class MockCounterOfferEngine:
-    def __init__(self) -> None:
-        self._game_id = "counter-offer-game"
-        self._player_ids = ("WHITE", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
+class MockCounterOfferEngine(BaseMockEngine):
+    _game_id = "counter-offer-game"
+    _default_player_ids = ("WHITE", "BLUE")
+    _default_result = {"winner_ids": ["WHITE"], "num_turns": 1}
 
     @property
     def turn_owner_id(self) -> str:
         return "WHITE"
-
-    def is_terminal(self) -> bool:
-        return self._terminal
 
     def current_decision(self) -> DecisionPoint:
         if self._step == 0:
@@ -887,31 +791,12 @@ class MockCounterOfferEngine:
             result_metadata={"winner_ids": ["WHITE"], "num_turns": 1},
         )
 
-    def result(self):
-        return {"winner_ids": ["WHITE"], "num_turns": 1}
-
-
-class MockRepeatRejectedTradeEngine:
-    def __init__(self) -> None:
-        self._game_id = "repeat-rejected-trade-game"
-        self._player_ids = ("RED", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
+class MockRepeatRejectedTradeEngine(BaseMockEngine):
+    _game_id = "repeat-rejected-trade-game"
 
     @property
     def turn_owner_id(self) -> str:
         return "RED"
-
-    def is_terminal(self) -> bool:
-        return self._terminal
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -1056,14 +941,8 @@ class MockRepeatRejectedTradeEngine:
             case _:
                 raise RuntimeError("Unexpected action.")
 
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
-
-
 class MockRepeatAfterCounterTradeEngine(MockRepeatRejectedTradeEngine):
-    def __init__(self) -> None:
-        super().__init__()
-        self._game_id = "repeat-after-counter-trade-game"
+    _game_id = "repeat-after-counter-trade-game"
 
     def current_decision(self) -> DecisionPoint:
         match self._step:
@@ -1087,27 +966,14 @@ class MockRepeatAfterCounterTradeEngine(MockRepeatRejectedTradeEngine):
                 return super().current_decision()
 
 
-class MockSelfTradeResponseEngine:
-    def __init__(self) -> None:
-        self._game_id = "self-trade-response-game"
-        self._player_ids = ("BLUE", "WHITE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
+class MockSelfTradeResponseEngine(BaseMockEngine):
+    _game_id = "self-trade-response-game"
+    _default_player_ids = ("BLUE", "WHITE")
+    _default_result = {"winner_ids": ["WHITE"], "num_turns": 1}
 
     @property
     def turn_owner_id(self) -> str:
         return "BLUE"
-
-    def is_terminal(self) -> bool:
-        return self._terminal
 
     def current_decision(self) -> DecisionPoint:
         if self._step == 0:
@@ -1173,27 +1039,8 @@ class MockSelfTradeResponseEngine:
             result_metadata={"winner_ids": ["WHITE"], "num_turns": 1},
         )
 
-    def result(self):
-        return {"winner_ids": ["WHITE"], "num_turns": 1}
-
-
-class MockPublicChatEngine:
-    def __init__(self) -> None:
-        self._game_id = "mock-public-chat-game"
-        self._player_ids = ("RED", "BLUE")
-        self._step = 0
-        self._terminal = False
-
-    @property
-    def game_id(self) -> str:
-        return self._game_id
-
-    @property
-    def player_ids(self) -> tuple[str, str]:
-        return self._player_ids
-
-    def is_terminal(self) -> bool:
-        return self._terminal
+class MockPublicChatEngine(BaseMockEngine):
+    _game_id = "mock-public-chat-game"
 
     def current_decision(self) -> DecisionPoint:
         if self._step == 0:
@@ -1267,9 +1114,6 @@ class MockPublicChatEngine:
                 result_metadata={"winner_ids": ["RED"], "num_turns": 1},
             )
         raise RuntimeError("Unexpected action.")
-
-    def result(self):
-        return {"winner_ids": ["RED"], "num_turns": 1}
 
 
 class GameOrchestratorTests(unittest.TestCase):

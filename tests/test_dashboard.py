@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
@@ -8,9 +7,6 @@ from functools import partial
 from pathlib import Path
 
 from conftest import write_test_json, write_test_jsonl
-
-_write_json = partial(write_test_json, indent=2, sort_keys=True)
-_write_jsonl = partial(write_test_jsonl, sort_keys=True)
 
 from catan_bench.dashboard import (
     DashboardSnapshot,
@@ -31,6 +27,9 @@ from catan_bench.dashboard import (
     _turn_index_for_cursor,
 )
 from catan_bench.schemas import Event, PromptTrace, PublicStateSnapshot
+
+_write_json = partial(write_test_json, indent=2, sort_keys=True)
+_write_jsonl = partial(write_test_jsonl, sort_keys=True)
 
 
 class DashboardTests(unittest.TestCase):

@@ -9,6 +9,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
+
 from catan_bench.analysis import (
     analyze_game,
     compute_market_analysis,
@@ -97,9 +99,6 @@ def _prompt_trace(player_id: str, *, attempts: int = 1, turn: int = 0) -> Prompt
         temperature=0.5,
         attempts=tuple(dummy_attempt for _ in range(attempts)),
     )
-
-
-from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
 
 
 # ── Game summary tests ────────────────────────────────────────────────────────

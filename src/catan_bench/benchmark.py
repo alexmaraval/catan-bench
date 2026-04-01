@@ -468,7 +468,9 @@ def compute_head_to_head(
 
     Returns ``{model_a: {model_b: {"wins": W, "losses": L, "draws": D}}}``.
     """
-    _record = lambda: {"wins": 0, "losses": 0, "draws": 0}
+    def _record() -> dict[str, int]:
+        return {"wins": 0, "losses": 0, "draws": 0}
+
     h2h: defaultdict[str, defaultdict[str, dict[str, int]]] = defaultdict(
         lambda: defaultdict(_record)
     )

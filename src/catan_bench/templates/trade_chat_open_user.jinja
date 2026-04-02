@@ -8,14 +8,9 @@ If a domestic deal could beat your bank or port rate, open the room first. Marit
 
 {% include "partials/your_hand.jinja" %}
 
-{% if payload.public_state.players %}
-### Standings
-{% for pid, info in payload.public_state.players.items() %}
-- {{ fmt_player_standing(pid, info) }}
-{% endfor %}
-Public Longest Road status: {{ fmt_longest_road_status(payload.public_state.players, payload.player_id) }}
-Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.players, payload.player_id) }}
-{% endif %}
+{% include "partials/standings.jinja" %}
+
+{% include "partials/board_context_rich.jinja" %}
 
 ### Trade situation
 Current request draft: {{ fmt_resources(payload.requested_resources) }}

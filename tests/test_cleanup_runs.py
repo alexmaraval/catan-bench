@@ -69,8 +69,8 @@ class CleanupRunsTests(unittest.TestCase):
     def test_discover_incomplete_run_directories_walks_version_subdirectories(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
-            unfinished = base / "1.1.1" / "tags-unstable-run"
-            finished = base / "1.1.1" / "tags-finished-run"
+            unfinished = base / "1.2.0" / "tags-unstable-run"
+            finished = base / "1.2.0" / "tags-finished-run"
             self._make_run_dir(unfinished, finished=False)
             self._make_run_dir(finished, finished=True)
 

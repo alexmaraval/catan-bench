@@ -5,14 +5,9 @@ Review the quotes and choose exactly one player to trade with, or no deal.
 
 {% include "partials/your_hand.jinja" %}
 
-{% if payload.public_state.players %}
-### Standings
-{% for pid, info in payload.public_state.players.items() %}
-- {{ fmt_player_standing(pid, info) }}
-{% endfor %}
-Public Longest Road status: {{ fmt_longest_road_status(payload.public_state.players, payload.player_id) }}
-Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.players, payload.player_id) }}
-{% endif %}
+{% include "partials/standings.jinja" %}
+
+{% include "partials/board_context_rich.jinja" %}
 
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 

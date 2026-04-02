@@ -1,0 +1,57 @@
+{% if payload.public_state.board %}
+### Board
+{% set board = payload.public_state.board %}
+{% set net = board.your_network %}
+Robber: {{ fmt_robber_status(board) }}
+
+{% if net %}
+Your position:
+Tiles: {{ net.adjacent_tiles | join(", ") or "none" }}
+{% if net.buildings %}
+Buildings:
+{% for b in net.buildings %}
+  {{ fmt_board_building(b) }}
+{% endfor %}
+{% else %}
+Buildings: none
+{% endif %}
+Roads built: {{ net.roads | length }}
+{% endif %}
+
+{% if board.other_player_networks %}
+Other players on board:
+{% for other in board.other_player_networks %}
+- {{ fmt_other_player_network(other) }}
+{% endfor %}
+{% endif %}
+{% if board.settlement_candidates %}
+Settlement candidates:
+{% for c in board.settlement_candidates %}
+  [{{ c.action_index }}] node {{ c.node_id }} — {{ c.adjacent_tiles | join(", ") }}{% if c.ports %}  [port: {{ c.ports | join(", ") }}]{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if board.city_candidates %}
+City upgrade candidates:
+{% for c in board.city_candidates %}
+  [{{ c.action_index }}] node {{ c.node_id }} ({{ c.adjacent_tiles | join(", ") }})
+{% endfor %}
+{% endif %}
+{% if board.road_candidates %}
+Road candidates:
+{% for r in board.road_candidates %}
+  [{{ r.action_index }}] edge {{ r.edge }}{% if r.adjacent_tiles %} — {{ r.adjacent_tiles | join(", ") }}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if board.robber_targets %}
+Robber targets:
+{% for t in board.robber_targets %}
+  {{ t.coordinate }}{% if t.victims %}  (can steal from: {{ t.victims | join(", ") }}){% endif %}
+
+{% endfor %}
+{% endif %}
+{% if payload.public_state.bank %}
+Bank: {{ fmt_resources(payload.public_state.bank.resources) }}
+{% endif %}
+{% endif %}

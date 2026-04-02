@@ -139,7 +139,31 @@ def fmt_memory(value: object) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-def fmt_player_standing(player_id: object, info: object) -> str:
+def _fmt_public_tile_summary(tile: object) -> str | None:
+    if not isinstance(tile, dict):
+        return None
+    tile_type = str(tile.get("type", "UNKNOWN"))
+    if tile_type == "RESOURCE_TILE":
+        resource = tile.get("resource")
+        number = tile.get("number")
+        if resource is None or number is None:
+            return None
+        return f"{resource}@{int(number)}"
+    if tile_type == "DESERT":
+        return "DESERT"
+    if tile_type == "PORT":
+        resource = tile.get("resource")
+        return f"PORT:{'ANY' if resource is None else resource}"
+    if tile_type == "WATER":
+        return "WATER"
+    return tile_type
+
+
+def fmt_player_standing(
+    player_id: object,
+    info: object,
+    viewer_player_id: object | None = None,
+) -> str:
     if not isinstance(info, dict):
         return str(player_id)
     vp = info.get("vp", info.get("visible_victory_points", "?"))
@@ -152,8 +176,11 @@ def fmt_player_standing(player_id: object, info: object) -> str:
         "settlements_left", info.get("settlements_available", "?")
     )
     cities_left = info.get("cities_left", info.get("cities_available", "?"))
+    player_label = str(player_id)
+    if player_id == viewer_player_id:
+        player_label = f"{player_label} [this is you]"
     parts = [
-        f"{player_id}: {vp}VP",
+        f"{player_label}: {vp}VP",
         f"{resource_cards} resource {resource_card_noun}",
         f"{development_cards} unused development {development_card_noun}",
         f"pieces left {roads_left}R/{settlements_left}S/{cities_left}C",
@@ -209,6 +236,79 @@ def fmt_largest_army_status(players: object, player_id: object) -> str:
         f"No one currently holds Largest Army. Your played knights count is {own_knights}. "
         "Unused knights in hand do not count yet."
     )
+
+
+def fmt_robber_status(board: object) -> str:
+    if not isinstance(board, dict):
+        return "?"
+    coordinate = board.get("robber_coordinate")
+    coordinate_text = str(coordinate) if coordinate is not None else "?"
+    tile_summary = board.get("robber_tile_summary")
+    if not isinstance(tile_summary, str) or not tile_summary:
+        tiles = board.get("tiles")
+        if (
+            isinstance(coordinate, (list, tuple))
+            and len(coordinate) == 3
+            and isinstance(tiles, list)
+        ):
+            target = tuple(int(axis) for axis in coordinate)
+            for tile_entry in tiles:
+                if not isinstance(tile_entry, dict):
+                    continue
+                entry_coordinate = tile_entry.get("coordinate")
+                if not (
+                    isinstance(entry_coordinate, (list, tuple))
+                    and len(entry_coordinate) == 3
+                ):
+                    continue
+                if tuple(int(axis) for axis in entry_coordinate) != target:
+                    continue
+                tile = tile_entry.get("tile")
+                summary = _fmt_public_tile_summary(tile)
+                if isinstance(summary, str) and summary and summary != "WATER":
+                    tile_summary = summary
+                break
+    if isinstance(tile_summary, str) and tile_summary:
+        return f"{coordinate_text} (on {tile_summary})"
+    return coordinate_text
+
+
+def fmt_board_building(building: object) -> str:
+    if not isinstance(building, dict):
+        return str(building)
+    building_name = building.get("building", "?")
+    node_id = building.get("node_id", "?")
+    adjacent_tiles = building.get("adjacent_tiles")
+    ports = building.get("ports")
+    result = f"{building_name} at node {node_id}"
+    if isinstance(adjacent_tiles, (list, tuple)):
+        tiles = [str(tile) for tile in adjacent_tiles if isinstance(tile, str) and tile]
+        if tiles:
+            result += f" ({', '.join(tiles)})"
+    if isinstance(ports, (list, tuple)):
+        port_values = [str(port) for port in ports if isinstance(port, str) and port]
+        if port_values:
+            result += f" [port: {', '.join(port_values)}]"
+    return result
+
+
+def fmt_other_player_network(network: object) -> str:
+    if not isinstance(network, dict):
+        return str(network)
+    player_id = network.get("player_id", "?")
+    roads_built = network.get("roads_built", "?")
+    road_noun = "road" if roads_built == 1 else "roads"
+    parts = [f"{player_id}: {roads_built} {road_noun} built"]
+    buildings = network.get("buildings")
+    building_parts = []
+    if isinstance(buildings, (list, tuple)):
+        building_parts = [
+            fmt_board_building(building)
+            for building in buildings
+            if isinstance(building, dict)
+        ]
+    parts.extend(building_parts or ["no public buildings"])
+    return "; ".join(parts)
 
 
 def fmt_event(event: object) -> str:
@@ -320,6 +420,9 @@ class PromptRenderer:
             env.globals["fmt_player_standing"] = fmt_player_standing
             env.globals["fmt_longest_road_status"] = fmt_longest_road_status
             env.globals["fmt_largest_army_status"] = fmt_largest_army_status
+            env.globals["fmt_robber_status"] = fmt_robber_status
+            env.globals["fmt_board_building"] = fmt_board_building
+            env.globals["fmt_other_player_network"] = fmt_other_player_network
             env.globals["fmt_event"] = fmt_event
             self._env = env
 

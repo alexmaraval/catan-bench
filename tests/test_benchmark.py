@@ -90,7 +90,7 @@ class BenchmarkCliTests(unittest.TestCase):
     def test_collect_game_records_accepts_versioned_runs_base_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            run_dir = base_dir / "1.1.1" / "tags-dev-game-a"
+            run_dir = base_dir / "1.2.0" / "tags-dev-game-a"
             self._make_minimal_completed_run(
                 run_dir,
                 red_model="provider/red-model",
@@ -106,13 +106,13 @@ class BenchmarkCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
             self._make_minimal_completed_run(
-                base_dir / "1.1.1" / "tags-dev-game-a",
+                base_dir / "1.2.0" / "tags-dev-game-a",
                 red_model="provider/red-model",
                 blue_model="provider/blue-model",
                 winner="RED",
             )
             self._make_minimal_completed_run(
-                base_dir / "1.1.1" / "tags-dev-game-b",
+                base_dir / "1.2.0" / "tags-dev-game-b",
                 red_model="provider/red-model",
                 blue_model="provider/blue-model",
                 winner="BLUE",

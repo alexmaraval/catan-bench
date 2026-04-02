@@ -2,59 +2,7 @@
 
 {% include "partials/your_hand.jinja" %}
 
-{% if payload.public_state.players %}
-### Standings
-{% for pid, info in payload.public_state.players.items() %}
-- {{ fmt_player_standing(pid, info) }}
-{% endfor %}
-Public Longest Road status: {{ fmt_longest_road_status(payload.public_state.players, payload.player_id) }}
-Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.players, payload.player_id) }}
-{% endif %}
-{% if payload.public_state.board %}
+{% include "partials/standings.jinja" %}
 
-### Board
-{% set board = payload.public_state.board %}
-{% set net = board.your_network %}
-Robber: {{ board.robber_coordinate }}
-{% if net %}
-Your tiles: {{ net.adjacent_tiles | join(", ") or "none" }}
-{% if net.buildings %}
-Your buildings:
-{% for b in net.buildings %}
-  {{ b.building }} at node {{ b.node_id }} ({{ b.adjacent_tiles | join(", ") }})
-{% endfor %}
-{% endif %}
-Roads built: {{ net.roads | length }}
-{% endif %}
-{% if board.settlement_candidates %}
-Settlement candidates:
-{% for c in board.settlement_candidates %}
-  [{{ c.action_index }}] node {{ c.node_id }} — {{ c.adjacent_tiles | join(", ") }}{% if c.ports %}  [port: {{ c.ports | join(", ") }}]{% endif %}
-
-{% endfor %}
-{% endif %}
-{% if board.city_candidates %}
-City upgrade candidates:
-{% for c in board.city_candidates %}
-  [{{ c.action_index }}] node {{ c.node_id }} ({{ c.adjacent_tiles | join(", ") }})
-{% endfor %}
-{% endif %}
-{% if board.road_candidates %}
-Road candidates:
-{% for r in board.road_candidates %}
-  [{{ r.action_index }}] edge {{ r.edge }}{% if r.adjacent_tiles %} — {{ r.adjacent_tiles | join(", ") }}{% endif %}
-
-{% endfor %}
-{% endif %}
-{% if board.robber_targets %}
-Robber targets:
-{% for t in board.robber_targets %}
-  {{ t.coordinate }}{% if t.victims %}  (can steal from: {{ t.victims | join(", ") }}){% endif %}
-
-{% endfor %}
-{% endif %}
-{% if payload.public_state.bank %}
-Bank: {{ fmt_resources(payload.public_state.bank.resources) }}
-{% endif %}
-{% endif %}
+{% include "partials/board_context_rich.jinja" %}
 {% include "partials/strategy_memory.jinja" %}

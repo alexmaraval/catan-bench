@@ -776,7 +776,14 @@ class CatanatronEngineAdapter:
                 player_id=player_id,
                 game_json=game_json,
             ),
+            "other_player_networks": self._other_player_network_views(
+                player_id=player_id,
+                game_json=game_json,
+            ),
         }
+        robber_tile_summary = self._robber_tile_summary(game_json)
+        if robber_tile_summary is not None:
+            board_view["robber_tile_summary"] = robber_tile_summary
         robber_targets = self._robber_targets_view(legal_actions)
         if robber_targets:
             board_view["robber_targets"] = robber_targets
@@ -811,25 +818,117 @@ class CatanatronEngineAdapter:
         buildings_payload: list[dict[str, JsonValue]] = []
         for node in owned_buildings:
             node_id = int(node["id"])
-            tiles = [
-                self._tile_prompt_value(tile)
-                for tile in adjacent_tiles.get(str(node_id), [])
-            ]
+            tiles, ports = self._node_prompt_context(
+                node_id=node_id,
+                adjacent_tiles=adjacent_tiles,
+            )
             for tile in tiles:
                 network_tiles.setdefault(tile, None)
-            buildings_payload.append(
-                {
-                    "node_id": node_id,
-                    "building": str(node["building"]),
-                    "adjacent_tiles": tiles,
-                }
-            )
+            building_view: dict[str, JsonValue] = {
+                "node_id": node_id,
+                "building": str(node["building"]),
+                "adjacent_tiles": tiles,
+            }
+            if ports:
+                building_view["ports"] = ports
+            buildings_payload.append(building_view)
 
         return {
             "buildings": buildings_payload,
             "roads": [{"edge": list(edge["id"])} for edge in owned_roads],
             "adjacent_tiles": list(network_tiles.keys()),
         }
+
+    def _other_player_network_views(
+        self,
+        *,
+        player_id: str,
+        game_json: Mapping[str, Any],
+    ) -> list[dict[str, JsonValue]]:
+        nodes = game_json["nodes"]
+        edges = game_json["edges"]
+        adjacent_tiles = game_json["adjacent_tiles"]
+        result: list[dict[str, JsonValue]] = []
+        for color in self.game.state.colors:
+            pid = color.value
+            if pid == player_id:
+                continue
+            owned_buildings = [
+                node
+                for node in nodes.values()
+                if node.get("color") == pid and node.get("building") is not None
+            ]
+            owned_buildings.sort(key=lambda node: int(node["id"]))
+            buildings_payload: list[dict[str, JsonValue]] = []
+            for node in owned_buildings:
+                node_id = int(node["id"])
+                tiles, ports = self._node_prompt_context(
+                    node_id=node_id,
+                    adjacent_tiles=adjacent_tiles,
+                )
+                building_view: dict[str, JsonValue] = {
+                    "node_id": node_id,
+                    "building": str(node["building"]),
+                    "adjacent_tiles": tiles,
+                }
+                if ports:
+                    building_view["ports"] = ports
+                buildings_payload.append(building_view)
+            roads_built = sum(1 for edge in edges if edge.get("color") == pid)
+            result.append(
+                {
+                    "player_id": pid,
+                    "roads_built": roads_built,
+                    "buildings": buildings_payload,
+                }
+            )
+        return result
+
+    @staticmethod
+    def _node_prompt_context(
+        *,
+        node_id: int,
+        adjacent_tiles: Mapping[str, Any],
+    ) -> tuple[list[str], list[str]]:
+        tiles: list[str] = []
+        ports: list[str] = []
+        for tile in adjacent_tiles.get(str(node_id), []):
+            summary = CatanatronEngineAdapter._tile_prompt_value(tile)
+            if summary.startswith("PORT:"):
+                ports.append(summary.removeprefix("PORT:"))
+                continue
+            if summary == "WATER":
+                continue
+            tiles.append(summary)
+        return tiles, sorted(set(ports))
+
+    @staticmethod
+    def _robber_tile_summary(game_json: Mapping[str, Any]) -> str | None:
+        coordinate = game_json.get("robber_coordinate")
+        tiles = game_json.get("tiles")
+        if not (
+            isinstance(coordinate, list)
+            and len(coordinate) == 3
+            and isinstance(tiles, list)
+        ):
+            return None
+        target = tuple(int(axis) for axis in coordinate)
+        for tile_entry in tiles:
+            if not isinstance(tile_entry, dict):
+                continue
+            entry_coordinate = tile_entry.get("coordinate")
+            if not (
+                isinstance(entry_coordinate, list)
+                and len(entry_coordinate) == 3
+                and tuple(int(axis) for axis in entry_coordinate) == target
+            ):
+                continue
+            tile = tile_entry.get("tile")
+            if not isinstance(tile, Mapping):
+                return None
+            summary = CatanatronEngineAdapter._tile_prompt_value(tile)
+            return None if summary == "WATER" else summary.removeprefix("PORT:")
+        return None
 
     @staticmethod
     def _robber_targets_view(
@@ -912,16 +1011,10 @@ class CatanatronEngineAdapter:
         include_owner: bool = False,
     ) -> dict[str, JsonValue]:
         node = game_json["nodes"][str(node_id)]
-        adjacent_tiles = game_json["adjacent_tiles"].get(str(node_id), [])
-
-        tile_summaries: list[str] = []
-        ports: list[str] = []
-        for tile in adjacent_tiles:
-            summary = self._tile_prompt_value(tile)
-            if summary.startswith("PORT:"):
-                ports.append(summary.removeprefix("PORT:"))
-                continue
-            tile_summaries.append(summary)
+        tile_summaries, ports = self._node_prompt_context(
+            node_id=node_id,
+            adjacent_tiles=game_json["adjacent_tiles"],
+        )
 
         candidate_view: dict[str, JsonValue] = {
             "action_index": action_index,

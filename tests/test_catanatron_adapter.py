@@ -302,6 +302,41 @@ class CatanatronAdapterTests(unittest.TestCase):
         self.assertNotIn("status_flags", private_state)
         self.assertNotIn("ports", private_state)
 
+    def test_decision_scoped_state_includes_other_player_networks_and_robber_tile(self) -> None:
+        adapter = CatanatronEngineAdapter(seed=1)
+
+        while adapter.current_decision().phase != "play_turn":
+            adapter.apply_action(adapter.current_decision().legal_actions[0])
+
+        decision = adapter.current_decision()
+        public_state = adapter.public_state_for_decision(
+            player_id=decision.acting_player_id,
+            phase=decision.phase,
+            legal_actions=decision.legal_actions,
+        )
+
+        board = public_state["board"]
+        self.assertIn("other_player_networks", board)
+        self.assertIn("robber_tile_summary", board)
+        self.assertNotIn("tiles", board)
+        self.assertNotIn("nodes", board)
+        self.assertNotIn("edges", board)
+
+        other_networks = board["other_player_networks"]
+        self.assertEqual(len(other_networks), len(public_state["players"]) - 1)
+        self.assertTrue(any(network["buildings"] for network in other_networks))
+        first_building = next(
+            building
+            for network in other_networks
+            for building in network["buildings"]
+        )
+        self.assertIn("player_id", other_networks[0])
+        self.assertIn("roads_built", other_networks[0])
+        self.assertIn("buildings", other_networks[0])
+        self.assertIn("node_id", first_building)
+        self.assertIn("adjacent_tiles", first_building)
+        self.assertIsInstance(board["robber_tile_summary"], str)
+
     def test_initial_road_prompt_view_uses_road_candidates(self) -> None:
         adapter = CatanatronEngineAdapter(seed=1)
         adapter.apply_action(adapter.current_decision().legal_actions[0])

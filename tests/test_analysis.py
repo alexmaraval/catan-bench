@@ -1385,7 +1385,7 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_discover_completed_run_directories_from_base_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            version_dir = base_dir / "1.1.1"
+            version_dir = base_dir / "1.2.0"
             completed = version_dir / "tags-dev-game-a"
             other_completed = version_dir / "tags-dev-game-b"
             incomplete = version_dir / "tags-dev-game-c"
@@ -1408,7 +1408,7 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
     def test_analysis_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            version_dir = base_dir / "1.1.1"
+            version_dir = base_dir / "1.2.0"
             run_a = version_dir / "tags-dev-game-a"
             run_b = version_dir / "tags-dev-game-b"
             self._make_minimal_run(run_a)

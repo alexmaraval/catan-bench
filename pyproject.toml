@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catan-bench"
-version = "1.1.1"
+version = "1.2.0"
 description = "Harness for benchmarking LLM players in multi-player Settlers of Catan."
 readme = "README.md"
 requires-python = ">=3.11"

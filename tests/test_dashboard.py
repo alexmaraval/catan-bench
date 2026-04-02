@@ -573,7 +573,7 @@ class DashboardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
             older = base_dir / "1.0.0" / "tags-older-run"
-            newer = base_dir / "1.1.1" / "tags-newer-run"
+            newer = base_dir / "1.2.0" / "tags-newer-run"
             older.mkdir(parents=True)
             newer.mkdir(parents=True)
             self._write_json(older / "metadata.json", {"game_id": "older"})

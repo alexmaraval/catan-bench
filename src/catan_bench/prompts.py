@@ -18,6 +18,10 @@ Core rules:
 - The first player to reach {vps_to_win} victory points wins.
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
 - Tile numbers indicate production frequency: 6 and 8 are strongest, then 5 and 9, then 4 and 10, then 3 and 11, then 2 and 12; 7 produces no resources and instead triggers the robber.
+- Board notation: hex coordinates like [q, r, s] identify tiles only. You usually do not need to reason geometrically from them.
+- Settlements and cities are identified by stable node ids. A node's adjacent tile list tells you what that intersection touches, and ports may be shown separately.
+- Roads are identified by edge endpoint pairs like [18, 23], meaning a road between those two node ids.
+- In board summaries and candidate lists, prioritize node ids, edge endpoints, adjacent tile summaries, ports, and legal candidates over reconstructing full map geometry.
 - Especially in the opening, prefer placements that combine strong production numbers, useful resource diversity, and good expansion routes.
 - When a 7 is rolled, no resources are produced. Every player with more than 7 resource cards discards half, rounded down, then the active player must move the robber and may steal 1 random resource from an adjacent opponent.
 - The robber blocks resource production on its hex, but does not block building or harbor access.

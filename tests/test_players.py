@@ -1419,7 +1419,7 @@ class LLMPlayerTests(unittest.TestCase):
 
         self.assertIn("Public Longest Road status:", rendered)
         self.assertIn(
-            "WHITE: 2VP  4 resource cards  2 unused development cards  pieces left 13R/3S/4C",
+            "WHITE [this is you]: 2VP  4 resource cards  2 unused development cards  pieces left 13R/3S/4C",
             rendered,
         )
         self.assertIn(
@@ -1434,6 +1434,447 @@ class LLMPlayerTests(unittest.TestCase):
         )
         self.assertIn("Your played knights count is 1.", rendered)
         self.assertIn("Unused knights in hand do not count yet.", rendered)
+
+    def test_game_context_renders_rich_board_summary_with_other_players(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/game_context.jinja",
+            payload={
+                "turn_index": 39,
+                "player_id": "BLUE",
+                "private_state": {
+                    "resources": {"WOOD": 2, "WHEAT": 2},
+                    "development_cards": {},
+                    "pieces": {"roads": 9, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "BLUE", "vps_to_win": 10},
+                    "players": {
+                        "RED": {
+                            "vp": 2,
+                            "resource_card_count": 7,
+                            "development_card_count": 2,
+                            "roads_left": 12,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 2,
+                            "played_knights": 0,
+                        },
+                        "BLUE": {
+                            "vp": 2,
+                            "resource_card_count": 4,
+                            "development_card_count": 0,
+                            "roads_left": 9,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 4,
+                            "played_knights": 1,
+                        },
+                        "WHITE": {
+                            "vp": 2,
+                            "resource_card_count": 5,
+                            "development_card_count": 0,
+                            "roads_left": 10,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 4,
+                            "played_knights": 0,
+                        },
+                    },
+                    "board": {
+                        "robber_coordinate": [0, 1, -1],
+                        "robber_tile_summary": "ORE@9",
+                        "your_network": {
+                            "adjacent_tiles": [
+                                "SHEEP@11",
+                                "BRICK@5",
+                                "WHEAT@4",
+                                "ORE@9",
+                                "WHEAT@5",
+                                "BRICK@2",
+                            ],
+                            "buildings": [
+                                {
+                                    "node_id": 0,
+                                    "building": "SETTLEMENT",
+                                    "adjacent_tiles": [
+                                        "SHEEP@11",
+                                        "BRICK@5",
+                                        "WHEAT@4",
+                                    ],
+                                },
+                                {
+                                    "node_id": 7,
+                                    "building": "SETTLEMENT",
+                                    "adjacent_tiles": ["ORE@9", "WHEAT@5", "BRICK@2"],
+                                    "ports": ["ANY"],
+                                },
+                            ],
+                            "roads": [
+                                {"edge": [0, 1]},
+                                {"edge": [1, 2]},
+                                {"edge": [2, 3]},
+                            ],
+                        },
+                        "other_player_networks": [
+                            {
+                                "player_id": "RED",
+                                "roads_built": 3,
+                                "buildings": [
+                                    {
+                                        "node_id": 12,
+                                        "building": "SETTLEMENT",
+                                        "adjacent_tiles": [
+                                            "WOOD@6",
+                                            "BRICK@3",
+                                            "SHEEP@11",
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "player_id": "WHITE",
+                                "roads_built": 4,
+                                "buildings": [
+                                    {
+                                        "node_id": 31,
+                                        "building": "CITY",
+                                        "adjacent_tiles": [
+                                            "WOOD@6",
+                                            "WHEAT@9",
+                                            "SHEEP@4",
+                                        ],
+                                        "ports": ["ANY"],
+                                    }
+                                ],
+                            },
+                        ],
+                        "settlement_candidates": [
+                            {
+                                "action_index": 12,
+                                "node_id": 19,
+                                "adjacent_tiles": ["WOOD@6", "BRICK@9", "SHEEP@3"],
+                            }
+                        ],
+                        "road_candidates": [
+                            {
+                                "action_index": 7,
+                                "edge": [7, 11],
+                                "adjacent_tiles": ["ORE@9", "WHEAT@5"],
+                            }
+                        ],
+                    },
+                    "bank": {"resources": {"WOOD": 17, "BRICK": 12}},
+                },
+                "memory": {"short_term": None, "long_term": None},
+            },
+        )
+
+        self.assertIn("Robber: [0, 1, -1] (on ORE@9)", rendered)
+        self.assertIn("Your position:", rendered)
+        self.assertIn(
+            "Tiles: SHEEP@11, BRICK@5, WHEAT@4, ORE@9, WHEAT@5, BRICK@2",
+            rendered,
+        )
+        self.assertIn(
+            "SETTLEMENT at node 0 (SHEEP@11, BRICK@5, WHEAT@4)",
+            rendered,
+        )
+        self.assertIn(
+            "SETTLEMENT at node 7 (ORE@9, WHEAT@5, BRICK@2) [port: ANY]",
+            rendered,
+        )
+        self.assertIn("Other players on board:", rendered)
+        self.assertIn(
+            "- RED: 3 roads built; SETTLEMENT at node 12 (WOOD@6, BRICK@3, SHEEP@11)",
+            rendered,
+        )
+        self.assertIn(
+            "- WHITE: 4 roads built; CITY at node 31 (WOOD@6, WHEAT@9, SHEEP@4) [port: ANY]",
+            rendered,
+        )
+        self.assertIn("Road candidates:", rendered)
+        self.assertIn("Bank: 17×WOOD, 12×BRICK", rendered)
+
+    def test_board_summary_mentions_ports_for_own_and_other_buildings(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/board_context_rich.jinja",
+            payload={
+                "public_state": {
+                    "board": {
+                        "robber_coordinate": [0, 1, -1],
+                        "robber_tile_summary": "ORE@9",
+                        "your_network": {
+                            "adjacent_tiles": ["ORE@9", "WHEAT@5", "BRICK@2"],
+                            "buildings": [
+                                {
+                                    "node_id": 7,
+                                    "building": "SETTLEMENT",
+                                    "adjacent_tiles": ["ORE@9", "WHEAT@5", "BRICK@2"],
+                                    "ports": ["ANY"],
+                                }
+                            ],
+                            "roads": [{"edge": [7, 11]}],
+                        },
+                        "other_player_networks": [
+                            {
+                                "player_id": "ORANGE",
+                                "roads_built": 2,
+                                "buildings": [
+                                    {
+                                        "node_id": 27,
+                                        "building": "SETTLEMENT",
+                                        "adjacent_tiles": ["ORE@6", "WHEAT@11", "BRICK@4"],
+                                        "ports": ["ORE"],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "bank": {},
+                }
+            },
+        )
+
+        self.assertIn(
+            "SETTLEMENT at node 7 (ORE@9, WHEAT@5, BRICK@2) [port: ANY]",
+            rendered,
+        )
+        self.assertIn(
+            "- ORANGE: 2 roads built; SETTLEMENT at node 27 (ORE@6, WHEAT@11, BRICK@4) [port: ORE]",
+            rendered,
+        )
+
+    def test_trade_chat_open_prompt_renders_rich_board_and_marks_viewer(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "trade_chat_open_user.jinja",
+            payload={
+                "turn_index": 12,
+                "player_id": "BLUE",
+                "private_state": {
+                    "resources": {"WOOD": 1},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "BLUE", "vps_to_win": 10},
+                    "players": {
+                        "BLUE": {
+                            "vp": 2,
+                            "resource_card_count": 1,
+                            "development_card_count": 0,
+                            "roads_left": 13,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 2,
+                            "played_knights": 0,
+                        },
+                        "RED": {
+                            "vp": 3,
+                            "resource_card_count": 5,
+                            "development_card_count": 1,
+                            "roads_left": 11,
+                            "settlements_left": 2,
+                            "cities_left": 4,
+                            "longest_road_length": 3,
+                            "played_knights": 1,
+                        },
+                    },
+                    "board": {
+                        "robber_coordinate": [0, 1, -1],
+                        "robber_tile_summary": "ORE@9",
+                        "your_network": {
+                            "adjacent_tiles": ["ORE@9", "WHEAT@5"],
+                            "buildings": [
+                                {
+                                    "node_id": 7,
+                                    "building": "SETTLEMENT",
+                                    "adjacent_tiles": ["ORE@9", "WHEAT@5", "BRICK@2"],
+                                }
+                            ],
+                            "roads": [{"edge": [7, 11]}],
+                        },
+                        "other_player_networks": [
+                            {
+                                "player_id": "RED",
+                                "roads_built": 3,
+                                "buildings": [
+                                    {
+                                        "node_id": 12,
+                                        "building": "SETTLEMENT",
+                                        "adjacent_tiles": ["WOOD@6", "BRICK@3"],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "bank": {"resources": {"WOOD": 17}},
+                },
+                "memory": {"short_term": None, "long_term": None},
+                "requested_resources": {"ORE": 1},
+                "other_player_ids": ["RED", "WHITE", "ORANGE"],
+                "message_char_limit": 500,
+                "public_history": (),
+                "public_chat_transcript": (),
+            },
+        )
+
+        self.assertIn(
+            "BLUE [this is you]: 2VP  1 resource card  0 unused development cards",
+            rendered,
+        )
+        self.assertIn("Robber: [0, 1, -1] (on ORE@9)", rendered)
+        self.assertIn("Your position:", rendered)
+        self.assertIn(
+            "- RED: 3 roads built; SETTLEMENT at node 12 (WOOD@6, BRICK@3)",
+            rendered,
+        )
+        self.assertIn("Bank: 17×WOOD", rendered)
+
+    def test_turn_end_prompt_uses_rich_board_context(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "turn_end_user.jinja",
+            payload={
+                "turn_index": 12,
+                "player_id": "BLUE",
+                "private_state": {
+                    "resources": {"WOOD": 1},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "BLUE", "vps_to_win": 10},
+                    "players": {
+                        "BLUE": {
+                            "vp": 2,
+                            "resource_card_count": 1,
+                            "development_card_count": 0,
+                            "roads_left": 13,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 2,
+                            "played_knights": 0,
+                        }
+                    },
+                    "board": {
+                        "robber_coordinate": [0, 1, -1],
+                        "robber_tile_summary": "ORE@9",
+                        "your_network": {
+                            "adjacent_tiles": ["ORE@9"],
+                            "buildings": [],
+                            "roads": [],
+                        },
+                        "other_player_networks": [
+                            {
+                                "player_id": "RED",
+                                "roads_built": 3,
+                                "buildings": [
+                                    {
+                                        "node_id": 12,
+                                        "building": "SETTLEMENT",
+                                        "adjacent_tiles": ["WOOD@6", "BRICK@3"],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "bank": {"resources": {"WOOD": 17}},
+                },
+                "memory": {"short_term": None, "long_term": None},
+                "turn_public_events": (),
+                "public_chat_enabled": False,
+                "public_chat_transcript": (),
+                "public_chat_message_char_limit": 500,
+            },
+        )
+
+        self.assertIn("Robber: [0, 1, -1] (on ORE@9)", rendered)
+        self.assertIn("Bank: 17×WOOD", rendered)
+        self.assertIn("Your position:", rendered)
+        self.assertIn("Tiles: ORE@9", rendered)
+        self.assertIn("Buildings: none", rendered)
+        self.assertIn("Other players on board:", rendered)
+        self.assertIn(
+            "- RED: 3 roads built; SETTLEMENT at node 12 (WOOD@6, BRICK@3)",
+            rendered,
+        )
+
+    def test_post_game_prompt_uses_rich_board_context(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "post_game_chat_user.jinja",
+            payload={
+                "turn_index": 12,
+                "player_id": "BLUE",
+                "private_state": {
+                    "resources": {"WOOD": 1},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "BLUE", "vps_to_win": 10},
+                    "players": {
+                        "BLUE": {
+                            "vp": 2,
+                            "resource_card_count": 1,
+                            "development_card_count": 0,
+                            "roads_left": 13,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 2,
+                            "played_knights": 0,
+                        }
+                    },
+                    "board": {
+                        "robber_coordinate": [0, 1, -1],
+                        "robber_tile_summary": "ORE@9",
+                        "your_network": {
+                            "adjacent_tiles": ["ORE@9"],
+                            "buildings": [],
+                            "roads": [],
+                        },
+                        "other_player_networks": [
+                            {
+                                "player_id": "RED",
+                                "roads_built": 3,
+                                "buildings": [],
+                            }
+                        ],
+                    },
+                    "bank": {"resources": {"WOOD": 17}},
+                },
+                "memory": {"short_term": None, "long_term": None},
+                "public_history": (),
+                "public_chat_enabled": False,
+                "public_chat_transcript": (),
+                "public_chat_message_char_limit": 500,
+                "result": {"winner_ids": ["WHITE"], "num_turns": 12},
+            },
+        )
+
+        self.assertIn("Robber: [0, 1, -1] (on ORE@9)", rendered)
+        self.assertIn("Bank: 17×WOOD", rendered)
+        self.assertIn("Your position:", rendered)
+        self.assertIn("Tiles: ORE@9", rendered)
+        self.assertIn("Other players on board:", rendered)
+        self.assertIn("- RED: 3 roads built; no public buildings", rendered)
+
+    def test_rules_summary_explains_board_notation(self) -> None:
+        self.assertIn(
+            "Board notation: hex coordinates like [q, r, s] identify tiles only.",
+            CATAN_RULES_SUMMARY,
+        )
+        self.assertIn(
+            "Roads are identified by edge endpoint pairs like [18, 23]",
+            CATAN_RULES_SUMMARY,
+        )
 
     def test_turn_start_contract_asks_for_plain_text_memory(self) -> None:
         renderer = PromptRenderer()

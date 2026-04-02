@@ -1,5 +1,10 @@
 Return strict JSON with keys:
+{% if payload.proposals %}
 - `decision`: one of `continue`, `select`, or `close`.
 - `selected_proposal_id`: required only when `decision` is `select`; it must match one provided proposal id.
+{% else %}
+- `decision`: one of `continue` or `close`.
+- Do not return `select` because there are no concrete proposals in this room.
+{% endif %}
 - `message`: optional public owner message.
 - `private_reasoning`: optional concise private note under 30 words.

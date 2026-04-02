@@ -13,12 +13,6 @@ Because the room is public, if another player already posted a proposal and you 
 
 {% include "partials/board_context_rich.jinja" %}
 
-### Trade negotiation
-Owner: {{ payload.owner_player_id }}
-They are requesting: {{ fmt_resources(payload.requested_resources) }}
-Round: {{ payload.round_index }}
-Message character limit: {{ payload.message_char_limit }}
-
 {% set recent_game_history = payload.public_history if payload.public_history else payload.transcript %}
 ### Recent Game History
 {% if recent_game_history %}
@@ -30,6 +24,12 @@ Message character limit: {{ payload.message_char_limit }}
 {% endif %}
 
 {% include "partials/public_chat_transcript_readonly.jinja" %}
+
+### Trade negotiation
+Owner: {{ payload.owner_player_id }}
+They are requesting: {{ fmt_resources(payload.requested_resources) }}
+Round: {{ payload.round_index }}
+Message character limit: {{ payload.message_char_limit }}
 
 ### Trade Chat
 {% if payload.transcript %}
@@ -44,7 +44,7 @@ Message character limit: {{ payload.message_char_limit }}
 ### Current proposals
 {% if payload.proposals %}
 {% for proposal in payload.proposals %}
-- {{ proposal.proposal_id }} by {{ proposal.player_id }}: owner gives {{ fmt_resources(proposal.owner_gives) }}, owner gets {{ fmt_resources(proposal.owner_gets) }}{% if proposal.message %}  "{{ proposal.message }}"{% endif %}
+- {{ proposal.proposal_id }} by {{ proposal.player_id }}: {{ proposal.player_id }} gives {{ fmt_resources(proposal.owner_gets) }}, receives {{ fmt_resources(proposal.owner_gives) }}{% if proposal.message %}  "{{ proposal.message }}"{% endif %}
 {% endfor %}
 {% else %}
 (no concrete proposals yet)
@@ -52,6 +52,8 @@ Message character limit: {{ payload.message_char_limit }}
 
 ### Proposal checklist
 - Your resources: {{ fmt_resources(payload.private_state.resources) }}. You may only offer resources from this list.
-- `owner_gives` = what {{ payload.owner_player_id }} sends to you; `owner_gets` = what you send to {{ payload.owner_player_id }}.
+- The owner is requesting: {{ fmt_resources(payload.requested_resources) }}. A concrete proposal usually means `you_give` matches or includes that request.
+- If you do not currently hold the requested resource(s), do not invent them and do not make a concrete proposal.
+- Think from your own seat: `you_give` = cards leaving your hand; `you_get` = cards the owner sends to you.
 
 {% include "partials/trade_chat_reply_contract.jinja" %}

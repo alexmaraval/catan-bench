@@ -686,6 +686,44 @@ class LLMPlayerTests(unittest.TestCase):
             select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
         )
 
+    def test_trade_chat_reply_accepts_responder_relative_keys(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "message": "I'll trade 1 brick for 1 wood.",
+                    "you_give": {"BRICK": 1},
+                    "you_get": {"WOOD": 1},
+                }
+            ),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="BLUE",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="reply",
+            attempt_index=1,
+            round_index=1,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"BRICK": 1}},
+            transcript=(),
+            requested_resources={"BRICK": 1},
+            other_player_ids=("RED", "ORANGE"),
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        reply_response = player.respond_trade_chat(observation)
+
+        self.assertEqual(reply_response.owner_gives, {"WOOD": 1})
+        self.assertEqual(reply_response.owner_gets, {"BRICK": 1})
+
     def test_trade_chat_reply_error_identifies_player_model_and_stage(self) -> None:
         player = LLMPlayer(
             client=StructuredCompletionClient(
@@ -777,6 +815,43 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(
             select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
         )
+
+    def test_trade_chat_owner_decision_downgrades_select_when_no_proposals(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient(
+                {
+                    "decision": "select",
+                    "message": "Deal.",
+                }
+            ),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="RED",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="owner_decision",
+            attempt_index=1,
+            round_index=1,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"WOOD": 1}},
+            transcript=(),
+            requested_resources={"BRICK": 1},
+            other_player_ids=("BLUE",),
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        select_response = player.decide_trade_chat(observation)
+
+        self.assertEqual(select_response.decision, "close")
+        self.assertIsNone(select_response.selected_proposal_id)
 
     def test_trade_chat_reply_falls_back_to_responder_relative_offer_request_when_needed(
         self,
@@ -972,6 +1047,65 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("### Trade Chat", user_prompt)
         self.assertIn("RED opened trade chat requesting 1×BRICK", user_prompt)
         self.assertIn("RED: Need brick.", user_prompt)
+        self.assertIn("A concrete proposal usually means `you_give` matches or includes that request.", user_prompt)
+        self.assertIn("If your message says \"I'll give you X for Y\", then JSON must be `you_give = X` and `you_get = Y`.", user_prompt)
+
+    def test_trade_chat_owner_decision_prompt_omits_select_when_no_proposals(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"decision": "close"}),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="RED",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="owner_decision",
+            attempt_index=1,
+            round_index=1,
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "players": {},
+                "board": {},
+                "bank": {},
+            },
+            private_state={
+                "resources": {"WOOD": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            transcript=(
+                Event(
+                    kind="trade_chat_opened",
+                    payload={
+                        "owner_player_id": "RED",
+                        "requested_resources": {"BRICK": 1},
+                        "attempt_index": 1,
+                    },
+                    history_index=4,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="RED",
+                ),
+            ),
+            requested_resources={"BRICK": 1},
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "trade"}),
+            message_char_limit=120,
+        )
+
+        messages = player._messages_for_trade_chat_owner_decision(observation)
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("There are no valid concrete proposals to select right now.", user_prompt)
+        self.assertIn("- `decision`: one of `continue` or `close`.", user_prompt)
+        self.assertIn("Do not return `select` because there are no concrete proposals in this room.", user_prompt)
 
     def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(
         self,

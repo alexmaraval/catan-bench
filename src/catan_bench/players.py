@@ -1224,7 +1224,10 @@ class LLMPlayer:
     ) -> TradeChatReplyResponse:
         owner_gives: dict[str, JsonValue]
         owner_gets: dict[str, JsonValue]
-        if "owner_gives" in response_payload or "owner_gets" in response_payload:
+        if "you_give" in response_payload or "you_get" in response_payload:
+            owner_gives = self._coerce_resource_map(response_payload.get("you_get"))
+            owner_gets = self._coerce_resource_map(response_payload.get("you_give"))
+        elif "owner_gives" in response_payload or "owner_gets" in response_payload:
             owner_gives = self._coerce_resource_map(response_payload.get("owner_gives"))
             owner_gets = self._coerce_resource_map(response_payload.get("owner_gets"))
         else:
@@ -1341,6 +1344,8 @@ class LLMPlayer:
                 decision = "close"
         decision = decision.lower()
         if decision not in {"continue", "select", "close"}:
+            decision = "close"
+        if decision == "select" and not observation.proposals:
             decision = "close"
 
         selected_proposal_id = response_payload.get("selected_proposal_id")

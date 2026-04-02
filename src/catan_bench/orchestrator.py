@@ -1814,6 +1814,7 @@ class GameOrchestrator:
                     proposals=tuple(proposals),
                 )
                 proposal: TradeChatProposal | None = None
+                rejection_event: Event | None = None
                 if reply.owner_gives and reply.owner_gets:
                     counterparty_can_pay = self._player_has_resources(
                         other_player_id,
@@ -1872,10 +1873,11 @@ class GameOrchestrator:
                             decision_index=decision.decision_index,
                             actor_player_id=other_player_id,
                         )
+                if reply.message is None and proposal is None:
+                    if rejection_event is not None:
                         events.append(rejection_event)
                         self._record_public_events((rejection_event,))
                         self._write_inflight_checkpoint()
-                if reply.message is None and proposal is None:
                     continue
                 message_event = self._trade_chat_message_event(
                     owner_player_id=decision.acting_player_id,
@@ -1891,6 +1893,10 @@ class GameOrchestrator:
                 events.append(message_event)
                 self._record_public_events((message_event,))
                 self._write_inflight_checkpoint()
+                if rejection_event is not None:
+                    events.append(rejection_event)
+                    self._record_public_events((rejection_event,))
+                    self._write_inflight_checkpoint()
 
             owner_decision = self._decide_trade_chat(
                 player=player,
@@ -2198,6 +2204,8 @@ class GameOrchestrator:
                 decision_value = "close"
         decision_value = decision_value.lower()
         if decision_value not in {"continue", "select", "close"}:
+            decision_value = "close"
+        if decision_value == "select" and not proposals:
             decision_value = "close"
         selected_proposal_id = self._coerce_selected_proposal_id_hint(
             proposals=proposals,

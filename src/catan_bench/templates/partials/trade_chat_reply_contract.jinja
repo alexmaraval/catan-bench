@@ -1,11 +1,15 @@
 Return strict JSON with keys:
 - `message`: optional public chat message.
-- `owner_gives`: optional resource-count map — what **{{ payload.owner_player_id }}** (the room owner) would send **to you**.
-- `owner_gets`: optional resource-count map — what **{{ payload.owner_player_id }}** (the room owner) would receive **from you**. You may only offer resources you currently hold.
+- `you_give`: optional resource-count map — what **you** would send **to {{ payload.owner_player_id }}**. Only include resources you currently hold.
+- `you_get`: optional resource-count map — what **{{ payload.owner_player_id }}** would send **to you**.
 - `private_reasoning`: optional concise private note under 30 words.
 
-Direction reminder: `owner_gives` is from the owner's hand; `owner_gets` comes from yours. Only propose resources you actually hold.
+Before you finalize:
+- If your message says "I'll give you X for Y", then JSON must be `you_give = X` and `you_get = Y`.
+- If {{ payload.owner_player_id }} is requesting {{ fmt_resources(payload.requested_resources) }} and you do not hold those resources, do not put them in `you_give`; leave the trade fields empty and only send a message if needed.
+- If you only want to talk publicly or decline, omit `you_give` and `you_get`.
 
 Examples:
-- You want to give the owner `1×BRICK` and receive `1×WOOD` from them → `{"owner_gives": {"WOOD": 1}, "owner_gets": {"BRICK": 1}}`
-- You want to give the owner `1×ORE` and receive `1×SHEEP` from them → `{"owner_gives": {"SHEEP": 1}, "owner_gets": {"ORE": 1}}`
+- You want to give the owner `1×BRICK` and receive `1×WOOD` from them → `{"you_give": {"BRICK": 1}, "you_get": {"WOOD": 1}}`
+- You want to give the owner `1×ORE` and receive `1×SHEEP` from them → `{"you_give": {"ORE": 1}, "you_get": {"SHEEP": 1}}`
+- Example invalid offer: owner requests `1×WHEAT`, your hand is `1×BRICK, 1×SHEEP, 1×ORE` → do **not** output `{"you_give": {"WHEAT": 1}}`; you do not have that card.

@@ -1,6 +1,11 @@
 Stage: Trade chat owner decision.
 You own this public trade chatroom.
+{% if payload.proposals %}
 After reviewing the round, either continue the discussion, select one concrete proposal, or close the room with no deal.
+{% else %}
+After reviewing the round, either continue the discussion or close the room with no deal.
+There are no valid concrete proposals to select right now.
+{% endif %}
 Prefer proposals that improve your build tempo at a better rate than your likely maritime fallback. If nobody offers that, close the room and move on.
 
 ## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}

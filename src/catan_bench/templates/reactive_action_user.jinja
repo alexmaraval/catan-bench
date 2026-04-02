@@ -5,7 +5,7 @@ If this is a discard decision, keep the hand that best preserves your likely bui
 
 {% include "partials/game_context.jinja" %}
 
-### Recent history
+### Recent Game History
 {% if payload.public_history %}
 {% for event in payload.public_history %}
 - {{ fmt_event(event) }}

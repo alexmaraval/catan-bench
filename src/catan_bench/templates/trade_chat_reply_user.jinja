@@ -24,9 +24,19 @@ They are requesting: {{ fmt_resources(payload.requested_resources) }}
 Round: {{ payload.round_index }}
 Message character limit: {{ payload.message_char_limit }}
 
+{% set recent_game_history = payload.public_history if payload.public_history else payload.transcript %}
+### Recent Game History
+{% if recent_game_history %}
+{% for event in recent_game_history %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 
-### Chat transcript
+### Trade Chat
 {% if payload.transcript %}
 {% for event in payload.transcript %}
 - {{ fmt_event(event) }}

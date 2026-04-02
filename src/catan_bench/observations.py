@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from .prompts import CATAN_RULES_SUMMARY
 from .schemas import (
     ActionObservation,
+    Event,
     OpeningStrategyObservation,
     PostGameChatObservation,
     ReactiveObservation,
@@ -297,10 +298,29 @@ class ObservationBuilder:
         public_chat_enabled: bool = False,
         public_chat_history_limit: int | None = None,
     ) -> TradeChatObservation:
-        transcript = tuple(
-            event
-            for event in self._tail_events(event_log.recent(transcript_limit))
-            if event.turn_index == decision.turn_index
+        recent_events = tuple(event_log.recent())
+        transcript = self._tail_events(
+            tuple(
+                event
+                for event in recent_events
+                if self._is_trade_chat_room_event(
+                    event,
+                    turn_index=decision.turn_index,
+                    attempt_index=attempt_index,
+                )
+            ),
+            limit=transcript_limit,
+        )
+        public_history = self._tail_events(
+            tuple(
+                event
+                for event in recent_events
+                if not self._is_trade_chat_room_event(
+                    event,
+                    turn_index=decision.turn_index,
+                    attempt_index=attempt_index,
+                )
+            )
         )
         return TradeChatObservation(
             game_id=engine.game_id,
@@ -323,6 +343,7 @@ class ObservationBuilder:
                 decision=decision,
                 player_id=player_id,
             ),
+            public_history=public_history,
             transcript=transcript,
             public_chat_transcript=self._public_chat_transcript(
                 event_log, limit=public_chat_history_limit
@@ -340,6 +361,31 @@ class ObservationBuilder:
             memory=memory_store.get(player_id),
             message_char_limit=message_char_limit,
         )
+
+    @staticmethod
+    def _is_trade_chat_room_event(
+        event: object,
+        *,
+        turn_index: int,
+        attempt_index: int,
+    ) -> bool:
+        if not isinstance(event, Event):
+            return False
+        if event.turn_index != turn_index:
+            return False
+        if event.kind not in {
+            "trade_chat_opened",
+            "trade_chat_message",
+            "trade_chat_proposal_rejected",
+            "trade_chat_quote_selected",
+            "trade_chat_no_deal",
+            "trade_chat_closed",
+        }:
+            return False
+        payload = event.payload
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("attempt_index") == attempt_index
 
     def _tail_events(self, events, limit: int | None = None):
         effective_limit = self.recent_event_window if limit is None else limit

@@ -4,6 +4,8 @@ import argparse
 import shutil
 from pathlib import Path
 
+from .run_dirs import iter_run_directory_candidates
+
 
 RUN_MARKER_FILES = ("metadata.json", "public_history.jsonl", "public_state_trace.jsonl")
 
@@ -27,7 +29,7 @@ def discover_incomplete_run_directories(base_run_dir: str | Path) -> tuple[Path,
 
     candidates = [
         path
-        for path in base_path.iterdir()
+        for path in iter_run_directory_candidates(base_path)
         if is_run_directory(path) and not is_finished_run_directory(path)
     ]
     candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)

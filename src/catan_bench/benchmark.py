@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .run_dirs import iter_run_directory_candidates
 
 # ---------------------------------------------------------------------------
 # Data collection
@@ -74,7 +75,7 @@ def _discover_run_directories(base_run_dir: Path) -> tuple[Path, ...]:
         return (base,)
     if not base.exists() or not base.is_dir():
         return ()
-    candidates = [p for p in base.iterdir() if p.is_dir() and _is_run_directory(p)]
+    candidates = [p for p in iter_run_directory_candidates(base) if _is_run_directory(p)]
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return tuple(candidates)
 

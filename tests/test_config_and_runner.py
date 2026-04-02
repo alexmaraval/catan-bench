@@ -57,6 +57,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertEqual(game_config.engine, "catanatron")
         self.assertIsNone(game_config.seed)
+        self.assertEqual(game_config.version, "1.1.1")
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertEqual(game_config.run_dir, Path("runs/test"))
         self.assertEqual(game_config.run_tags, ("1.1.1",))
@@ -351,26 +352,28 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
             self.assertEqual(orchestrator_cls.call_args.kwargs["game_seed"], 777)
 
-    def test_resolve_run_dir_prefixes_tags_into_flat_run_name(self) -> None:
+    def test_resolve_run_dir_places_logs_under_version_directory(self) -> None:
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
+            run_version="1.1.1",
             run_tags=("1.1.1", "dev"),
             run_label="mixed-players",
         )
 
         self.assertIsNotNone(resolved)
         assert resolved is not None
-        self.assertEqual(resolved.parent, Path("runs"))
+        self.assertEqual(resolved.parent, Path("runs") / "1.1.1")
         self.assertRegex(
             resolved.name,
-            r"^1\.1\.1-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^tags-dev-mixed-players-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_resolve_run_dir_includes_seed_when_configured(self) -> None:
         resolved = _resolve_run_dir(
             Path("runs"),
             game_id="mock-game",
+            run_version="1.1.1",
             run_tags=("1.1.1", "dev"),
             run_label="mixed-players",
             game_seed=12,
@@ -378,10 +381,10 @@ class ConfigAndRunnerTests(unittest.TestCase):
 
         self.assertIsNotNone(resolved)
         assert resolved is not None
-        self.assertEqual(resolved.parent, Path("runs"))
+        self.assertEqual(resolved.parent, Path("runs") / "1.1.1")
         self.assertRegex(
             resolved.name,
-            r"^1\.1\.1-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+            r"^tags-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
     def test_runner_uses_debug_reporter_when_requested(self) -> None:
@@ -657,13 +660,14 @@ class ConfigAndRunnerTests(unittest.TestCase):
             players_toml = Path(tmpdir) / "players.toml"
             players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
 
-            matching_run = base_run_dir / "match"
+            matching_run = base_run_dir / "1.1.1" / "tags-players"
             _write_resume_artifacts(
                 matching_run,
                 metadata_contents=(
                     "{\n"
                     '  "game_id": "saved-game-id",\n'
                     f'  "players_config_path": "{players_toml.resolve()}",\n'
+                    '  "run_version": "1.1.1",\n'
                     '  "run_label": "players",\n'
                     '  "game_seed": 777,\n'
                     '  "run_tags": ["1.1.1"]\n'
@@ -671,7 +675,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 ),
             )
             _write_resume_artifacts(
-                base_run_dir / "other",
+                base_run_dir / "1.1.0" / "tags-other",
                 metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
             )
 
@@ -681,6 +685,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 players_config_path=players_toml.resolve(),
                 run_label="players",
                 game_seed=777,
+                run_version="1.1.1",
                 run_tags=("1.1.1",),
             )
 
@@ -699,13 +704,20 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 "{\n"
                 '  "game_id": "saved-game-id",\n'
                 f'  "players_config_path": "{players_toml.resolve()}",\n'
+                '  "run_version": "1.1.1",\n'
                 '  "run_label": "players",\n'
                 '  "game_seed": 777,\n'
                 '  "run_tags": ["1.1.1"]\n'
                 "}\n"
             )
-            _write_resume_artifacts(base_run_dir / "match-a", metadata_contents=metadata_contents)
-            _write_resume_artifacts(base_run_dir / "match-b", metadata_contents=metadata_contents)
+            _write_resume_artifacts(
+                base_run_dir / "1.1.1" / "tags-match-a",
+                metadata_contents=metadata_contents,
+            )
+            _write_resume_artifacts(
+                base_run_dir / "1.1.1" / "tags-match-b",
+                metadata_contents=metadata_contents,
+            )
 
             with self.assertRaisesRegex(ValueError, "Multiple matching run directories"):
                 _resolve_requested_run_dir(
@@ -714,6 +726,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     players_config_path=players_toml.resolve(),
                     run_label="players",
                     game_seed=777,
+                    run_version="1.1.1",
                     run_tags=("1.1.1",),
                 )
 
@@ -723,7 +736,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             players_toml = Path(tmpdir) / "players.toml"
             players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
             _write_resume_artifacts(
-                base_run_dir / "other",
+                base_run_dir / "1.1.0" / "tags-other",
                 metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
             )
 
@@ -734,6 +747,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                     players_config_path=players_toml.resolve(),
                     run_label="players",
                     game_seed=777,
+                    run_version="1.1.1",
                     run_tags=("1.1.1",),
                 )
 

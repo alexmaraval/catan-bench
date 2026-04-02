@@ -14,4 +14,5 @@ trading_chat_message_chars = 500
 trading_chat_history_limit = 40
 prompt_history_limit = 15
 run_dir = "runs/elo-games"
-run_tags = ["1.0.0"]
+version = "1.1.2"
+run_tags = []

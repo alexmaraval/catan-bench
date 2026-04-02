@@ -16,7 +16,7 @@ Short-term memory is a within-turn drawing board for local strategy, not a narra
 (none)
 {% endif %}
 
-### Recent history
+### Recent Game History
 {% if payload.public_history %}
 {% for event in payload.public_history %}
 - {{ fmt_event(event) }}

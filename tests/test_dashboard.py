@@ -572,10 +572,10 @@ class DashboardTests(unittest.TestCase):
     def test_discover_run_directories_returns_newest_child_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
-            older = base_dir / "older-run"
-            newer = base_dir / "newer-run"
-            older.mkdir()
-            newer.mkdir()
+            older = base_dir / "1.0.0" / "tags-older-run"
+            newer = base_dir / "1.1.1" / "tags-newer-run"
+            older.mkdir(parents=True)
+            newer.mkdir(parents=True)
             self._write_json(older / "metadata.json", {"game_id": "older"})
             self._write_json(newer / "metadata.json", {"game_id": "newer"})
             older_history = older / "public_history.jsonl"

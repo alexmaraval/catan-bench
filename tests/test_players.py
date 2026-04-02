@@ -819,11 +819,9 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertEqual(reply_response.owner_gets, {"WHEAT": 1})
 
     def test_trade_chat_open_prompt_includes_requested_resources_context(self) -> None:
-        renderer = CapturingRenderer()
         player = LLMPlayer(
             client=FakeLLMClient({"open_chat": False}),
             model="fake-model",
-            renderer=renderer,
         )
         observation = TradeChatObservation(
             game_id="game-1",
@@ -836,8 +834,29 @@ class LLMPlayerTests(unittest.TestCase):
             stage="open",
             attempt_index=1,
             round_index=0,
-            public_state={"turn": {"turn_player_id": "RED"}},
-            private_state={"resources": {"WOOD": 1}},
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "players": {},
+                "board": {},
+                "bank": {},
+            },
+            private_state={
+                "resources": {"WOOD": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(
+                Event(
+                    kind="dice_rolled",
+                    payload={"result": [4, 3]},
+                    history_index=4,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=0,
+                    actor_player_id="RED",
+                ),
+            ),
             transcript=(),
             public_chat_transcript=(
                 Event(
@@ -862,15 +881,97 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         messages = player._messages_for_trade_chat_open(observation)
+        user_prompt = messages[1]["content"]
 
-        self.assertEqual(messages[1]["role"], "user")
-        self.assertIsNotNone(renderer.last_payload)
-        assert renderer.last_payload is not None
-        self.assertEqual(renderer.last_payload["requested_resources"], {"BRICK": 1})
-        self.assertEqual(
-            renderer.last_payload["public_chat_transcript"][0]["kind"],
-            "public_chat_message",
+        self.assertIn("### Recent Game History", user_prompt)
+        self.assertIn("RED rolled [4, 3]", user_prompt)
+        self.assertIn("### Main public chat", user_prompt)
+        self.assertIn("BLUE to WHITE (public): RED is pushing for road tempo.", user_prompt)
+
+    def test_trade_chat_reply_prompt_includes_recent_game_history(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"message": "Pass."}),
+            model="fake-model",
         )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="BLUE",
+            owner_player_id="RED",
+            history_index=5,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=8,
+            stage="reply",
+            attempt_index=1,
+            round_index=1,
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "players": {},
+                "board": {},
+                "bank": {},
+            },
+            private_state={
+                "resources": {"WHEAT": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(
+                Event(
+                    kind="dice_rolled",
+                    payload={"result": [4, 3]},
+                    history_index=3,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=0,
+                    actor_player_id="RED",
+                ),
+            ),
+            transcript=(
+                Event(
+                    kind="trade_chat_opened",
+                    payload={
+                        "owner_player_id": "RED",
+                        "requested_resources": {"BRICK": 1},
+                        "attempt_index": 1,
+                    },
+                    history_index=4,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="trade_chat_message",
+                    payload={
+                        "owner_player_id": "RED",
+                        "speaker_player_id": "RED",
+                        "message": "Need brick.",
+                        "attempt_index": 1,
+                        "round_index": 0,
+                    },
+                    history_index=5,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="RED",
+                ),
+            ),
+            requested_resources={"BRICK": 1},
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "Only trade up."}),
+            message_char_limit=120,
+        )
+
+        messages = player._messages_for_trade_chat_reply(observation)
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("### Recent Game History", user_prompt)
+        self.assertIn("RED rolled [4, 3]", user_prompt)
+        self.assertIn("### Trade Chat", user_prompt)
+        self.assertIn("RED opened trade chat requesting 1×BRICK", user_prompt)
+        self.assertIn("RED: Need brick.", user_prompt)
 
     def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(
         self,
@@ -921,6 +1022,7 @@ class LLMPlayerTests(unittest.TestCase):
         user_prompt = messages[1]["content"]
 
         self.assertIn("[0] OFFER_TRADE", user_prompt)
+        self.assertIn("### Recent Game History", user_prompt)
         self.assertIn('payload: `{"offer": {}, "request": {}}`', user_prompt)
         self.assertIn(
             "requires full `action` object; do not use `action_index` alone",
@@ -1025,6 +1127,7 @@ class LLMPlayerTests(unittest.TestCase):
         user_prompt = messages[1]["content"]
 
         self.assertIn("If this is a discard decision, keep the hand", user_prompt)
+        self.assertIn("### Recent Game History", user_prompt)
         self.assertIn("Must discard: 2 cards", user_prompt)
         self.assertIn("Legal discard options: 2", user_prompt)
         self.assertIn("[0] DISCARD", user_prompt)
@@ -1225,6 +1328,45 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("VP remaining to win: 1 to reach 10 VP", rendered)
         self.assertIn(
             "Ports (public): ANY (3:1), BRICK (2:1), ORE (2:1)",
+            rendered,
+        )
+
+    def test_game_context_preserves_zero_played_knights_in_hand_summary(self) -> None:
+        renderer = PromptRenderer()
+        rendered = renderer.render(
+            "partials/game_context.jinja",
+            payload={
+                "turn_index": 4,
+                "player_id": "RED",
+                "private_state": {
+                    "resources": {"WOOD": 1},
+                    "development_cards": {},
+                    "pieces": {"roads": 13, "settlements": 3, "cities": 4},
+                    "victory_points": {"visible": 2, "actual": 2},
+                },
+                "public_state": {
+                    "turn": {"turn_player_id": "RED", "vps_to_win": 10},
+                    "players": {
+                        "RED": {
+                            "vp": 2,
+                            "resource_card_count": 1,
+                            "development_card_count": 0,
+                            "roads_left": 13,
+                            "settlements_left": 3,
+                            "cities_left": 4,
+                            "longest_road_length": 1,
+                            "played_knights": 0,
+                        }
+                    },
+                    "board": {},
+                    "bank": {},
+                },
+                "memory": {"short_term": None, "long_term": None},
+            },
+        )
+
+        self.assertIn(
+            "Development (played knights public; unplayed cards private, including VP cards): 0 played knights; no unplayed development cards",
             rendered,
         )
 

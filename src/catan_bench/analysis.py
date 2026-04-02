@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from .run_dirs import iter_run_directory_candidates
 from .schemas import Event, MemorySnapshot, PromptTrace, PublicStateSnapshot
 from .storage import read_json, read_jsonl, write_json
 
@@ -71,7 +72,9 @@ def discover_completed_run_directories(target: str | Path) -> tuple[Path, ...]:
     if not path.is_dir():
         return ()
     candidates = [
-        child for child in path.iterdir() if _is_completed_run_directory(child)
+        child
+        for child in iter_run_directory_candidates(path)
+        if _is_completed_run_directory(child)
     ]
     candidates.sort(key=lambda child: child.stat().st_mtime, reverse=True)
     return tuple(candidates)

@@ -23,7 +23,7 @@ Message character limit: {{ payload.message_char_limit }}
 
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 
-### Chat transcript
+### Trade Chat
 {% if payload.transcript %}
 {% for event in payload.transcript %}
 - {{ fmt_event(event) }}

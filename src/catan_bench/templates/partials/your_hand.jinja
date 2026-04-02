@@ -1,5 +1,5 @@
 {% set player_summary = payload.public_state.players.get(payload.player_id, {}) if payload.public_state.players else {} %}
-{% set resource_count = player_summary.resource_card_count | default(fmt_resource_card_count(payload.private_state.resources), true) %}
+{% set resource_count = player_summary.resource_card_count | default(fmt_resource_card_count(payload.private_state.resources)) %}
 
 ### Your hand
 Resources ({{ resource_count }} cards total; count public, exact types private): {{ fmt_resources(payload.private_state.resources) }}
@@ -8,7 +8,7 @@ Must discard: {{ payload.private_state.discard_requirement.count }} cards
 Legal discard options: {{ payload.private_state.discard_requirement.legal_options }}
 {% endif %}
 {% set dc = fmt_dev_cards(payload.private_state.development_cards) %}
-Development (played knights public; unplayed cards private, including VP cards): {{ player_summary.played_knights | default("?", true) }} played knights; {{ dc if dc != "none" else "no unplayed development cards" }}
+Development (played knights public; unplayed cards private, including VP cards): {{ player_summary.played_knights | default("?") }} played knights; {{ dc if dc != "none" else "no unplayed development cards" }}
 {% set pieces_str = fmt_pieces_long(payload.private_state) %}
 {% if pieces_str %}
 Pieces left to play (public): {{ pieces_str }}

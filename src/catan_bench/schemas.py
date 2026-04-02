@@ -499,6 +499,7 @@ class TradeChatObservation:
     round_index: int
     public_state: dict[str, JsonValue]
     private_state: dict[str, JsonValue]
+    public_history: tuple[Event, ...] = ()
     transcript: tuple[Event, ...] = ()
     public_chat_transcript: tuple[Event, ...] = ()
     requested_resources: dict[str, JsonValue] = field(default_factory=dict)
@@ -522,6 +523,7 @@ class TradeChatObservation:
             "round_index": self.round_index,
             "public_state": self.public_state,
             "private_state": self.private_state,
+            "public_history": [event.to_dict() for event in self.public_history],
             "transcript": [event.to_dict() for event in self.transcript],
             "public_chat_transcript": [
                 event.to_dict() for event in self.public_chat_transcript

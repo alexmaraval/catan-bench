@@ -13,6 +13,7 @@ import altair as alt
 import pandas as pd
 import plotly.graph_objects as go
 
+from .run_dirs import iter_run_directory_candidates
 from .schemas import Event, JsonValue, MemorySnapshot, PromptTrace, PublicStateSnapshot
 
 PLAYER_COLORS: dict[str, tuple[str, str, str]] = {
@@ -234,7 +235,11 @@ def load_dashboard_snapshot(run_dir: str | Path) -> DashboardSnapshot:
 #     return tuple(sorted(candidates, key=_run_sort_key, reverse=True))
 def discover_run_directories(base_dir: Path) -> tuple[Path, ...]:
     """Discover run directories, sorted by modification time (newest first)."""
-    run_dirs = [d for d in base_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()]
+    run_dirs = [
+        d
+        for d in iter_run_directory_candidates(base_dir)
+        if (d / "metadata.json").exists()
+    ]
     # Sort by the modification time of public_history.jsonl in descending order (newest first)
     run_dirs.sort(
         key=lambda d: (d / "public_history.jsonl").stat().st_mtime,

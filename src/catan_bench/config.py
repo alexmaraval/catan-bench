@@ -9,6 +9,7 @@ import tomllib
 class GameConfig:
     engine: str = "catanatron"
     seed: int | None = None
+    version: str | None = None
     discard_limit: int = 7
     vps_to_win: int = 10
     run_dir: Path | None = None
@@ -49,6 +50,7 @@ def _parse_game_payload(payload: dict, defaults: GameConfig) -> GameConfig:
         )
 
     seed = payload.get("seed", defaults.seed)
+    version = payload.get("version", defaults.version)
     run_dir = payload.get("run_dir", defaults.run_dir)
     run_tags = payload.get("run_tags", defaults.run_tags)
     history_window = payload.get("history_window", defaults.history_window)
@@ -70,6 +72,8 @@ def _parse_game_payload(payload: dict, defaults: GameConfig) -> GameConfig:
         trading_chat_history_limit = int(trading_chat_history_limit)
     if run_dir is not None:
         run_dir = Path(run_dir)
+    if version is not None:
+        version = str(version).strip() or None
     if run_tags is None:
         run_tags = ()
     elif isinstance(run_tags, (list, tuple)):
@@ -80,6 +84,7 @@ def _parse_game_payload(payload: dict, defaults: GameConfig) -> GameConfig:
     return GameConfig(
         engine=engine,
         seed=None if seed is None else int(seed),
+        version=version,
         discard_limit=int(payload.get("discard_limit", defaults.discard_limit)),
         vps_to_win=int(payload.get("vps_to_win", defaults.vps_to_win)),
         run_dir=run_dir,

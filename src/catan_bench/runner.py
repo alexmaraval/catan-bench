@@ -42,6 +42,7 @@ from .orchestrator import GameOrchestrator
 from .players import FirstLegalPlayer, LLMPlayer, RandomLegalPlayer
 from .prompts import build_game_rules
 from .reporter import DebugTerminalReporter, TerminalReporter
+from .run_dirs import iter_run_directory_candidates
 from .storage import read_json
 
 _RESUME_ARTIFACT_FILES = (
@@ -137,6 +138,7 @@ def run_from_config_files(
         players_config_path=players_config_path.resolve(),
         run_label=players_config_path.stem,
         game_seed=game_config.seed,
+        run_version=game_config.version,
         run_tags=game_config.run_tags,
     )
     resume_game_id = _load_resume_game_id(resume_run_dir)
@@ -150,6 +152,7 @@ def run_from_config_files(
             game_rules=build_game_rules(game_config.vps_to_win),
         ),
         run_dir=effective_run_dir,
+        run_version=game_config.version,
         run_tags=game_config.run_tags,
         run_label=players_config_path.stem,
         game_seed=game_config.seed,
@@ -193,6 +196,7 @@ def _resolve_requested_run_dir(
     players_config_path: Path | None = None,
     run_label: str | None = None,
     game_seed: int | None = None,
+    run_version: str | None = None,
     run_tags: tuple[str, ...] = (),
 ) -> tuple[Path | None, Path | None]:
     if requested_run_dir is None:
@@ -203,6 +207,7 @@ def _resolve_requested_run_dir(
             players_config_path=players_config_path,
             run_label=run_label,
             game_seed=game_seed,
+            run_version=run_version,
             run_tags=run_tags,
         )
     requested_path = Path(requested_run_dir)
@@ -230,6 +235,7 @@ def _find_matching_resume_run_dir(
     players_config_path: Path | None,
     run_label: str | None,
     game_seed: int | None,
+    run_version: str | None,
     run_tags: tuple[str, ...],
 ) -> Path:
     if configured_run_dir is None:
@@ -247,8 +253,8 @@ def _find_matching_resume_run_dir(
         )
 
     matching_runs: list[Path] = []
-    for child in sorted(Path(configured_run_dir).iterdir()):
-        if not child.is_dir() or not _is_existing_run_directory(child):
+    for child in iter_run_directory_candidates(configured_run_dir):
+        if not _is_existing_run_directory(child):
             continue
         metadata = read_json(child / "metadata.json") or {}
         if _resume_run_matches_config(
@@ -256,6 +262,7 @@ def _find_matching_resume_run_dir(
             players_config_path=players_config_path,
             run_label=run_label,
             game_seed=game_seed,
+            run_version=run_version,
             run_tags=run_tags,
         ):
             matching_runs.append(child)
@@ -280,6 +287,7 @@ def _resume_run_matches_config(
     players_config_path: Path,
     run_label: str | None,
     game_seed: int | None,
+    run_version: str | None,
     run_tags: tuple[str, ...],
 ) -> bool:
     matched = False
@@ -306,6 +314,12 @@ def _resume_run_matches_config(
     if isinstance(metadata_run_tags, list):
         normalized_run_tags = tuple(str(tag) for tag in metadata_run_tags)
         if normalized_run_tags != tuple(str(tag) for tag in run_tags):
+            return False
+        matched = True
+
+    metadata_run_version = metadata.get("run_version")
+    if isinstance(metadata_run_version, str):
+        if run_version is not None and metadata_run_version != str(run_version):
             return False
         matched = True
 

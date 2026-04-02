@@ -22,6 +22,15 @@ Current request draft: {{ fmt_resources(payload.requested_resources) }}
 Other players: {{ payload.other_player_ids | join(", ") }}
 Message character limit: {{ payload.message_char_limit }}
 
+### Recent Game History
+{% if payload.public_history %}
+{% for event in payload.public_history %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% else %}
+(none)
+{% endif %}
+
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 {% include "partials/strategy_memory.jinja" %}
 

@@ -61,6 +61,7 @@ def _resolve_run_dir(
     base_run_dir: str | Path | None,
     *,
     game_id: str,
+    run_version: str | None = None,
     run_tags: tuple[str, ...] = (),
     run_label: str | None = None,
     game_seed: int | None = None,
@@ -69,9 +70,17 @@ def _resolve_run_dir(
         return None
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     token = secrets.token_hex(4)
-    name_parts = [
+    version_slug = _slugify_path_component(run_version) if run_version else None
+    tag_slugs = [
         _slugify_path_component(tag) for tag in run_tags if _slugify_path_component(tag)
     ]
+    if version_slug is None and tag_slugs:
+        version_slug = tag_slugs[0]
+        tag_slugs = tag_slugs[1:]
+    elif version_slug is not None and tag_slugs and tag_slugs[0] == version_slug:
+        tag_slugs = tag_slugs[1:]
+    version_slug = version_slug or "unversioned"
+    name_parts = ["tags", *tag_slugs]
     if run_label:
         label_slug = _slugify_path_component(run_label)
         if label_slug:
@@ -80,7 +89,7 @@ def _resolve_run_dir(
         name_parts.append(f"seed-{game_seed}")
     name_parts.append(_slugify_path_component(game_id))
     run_name = "-".join(name_parts + [timestamp, token])
-    return Path(base_run_dir) / run_name
+    return Path(base_run_dir) / version_slug / run_name
 
 
 @dataclass(slots=True)
@@ -125,6 +134,7 @@ class GameOrchestrator:
         prompt_trace_store: PromptTraceStore | None = None,
         action_trace_store: ActionTraceStore | None = None,
         run_dir: str | Path | None = None,
+        run_version: str | None = None,
         run_tags: tuple[str, ...] = (),
         run_label: str | None = None,
         game_seed: int | None = None,
@@ -152,6 +162,7 @@ class GameOrchestrator:
             else _resolve_run_dir(
                 run_dir,
                 game_id=engine.game_id,
+                run_version=run_version,
                 run_tags=run_tags,
                 run_label=run_label,
                 game_seed=game_seed,
@@ -172,6 +183,7 @@ class GameOrchestrator:
             resolved_run_dir
         )
         self.run_dir = resolved_run_dir
+        self._run_version = None if run_version is None else str(run_version)
         self._run_tags = tuple(str(tag) for tag in run_tags)
         self._run_label = None if run_label is None else str(run_label)
         self._game_seed = game_seed
@@ -352,6 +364,7 @@ class GameOrchestrator:
                     "game_id": self.engine.game_id,
                     "artifact_version": 3,
                     "run_directory": str(self.run_dir),
+                    "run_version": self._run_version,
                     "run_tags": list(self._run_tags),
                     "run_label": self._run_label,
                     "game_seed": self._game_seed,

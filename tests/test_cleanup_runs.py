@@ -66,6 +66,18 @@ class CleanupRunsTests(unittest.TestCase):
 
             self.assertEqual(discovered, (run_dir,))
 
+    def test_discover_incomplete_run_directories_walks_version_subdirectories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            unfinished = base / "1.1.1" / "tags-unstable-run"
+            finished = base / "1.1.1" / "tags-finished-run"
+            self._make_run_dir(unfinished, finished=False)
+            self._make_run_dir(finished, finished=True)
+
+            discovered = discover_incomplete_run_directories(base)
+
+            self.assertEqual(discovered, (unfinished,))
+
 
 if __name__ == "__main__":
     unittest.main()

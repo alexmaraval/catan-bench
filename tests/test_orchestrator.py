@@ -1715,6 +1715,102 @@ class GameOrchestratorTests(unittest.TestCase):
             counterparty_trade_obs.public_chat_transcript[0].payload["message"],
             "BLUE, WHITE is the real threat.",
         )
+        self.assertTrue(counterparty_trade_obs.public_history)
+        self.assertTrue(counterparty_trade_obs.transcript)
+        self.assertTrue(
+            all(
+                event.kind not in {"trade_chat_opened", "trade_chat_message"}
+                for event in counterparty_trade_obs.public_history
+            )
+        )
+        self.assertEqual(
+            [event.kind for event in counterparty_trade_obs.transcript],
+            ["trade_chat_opened", "trade_chat_message"],
+        )
+
+    def test_second_trade_chat_open_observation_includes_previous_room_in_history(
+        self,
+    ) -> None:
+        red = ScriptedPlayer(
+            start_turn_responses=[
+                TurnStartResponse(short_term={"plan": "Try two different asks."})
+            ],
+            action_responses=[
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Ask for wood first."},
+                ),
+                ActionDecision(
+                    action=Action(
+                        "OFFER_TRADE",
+                        payload={"offer": {"BRICK": 1}, "request": {"WOOD": 1}},
+                    ),
+                    short_term={"plan": "Ask for ore second."},
+                ),
+                ActionDecision(action=Action("END_TURN"), short_term={"plan": "Move on."}),
+            ],
+            trade_chat_open_responses=[
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need wood.",
+                    requested_resources={"WOOD": 1},
+                ),
+                TradeChatOpenResponse(
+                    open_chat=True,
+                    message="Need ore instead.",
+                    requested_resources={"ORE": 1},
+                ),
+            ],
+            trade_chat_owner_decision_responses=[
+                TradeChatOwnerDecisionResponse(decision="close", message="No deal."),
+                TradeChatOwnerDecisionResponse(decision="close", message="Still no deal."),
+            ],
+            end_turn_responses=[
+                TurnEndResponse(long_term={"goal": "Try again next turn."})
+            ],
+        )
+        blue = ScriptedPlayer()
+
+        orchestrator = GameOrchestrator(
+            MockTradeChatInsufficientOwnerResourcesEngine(),
+            {"RED": red, "BLUE": blue},
+            trading_chat_enabled=True,
+        )
+
+        orchestrator.run()
+
+        second_open_obs = next(
+            observation
+            for observation in red.trade_chat_observations
+            if observation.stage == "open" and observation.attempt_index == 2
+        )
+        self.assertEqual(second_open_obs.transcript, ())
+        self.assertIn(
+            "trade_chat_opened",
+            {event.kind for event in second_open_obs.public_history},
+        )
+        self.assertIn(
+            "trade_chat_message",
+            {event.kind for event in second_open_obs.public_history},
+        )
+        self.assertIn(
+            "trade_chat_no_deal",
+            {event.kind for event in second_open_obs.public_history},
+        )
+        self.assertIn(
+            "trade_chat_closed",
+            {event.kind for event in second_open_obs.public_history},
+        )
+        self.assertTrue(
+            all(
+                (event.payload.get("attempt_index") != 2)
+                for event in second_open_obs.public_history
+                if event.kind.startswith("trade_chat_")
+            )
+        )
 
     def test_orchestrator_records_persistent_public_chat_and_surfaces_transcript(
         self,

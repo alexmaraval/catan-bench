@@ -16,7 +16,7 @@ Public Largest Army status: {{ fmt_largest_army_status(payload.public_state.play
 
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 
-### Chat transcript
+### Trade Chat
 {% if payload.transcript %}
 {% for event in payload.transcript %}
 - {{ fmt_event(event) }}

@@ -1,0 +1,47 @@
+# Game 04 of 06 in the 8-model minimum practical Elo schedule.
+[game]
+seed = 123
+
+[[players]]
+id = "RED"
+type = "llm"
+model = "z-ai/glm-5-turbo"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "arcee-ai/trinity-large-thinking"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "deepseek/deepseek-v3.2"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "x-ai/grok-4.1-fast"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false

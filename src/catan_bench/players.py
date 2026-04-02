@@ -894,6 +894,10 @@ class LLMPlayer:
             "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
+            "public_history": [
+                event.to_dict()
+                for event in self._tail_events(observation.public_history, compact=False)
+            ],
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "other_player_ids": list(observation.other_player_ids),
@@ -927,6 +931,10 @@ class LLMPlayer:
             "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
+            "public_history": [
+                event.to_dict()
+                for event in self._tail_events(observation.public_history, compact=False)
+            ],
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "proposals": [proposal.to_dict() for proposal in observation.proposals],
@@ -960,6 +968,10 @@ class LLMPlayer:
             "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
+            "public_history": [
+                event.to_dict()
+                for event in self._tail_events(observation.public_history, compact=False)
+            ],
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "proposals": [proposal.to_dict() for proposal in observation.proposals],

@@ -1,0 +1,47 @@
+# Game 06 of 13 in the pairwise-complete 13-model Elo schedule.
+[game]
+seed = 1337
+
+[[players]]
+id = "RED"
+type = "llm"
+model = "qwen/qwen3.6-plus:free"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "deepseek/deepseek-v3.2"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "moonshotai/kimi-k2.5"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "z-ai/glm-5-turbo"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false

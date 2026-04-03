@@ -1,11 +1,11 @@
-# Game 01 of 06 in the 8-model minimum practical Elo schedule.
+# Game 09 of 13 in the pairwise-complete 13-model Elo schedule.
 [game]
-seed = 12
+seed = 8192
 
 [[players]]
 id = "RED"
 type = "llm"
-model = "nvidia/nemotron-3-super-120b-a12b:free"
+model = "moonshotai/kimi-k2.5"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
@@ -16,7 +16,7 @@ reasoning_enabled = false
 [[players]]
 id = "BLUE"
 type = "llm"
-model = "z-ai/glm-5-turbo"
+model = "prime-intellect/intellect-3"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
@@ -27,7 +27,7 @@ reasoning_enabled = false
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "xiaomi/mimo-v2-flash"
+model = "stepfun/step-3.5-flash"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
@@ -38,7 +38,7 @@ reasoning_enabled = false
 [[players]]
 id = "WHITE"
 type = "llm"
-model = "arcee-ai/trinity-large-thinking"
+model = "mistralai/mistral-large-2512"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300

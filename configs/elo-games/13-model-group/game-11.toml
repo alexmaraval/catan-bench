@@ -1,0 +1,47 @@
+# Game 11 of 13 in the pairwise-complete 13-model Elo schedule.
+[game]
+seed = 20031
+
+[[players]]
+id = "RED"
+type = "llm"
+model = "openai/gpt-oss-120b"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "BLUE"
+type = "llm"
+model = "stepfun/step-3.5-flash"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "ORANGE"
+type = "llm"
+model = "nvidia/nemotron-3-super-120b-a12b:free"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false
+
+[[players]]
+id = "WHITE"
+type = "llm"
+model = "deepseek/deepseek-v3.2"
+api_base = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 300
+temperature = 0.3
+top_p = 1.0
+reasoning_enabled = false

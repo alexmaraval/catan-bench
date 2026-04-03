@@ -1,11 +1,11 @@
-# Game 06 of 06 in the 8-model minimum practical Elo schedule.
+# Game 04 of 13 in the pairwise-complete 13-model Elo schedule.
 [game]
-seed = 42069
+seed = 123
 
 [[players]]
 id = "RED"
 type = "llm"
-model = "qwen/qwen3-235b-a22b-2507"
+model = "arcee-ai/trinity-large-thinking"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
@@ -16,7 +16,7 @@ reasoning_enabled = false
 [[players]]
 id = "BLUE"
 type = "llm"
-model = "deepseek/deepseek-v3.2"
+model = "mistralai/mistral-large-2512"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
@@ -27,18 +27,18 @@ reasoning_enabled = false
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "minimax/minimax-m2.7"
+model = "deepseek/deepseek-v3.2"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_effort = "minimal"
+reasoning_enabled = false
 
 [[players]]
 id = "WHITE"
 type = "llm"
-model = "xiaomi/mimo-v2-flash"
+model = "google/gemma-4-31b-it"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300

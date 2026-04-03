@@ -8,7 +8,9 @@ There are no valid concrete proposals to select right now.
 {% endif %}
 Prefer proposals that improve your build tempo at a better rate than your likely maritime fallback. If nobody offers that, close the room and move on.
 
-## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+## Turn {{ payload.turn_index }}
+
+{% include "partials/identity_perspective.jinja" %}
 
 {% include "partials/your_hand.jinja" %}
 

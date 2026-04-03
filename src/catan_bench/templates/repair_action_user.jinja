@@ -1,3 +1,8 @@
+Stage: Repair action.
+You are fixing your own previous invalid move as player {{ payload.player_id }}.
+
+{% include "partials/identity_perspective.jinja" %}
+
 Repair the previous invalid move by selecting one legal action.
 
 **Error:** {{ payload.error }}

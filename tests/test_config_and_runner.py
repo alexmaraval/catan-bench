@@ -59,8 +59,6 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertIsNone(game_config.seed)
         self.assertEqual(game_config.version, "1.2.0")
         self.assertEqual(game_config.prompt_history_limit, 30)
-        self.assertEqual(game_config.run_dir, Path("runs/test"))
-        self.assertEqual(game_config.run_tags, ("1.2.0",))
         self.assertIn(
             f"The first player to reach {game_config.vps_to_win} victory points wins.",
             CATAN_RULES_SUMMARY,

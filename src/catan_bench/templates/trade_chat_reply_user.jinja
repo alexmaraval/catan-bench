@@ -5,7 +5,9 @@ You cannot trade with another non-owner player in this room.
 Compelling proposals should help you while still being attractive enough that the owner might prefer them to a bank fallback.
 Because the room is public, if another player already posted a proposal and you want the deal, improve on it or offer a cleaner fit instead of repeating a worse trade.
 
-## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+## Turn {{ payload.turn_index }}
+
+{% include "partials/identity_perspective.jinja" %}
 
 {% include "partials/your_hand.jinja" %}
 

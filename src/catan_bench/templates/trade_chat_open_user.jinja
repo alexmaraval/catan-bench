@@ -4,7 +4,9 @@ Any eventual trade must be between you and one other player.
 Keep public messages concrete and useful.
 If a domestic deal could beat your bank or port rate, open the room first. Maritime trade should usually be the fallback after the table passes or if your port is already clearly better.
 
-## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+## Turn {{ payload.turn_index }}
+
+{% include "partials/identity_perspective.jinja" %}
 
 {% include "partials/your_hand.jinja" %}
 

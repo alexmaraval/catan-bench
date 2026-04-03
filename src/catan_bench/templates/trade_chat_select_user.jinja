@@ -1,7 +1,9 @@
 Stage: Trade chat selection.
 Review the quotes and choose exactly one player to trade with, or no deal.
 
-## Turn {{ payload.turn_index }} — You are {{ payload.player_id }}
+## Turn {{ payload.turn_index }}
+
+{% include "partials/identity_perspective.jinja" %}
 
 {% include "partials/your_hand.jinja" %}
 

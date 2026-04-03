@@ -958,9 +958,15 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_trade_chat_open(observation)
         user_prompt = messages[1]["content"]
 
+        self.assertIn("### Identity", user_prompt)
+        self.assertIn("You are player RED.", user_prompt)
         self.assertIn("### Recent Game History", user_prompt)
         self.assertIn("RED rolled [4, 3]", user_prompt)
         self.assertIn("### Main public chat", user_prompt)
+        self.assertIn(
+            "Quoted table talk from named speakers. Read it as public evidence, not as your voice.",
+            user_prompt,
+        )
         self.assertIn("BLUE to WHITE (public): RED is pushing for road tempo.", user_prompt)
 
     def test_trade_chat_reply_prompt_includes_recent_game_history(self) -> None:
@@ -1042,11 +1048,17 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_trade_chat_reply(observation)
         user_prompt = messages[1]["content"]
 
+        self.assertIn("### Identity", user_prompt)
+        self.assertIn("You are player BLUE.", user_prompt)
         self.assertIn("### Recent Game History", user_prompt)
         self.assertIn("RED rolled [4, 3]", user_prompt)
         self.assertIn("### Trade Chat", user_prompt)
         self.assertIn("RED opened trade chat requesting 1×BRICK", user_prompt)
         self.assertIn("RED: Need brick.", user_prompt)
+        self.assertIn(
+            "Quoted table talk from named speakers. Read it as public evidence, not as your voice.",
+            user_prompt,
+        )
         self.assertIn("A concrete proposal usually means `you_give` matches or includes that request.", user_prompt)
         self.assertIn("If your message says \"I'll give you X for Y\", then JSON must be `you_give = X` and `you_get = Y`.", user_prompt)
 
@@ -1155,6 +1167,8 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_action(observation)
         user_prompt = messages[1]["content"]
 
+        self.assertIn("### Identity", user_prompt)
+        self.assertIn("You are player RED.", user_prompt)
         self.assertIn("[0] OFFER_TRADE", user_prompt)
         self.assertIn("### Recent Game History", user_prompt)
         self.assertIn('payload: `{"offer": {}, "request": {}}`', user_prompt)
@@ -1165,6 +1179,43 @@ class LLMPlayerTests(unittest.TestCase):
         self.assertIn("[1] MOVE_ROBBER", user_prompt)
         self.assertIn(
             'payload: `{"coordinate": [1, -1, 0], "victim": "BLUE"}`', user_prompt
+        )
+
+    def test_repair_prompt_includes_identity_perspective_block(self) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"action_index": 0}),
+            model="fake-model",
+        )
+        observation = ActionObservation(
+            game_id="game-1",
+            player_id="RED",
+            history_index=2,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=5,
+            public_state={"turn": {"turn_player_id": "RED"}},
+            private_state={"resources": {"WOOD": 1}},
+            public_history=(),
+            turn_public_events=(),
+            legal_actions=(Action("END_TURN"),),
+            decision_prompt="Choose an action.",
+            game_rules="Rules",
+            memory=PlayerMemory(
+                long_term={"belief": "BLUE wants brick"},
+                short_term={"plan": "Trade first."},
+            ),
+        )
+
+        messages = player._repair_messages(observation, {"action_index": 99})
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("Stage: Repair action.", user_prompt)
+        self.assertIn("### Identity", user_prompt)
+        self.assertIn("You are player RED.", user_prompt)
+        self.assertIn("Current turn owner: RED. That is you.", user_prompt)
+        self.assertIn(
+            "Only use information and legal actions that belong to RED.",
+            user_prompt,
         )
 
     def test_choose_action_system_prompt_warns_against_circular_trades(self) -> None:
@@ -1209,6 +1260,11 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_action(observation)
         system_prompt = messages[0]["content"]
 
+        self.assertIn("You are exactly player RED in this game.", system_prompt)
+        self.assertIn(
+            "Interpret all first-person and second-person references only from RED's point of view.",
+            system_prompt,
+        )
         self.assertIn("Avoid circular same-turn trades", system_prompt)
         self.assertIn("unless you intentionally want that reversal", system_prompt)
 
@@ -1499,6 +1555,9 @@ class LLMPlayerTests(unittest.TestCase):
             },
         )
 
+        self.assertIn("### Identity", rendered)
+        self.assertIn("You are player RED.", rendered)
+        self.assertIn("Current turn owner: RED. That is you.", rendered)
         self.assertIn(
             "Development (played knights public; unplayed cards private, including VP cards): 0 played knights; no unplayed development cards",
             rendered,

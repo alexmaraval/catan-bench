@@ -1419,6 +1419,8 @@ class LLMPlayer:
     ) -> list[dict[str, object]]:
         placement_candidates_key = self._placement_candidates_key(observation)
         payload: dict[str, object] = {
+            "player_id": observation.player_id,
+            "public_state": observation.public_state,
             "error": "Your previous response selected an illegal action for the current decision.",
             "previous_response": attempted_response,
         }

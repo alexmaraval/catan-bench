@@ -1,0 +1,18 @@
+{% set turn_player_id = payload.public_state.get("turn", {}).get("turn_player_id") if payload.public_state is defined and payload.public_state else none %}
+{% set owner_player_id = payload.owner_player_id if payload.owner_player_id is defined else none %}
+{% set turn_owner_note = "That is you." if turn_player_id == payload.player_id else "That player is not you unless explicitly stated otherwise." %}
+{% set trade_owner_note = "You are the owner." if owner_player_id == payload.player_id else "The owner is not you." %}
+### Identity
+- You are player {{ payload.player_id }}.
+- Use {{ payload.player_id }}'s point of view for every line below.
+{% if turn_player_id %}
+- Current turn owner: {{ turn_player_id }}. {{ turn_owner_note }}
+{% endif %}
+{% if owner_player_id %}
+- Trade-room owner: {{ owner_player_id }}. {{ trade_owner_note }}
+{% endif %}
+{% if payload.private_state is defined and payload.private_state %}
+- Only the cards and private facts shown for {{ payload.player_id }} belong to you.
+{% else %}
+- Only use information and legal actions that belong to {{ payload.player_id }}.
+{% endif %}

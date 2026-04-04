@@ -1260,7 +1260,7 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_action(observation)
         system_prompt = messages[0]["content"]
 
-        self.assertIn("You are exactly player RED in this game.", system_prompt)
+        self.assertIn("You are player RED in this game.", system_prompt)
         self.assertIn(
             "Interpret all first-person and second-person references only from RED's point of view.",
             system_prompt,

@@ -385,6 +385,24 @@ class ConfigAndRunnerTests(unittest.TestCase):
             r"^tags-dev-mixed-players-seed-12-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
         )
 
+    def test_resolve_run_dir_omits_tags_prefix_when_effectively_untagged(self) -> None:
+        resolved = _resolve_run_dir(
+            Path("runs"),
+            game_id="mock-game",
+            run_version="1.2.0",
+            run_tags=("1.2.0",),
+            run_label="players",
+            game_seed=42,
+        )
+
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.parent, Path("runs") / "1.2.0")
+        self.assertRegex(
+            resolved.name,
+            r"^players-seed-42-mock-game-\d{8}T\d{6}Z-[0-9a-f]{8}$",
+        )
+
     def test_runner_uses_debug_reporter_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             game_toml = Path(tmpdir) / "game.toml"
@@ -658,7 +676,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             players_toml = Path(tmpdir) / "players.toml"
             players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
 
-            matching_run = base_run_dir / "1.2.0" / "tags-players"
+            matching_run = base_run_dir / "1.2.0" / "players"
             _write_resume_artifacts(
                 matching_run,
                 metadata_contents=(
@@ -673,7 +691,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 ),
             )
             _write_resume_artifacts(
-                base_run_dir / "1.1.0" / "tags-other",
+                base_run_dir / "1.1.0" / "other",
                 metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
             )
 
@@ -709,11 +727,11 @@ class ConfigAndRunnerTests(unittest.TestCase):
                 "}\n"
             )
             _write_resume_artifacts(
-                base_run_dir / "1.2.0" / "tags-match-a",
+                base_run_dir / "1.2.0" / "match-a",
                 metadata_contents=metadata_contents,
             )
             _write_resume_artifacts(
-                base_run_dir / "1.2.0" / "tags-match-b",
+                base_run_dir / "1.2.0" / "match-b",
                 metadata_contents=metadata_contents,
             )
 
@@ -734,7 +752,7 @@ class ConfigAndRunnerTests(unittest.TestCase):
             players_toml = Path(tmpdir) / "players.toml"
             players_toml.write_text("[[players]]\nid = \"RED\"\ntype = \"random\"\n", encoding="utf-8")
             _write_resume_artifacts(
-                base_run_dir / "1.1.0" / "tags-other",
+                base_run_dir / "1.1.0" / "other",
                 metadata_contents='{"game_id":"saved-game-id","players_config_path":"/tmp/other.toml"}\n',
             )
 

@@ -80,7 +80,7 @@ def _resolve_run_dir(
     elif version_slug is not None and tag_slugs and tag_slugs[0] == version_slug:
         tag_slugs = tag_slugs[1:]
     version_slug = version_slug or "unversioned"
-    name_parts = ["tags", *tag_slugs]
+    name_parts = ["tags", *tag_slugs] if tag_slugs else []
     if run_label:
         label_slug = _slugify_path_component(run_label)
         if label_slug:

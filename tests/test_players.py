@@ -1612,11 +1612,11 @@ class LLMPlayerTests(unittest.TestCase):
 
         self.assertIn("Public Longest Road status:", rendered)
         self.assertIn(
-            "WHITE [this is you]: 2VP  4 resource cards  2 unused development cards  pieces left 13R/3S/4C",
+            "WHITE [this is you]: 2 Victory Points  4 resource cards  2 unused development cards  pieces left 13R/3S/4C  longest road 4  played knights 1",
             rendered,
         )
         self.assertIn(
-            "BLUE: 4VP  5 resource cards  1 unused development card  pieces left 10R/3S/3C",
+            "BLUE: 4 Victory Points  5 resource cards  1 unused development card  pieces left 10R/3S/3C  longest road 6  played knights 3  [Longest Road]  [Largest Army]",
             rendered,
         )
         self.assertIn("BLUE currently holds Longest Road at length 6.", rendered)
@@ -1917,7 +1917,7 @@ class LLMPlayerTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "BLUE [this is you]: 2VP  1 resource card  0 unused development cards",
+            "BLUE [this is you]: 2 Victory Points  1 resource card  0 unused development cards  pieces left 13R/3S/4C  longest road 2  played knights 0",
             rendered,
         )
         self.assertIn("Robber: [0, 1, -1] (on ORE@9)", rendered)

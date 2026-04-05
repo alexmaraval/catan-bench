@@ -8,6 +8,7 @@ from .config import GameConfig, load_game_config
 _CATAN_RULES_TEMPLATE = """You are playing Settlers of Catan in a benchmark harness.
 
 Core rules:
+- Goal of the game: the first player to reach {vps_to_win} victory points wins.
 - Players collect WOOD, BRICK, SHEEP, WHEAT, and ORE.
 - On your turn, resolve the dice roll first, then trade/build. You may also play at most 1 development card at any time during your turn.
 - Standard costs: ROAD = 1×WOOD + 1×BRICK; SETTLEMENT = 1×WOOD + 1×BRICK + 1×SHEEP + 1×WHEAT; CITY = 2×WHEAT + 3×ORE; DEVELOPMENT_CARD = 1×SHEEP + 1×WHEAT + 1×ORE.
@@ -15,7 +16,6 @@ Core rules:
 - Roads extend your network and contest Longest Road. The first player with a continuous road of at least 5 segments takes Longest Road; a longer road steals it.
 - The first player to play 3 knight cards takes Largest Army; a player with more played knights steals it.
 - New settlements must follow the distance rule: no adjacent settlement/city on neighboring intersections, and outside set-up they must connect to your own road.
-- The first player to reach {vps_to_win} victory points wins.
 - Information is partially observable: public state is shared, but each player has private cards and private memory.
 - Tile numbers indicate production frequency: 6 and 8 are strongest, then 5 and 9, then 4 and 10, then 3 and 11, then 2 and 12; 7 produces no resources and instead triggers the robber.
 - Board notation: hex coordinates like [q, r, s] identify tiles only. You usually do not need to reason geometrically from them.

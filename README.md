@@ -52,6 +52,30 @@ The repo keeps two example configs:
 
 To target another OpenAI-compatible provider or a local server, copy `configs/openai-players.toml` and change `api_base`, `api_key_env`, and `model`.
 
+## Elo Snapshot
+
+Static snapshot from `runs/elo-games/1.0.0`, computed on April 5, 2026 from the same run artifacts used by the dashboard. This schedule contains 6 completed games across 8 models, with each model appearing in 3 games.
+
+| Rank | Model | ELO | Games | Wins | Win Rate | Avg VP |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `deepseek/deepseek-v3.2` | 1592 | 3 | 2 | 66.67% | 8.7 |
+| 2 | `nvidia/nemotron-3-super-120b-a12b:free` | 1564 | 3 | 1 | 33.33% | 7.7 |
+| 3 | `x-ai/grok-4.1-fast` | 1509 | 3 | 1 | 33.33% | 6.0 |
+| 4 | `minimax/minimax-m2.7` | 1492 | 3 | 0 | 0.00% | 7.3 |
+| 5 | `z-ai/glm-5-turbo` | 1489 | 3 | 1 | 33.33% | 7.0 |
+| 6 | `xiaomi/mimo-v2-flash` | 1476 | 3 | 0 | 0.00% | 6.0 |
+| 7 | `arcee-ai/trinity-large-preview:free` | 1462 | 3 | 1 | 33.33% | 7.0 |
+| 8 | `qwen/qwen3-235b-a22b-2507` | 1418 | 3 | 0 | 0.00% | 5.7 |
+
+Game winners:
+
+- `game-01` (seed 12): `arcee-ai/trinity-large-preview:free`
+- `game-02` (seed 24): `deepseek/deepseek-v3.2`
+- `game-03` (seed 42): `nvidia/nemotron-3-super-120b-a12b:free`
+- `game-04` (seed 123): `z-ai/glm-5-turbo`
+- `game-05` (seed 777): `x-ai/grok-4.1-fast`
+- `game-06` (seed 42069): `deepseek/deepseek-v3.2`
+
 ## Development
 
 ```bash

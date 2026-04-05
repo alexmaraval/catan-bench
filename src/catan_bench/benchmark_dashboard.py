@@ -207,7 +207,7 @@ def _render_leaderboard(
                 "Model": _short_model_name(model),
                 "ELO": round(elo.ratings[model]),
                 "Games": gp,
-                "Win Rate": wins / max(gp, 1),
+                "Win Rate": (wins / max(gp, 1)) * 100,
                 "Avg VP": round(total_vp / max(gp, 1), 1),
                 "Trading": round(rubric.trading, 1) if rubric else 0,
                 "Strategy": round(rubric.strategy, 1) if rubric else 0,
@@ -227,15 +227,27 @@ def _render_leaderboard(
             "Model": st.column_config.TextColumn(width="medium"),
             "ELO": st.column_config.NumberColumn(format="%d"),
             "Win Rate": st.column_config.ProgressColumn(
-                min_value=0, max_value=1, format="%.0%%"
+                min_value=0, max_value=100, format="%.2f%%"
             ),
             "Avg VP": st.column_config.NumberColumn(format="%.1f"),
-            "Trading": st.column_config.ProgressColumn(min_value=0, max_value=100),
-            "Strategy": st.column_config.ProgressColumn(min_value=0, max_value=100),
-            "Manipulation": st.column_config.ProgressColumn(min_value=0, max_value=100),
-            "Resources": st.column_config.ProgressColumn(min_value=0, max_value=100),
-            "Mechanics": st.column_config.ProgressColumn(min_value=0, max_value=100),
-            "Overall": st.column_config.ProgressColumn(min_value=0, max_value=100),
+            "Trading": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Strategy": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Manipulation": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Resources": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Mechanics": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Overall": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
         },
         width="stretch",
     )

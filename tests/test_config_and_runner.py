@@ -60,8 +60,8 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(game_config.version, "1.2.0")
         self.assertEqual(game_config.prompt_history_limit, 30)
         self.assertIn(
-            f"The first player to reach {game_config.vps_to_win} victory points wins.",
-            CATAN_RULES_SUMMARY,
+            f"the first player to reach {game_config.vps_to_win} victory points wins.",
+            CATAN_RULES_SUMMARY.lower(),
         )
         self.assertTrue(game_config.public_chat_enabled)
         self.assertEqual(game_config.public_chat_message_chars, 500)
@@ -303,8 +303,8 @@ class ConfigAndRunnerTests(unittest.TestCase):
             self.assertEqual(orchestrator_cls.call_args.kwargs["run_label"], "players")
             self.assertIsNone(orchestrator_cls.call_args.kwargs["game_seed"])
             self.assertIn(
-                "The first player to reach 5 victory points wins.",
-                orchestrator_cls.call_args.kwargs["observation_builder"].game_rules,
+                "the first player to reach 5 victory points wins.",
+                orchestrator_cls.call_args.kwargs["observation_builder"].game_rules.lower(),
             )
 
     def test_runner_uses_game_seed_override_from_players_file(self) -> None:

@@ -180,7 +180,7 @@ def fmt_player_standing(
     if player_id == viewer_player_id:
         player_label = f"{player_label} [this is you]"
     parts = [
-        f"{player_label}: {vp}VP",
+        f"{player_label}: {vp} Victory Points",
         f"{resource_cards} resource {resource_card_noun}",
         f"{development_cards} unused development {development_card_noun}",
         f"pieces left {roads_left}R/{settlements_left}S/{cities_left}C",

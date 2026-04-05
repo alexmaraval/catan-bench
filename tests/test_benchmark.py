@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from catan_bench.benchmark import collect_game_records, main as benchmark_main
+from catan_bench.benchmark import (
+    GameRecord,
+    collect_game_records,
+    compute_elo_ratings,
+    main as benchmark_main,
+)
 from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
 
 
@@ -101,6 +107,60 @@ class BenchmarkCliTests(unittest.TestCase):
 
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0].run_dir, run_dir)
+
+    def test_collect_game_records_uses_deterministic_path_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            run_a = base_dir / "1.2.0" / "game-01"
+            run_b = base_dir / "1.2.0" / "game-02"
+            self._make_minimal_completed_run(
+                run_a,
+                red_model="provider/red-model",
+                blue_model="provider/blue-model",
+            )
+            self._make_minimal_completed_run(
+                run_b,
+                red_model="provider/red-model",
+                blue_model="provider/blue-model",
+            )
+
+            # Deliberately invert mtimes: order should still follow the path names.
+            os.utime(run_a, (100.0, 100.0))
+            os.utime(run_b, (200.0, 200.0))
+
+            records = collect_game_records(base_dir)
+
+            self.assertEqual(
+                [record.run_dir.name for record in records],
+                ["game-01", "game-02"],
+            )
+
+    def test_compute_elo_ratings_is_invariant_to_player_order_within_game(self) -> None:
+        first_order = GameRecord(
+            game_id="game-a",
+            run_dir=Path("run-a"),
+            num_turns=10,
+            player_models={"RED": "A", "BLUE": "B", "ORANGE": "C", "WHITE": "D"},
+            winner_ids=["RED"],
+            player_vps={"RED": 10, "BLUE": 7, "ORANGE": 6, "WHITE": 5},
+            analysis=None,
+        )
+        reversed_order = GameRecord(
+            game_id="game-a",
+            run_dir=Path("run-a"),
+            num_turns=10,
+            player_models={"WHITE": "D", "ORANGE": "C", "BLUE": "B", "RED": "A"},
+            winner_ids=["RED"],
+            player_vps={"RED": 10, "BLUE": 7, "ORANGE": 6, "WHITE": 5},
+            analysis=None,
+        )
+
+        first_ratings = compute_elo_ratings([first_order]).ratings
+        reversed_ratings = compute_elo_ratings([reversed_order]).ratings
+
+        self.assertEqual(first_ratings.keys(), reversed_ratings.keys())
+        for model in first_ratings:
+            self.assertAlmostEqual(first_ratings[model], reversed_ratings[model])
 
     def test_benchmark_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

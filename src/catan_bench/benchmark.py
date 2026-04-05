@@ -75,9 +75,9 @@ def _discover_run_directories(base_run_dir: Path) -> tuple[Path, ...]:
         return (base,)
     if not base.exists() or not base.is_dir():
         return ()
-    candidates = [p for p in iter_run_directory_candidates(base) if _is_run_directory(p)]
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return tuple(candidates)
+    # ELO is order-sensitive across games, so keep a deterministic path-based order
+    # rather than filesystem mtimes that can change when artifacts are copied/touched.
+    return tuple(p for p in iter_run_directory_candidates(base) if _is_run_directory(p))
 
 
 def collect_game_records(base_run_dir: Path) -> list[GameRecord]:
@@ -231,13 +231,19 @@ def compute_elo_ratings(
 
         # Pairwise ELO updates
         outcomes = _generate_pairwise_outcomes(record)
+        rating_deltas: defaultdict[str, float] = defaultdict(float)
         for model_a, model_b, score_a in outcomes:
+            # Apply all pairwise comparisons against the pre-game snapshot so a
+            # single game's rating change does not depend on seat ordering.
             ra = state.ratings[model_a]
             rb = state.ratings[model_b]
             ea = _elo_expected(ra, rb)
             eb = 1.0 - ea
-            state.ratings[model_a] = ra + k_factor * (score_a - ea)
-            state.ratings[model_b] = rb + k_factor * ((1.0 - score_a) - eb)
+            rating_deltas[model_a] += k_factor * (score_a - ea)
+            rating_deltas[model_b] += k_factor * ((1.0 - score_a) - eb)
+
+        for model, delta in rating_deltas.items():
+            state.ratings[model] += delta
 
         # Snapshot for history chart
         state.history.append(dict(state.ratings))

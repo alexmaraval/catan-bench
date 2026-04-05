@@ -27,7 +27,7 @@ reasoning_enabled = false
 [[players]]
 id = "ORANGE"
 type = "llm"
-model = "z-ai/glm-5-turbo"
+model = "z-ai/glm-5v-turbo"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 60
@@ -41,7 +41,7 @@ type = "llm"
 model = "minimax/minimax-m2.7"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
-timeout_seconds = 60
+timeout_seconds = 120
 temperature = 0.3
 top_p = 1.0
 reasoning_effort = "minimal"

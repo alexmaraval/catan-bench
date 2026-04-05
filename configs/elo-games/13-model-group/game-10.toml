@@ -8,10 +8,10 @@ type = "llm"
 model = "prime-intellect/intellect-3"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
-timeout_seconds = 60
+timeout_seconds = 120
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"
 
 [[players]]
 id = "BLUE"
@@ -19,10 +19,10 @@ type = "llm"
 model = "openai/gpt-oss-120b"
 api_base = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
-timeout_seconds = 60
+timeout_seconds = 120
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"
 
 [[players]]
 id = "ORANGE"

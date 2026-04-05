@@ -28,6 +28,17 @@ Message character limit: {{ payload.message_char_limit }}
 (none)
 {% endif %}
 
+{% if payload.previous_trade_chat_attempts %}
+### Previous Trade Rooms This Turn
+Reuse anything still relevant from earlier room(s), especially what other players offered or why they passed.
+{% for previous_attempt in payload.previous_trade_chat_attempts %}
+Attempt {{ previous_attempt.attempt_index }}:
+{% for event in previous_attempt.events %}
+- {{ fmt_event(event) }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
 {% include "partials/public_chat_transcript_readonly.jinja" %}
 {% include "partials/strategy_memory.jinja" %}
 

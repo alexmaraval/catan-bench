@@ -290,7 +290,9 @@ class LLMPlayerTests(unittest.TestCase):
         )
         assert renderer.last_payload is not None
         self.assertEqual(renderer.last_payload["result"]["winner_ids"], ["RED"])
-        self.assertEqual(renderer.last_payload["public_history"][0]["kind"], "turn_ended")
+        self.assertEqual(
+            renderer.last_payload["public_history"][0]["kind"], "turn_ended"
+        )
         self.assertEqual(
             renderer.last_payload["public_chat_transcript"][0]["kind"],
             "public_chat_message",
@@ -816,7 +818,9 @@ class LLMPlayerTests(unittest.TestCase):
             select_response.selected_proposal_id, "attempt-1-round-1-proposal-1"
         )
 
-    def test_trade_chat_owner_decision_downgrades_select_when_no_proposals(self) -> None:
+    def test_trade_chat_owner_decision_downgrades_select_when_no_proposals(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient(
                 {
@@ -967,7 +971,9 @@ class LLMPlayerTests(unittest.TestCase):
             "Quoted table talk from named speakers. Read it as public evidence, not as your voice.",
             user_prompt,
         )
-        self.assertIn("BLUE to WHITE (public): RED is pushing for road tempo.", user_prompt)
+        self.assertIn(
+            "BLUE to WHITE (public): RED is pushing for road tempo.", user_prompt
+        )
 
     def test_trade_chat_reply_prompt_includes_recent_game_history(self) -> None:
         player = LLMPlayer(
@@ -1059,10 +1065,153 @@ class LLMPlayerTests(unittest.TestCase):
             "Quoted table talk from named speakers. Read it as public evidence, not as your voice.",
             user_prompt,
         )
-        self.assertIn("A concrete proposal usually means `you_give` matches or includes that request.", user_prompt)
-        self.assertIn("If your message says \"I'll give you X for Y\", then JSON must be `you_give = X` and `you_get = Y`.", user_prompt)
+        self.assertIn(
+            "A concrete proposal usually means `you_give` matches or includes that request.",
+            user_prompt,
+        )
+        self.assertIn(
+            'If your message says "I\'ll give you X for Y", then JSON must be `you_give = X` and `you_get = Y`.',
+            user_prompt,
+        )
 
-    def test_trade_chat_owner_decision_prompt_omits_select_when_no_proposals(self) -> None:
+    def test_trade_chat_open_prompt_surfaces_previous_trade_room_transcript(
+        self,
+    ) -> None:
+        player = LLMPlayer(
+            client=FakeLLMClient({"open_chat": True}),
+            model="fake-model",
+        )
+        observation = TradeChatObservation(
+            game_id="game-1",
+            player_id="RED",
+            owner_player_id="RED",
+            history_index=9,
+            turn_index=3,
+            phase="play_turn",
+            decision_index=10,
+            stage="open",
+            attempt_index=2,
+            round_index=0,
+            public_state={
+                "turn": {"turn_player_id": "RED"},
+                "players": {},
+                "board": {},
+                "bank": {},
+            },
+            private_state={
+                "resources": {"BRICK": 1},
+                "development_cards": {},
+                "pieces": {"roads": 15, "settlements": 5, "cities": 4},
+                "victory_points": {"visible": 2, "actual": 2},
+            },
+            public_history=(
+                Event(
+                    kind="dice_rolled",
+                    payload={"result": [4, 3]},
+                    history_index=3,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=0,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="trade_chat_opened",
+                    payload={
+                        "attempt_index": 1,
+                        "requested_resources": {"WOOD": 1},
+                        "message": "Need wood fast.",
+                    },
+                    history_index=4,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="trade_chat_message",
+                    payload={
+                        "attempt_index": 1,
+                        "speaker_player_id": "BLUE",
+                        "message": "I can do wood for brick.",
+                        "offer": {"BRICK": 1},
+                        "request": {"WOOD": 1},
+                    },
+                    history_index=5,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="BLUE",
+                ),
+                Event(
+                    kind="trade_chat_message",
+                    payload={
+                        "attempt_index": 1,
+                        "speaker_player_id": "WHITE",
+                        "message": "Can't help this turn.",
+                    },
+                    history_index=6,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=8,
+                    actor_player_id="WHITE",
+                ),
+                Event(
+                    kind="trade_chat_no_deal",
+                    payload={
+                        "attempt_index": 1,
+                        "message": "No takers.",
+                    },
+                    history_index=7,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=9,
+                    actor_player_id="RED",
+                ),
+                Event(
+                    kind="trade_chat_closed",
+                    payload={
+                        "attempt_index": 1,
+                        "outcome": "no_deal",
+                    },
+                    history_index=8,
+                    turn_index=3,
+                    phase="play_turn",
+                    decision_index=9,
+                    actor_player_id="RED",
+                ),
+            ),
+            transcript=(),
+            public_chat_transcript=(),
+            requested_resources={"ORE": 1},
+            other_player_ids=("BLUE", "WHITE"),
+            proposals=(),
+            game_rules="Rules",
+            memory=PlayerMemory(long_term={"goal": "Keep tempo."}),
+            message_char_limit=120,
+        )
+
+        messages = player._messages_for_trade_chat_open(observation)
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("### Previous Trade Rooms This Turn", user_prompt)
+        self.assertIn("Attempt 1:", user_prompt)
+        self.assertIn(
+            "RED opened trade chat requesting 1×WOOD: Need wood fast.",
+            user_prompt,
+        )
+        self.assertIn(
+            "BLUE: I can do wood for brick. [proposal: owner gives 1×BRICK, gets 1×WOOD]",
+            user_prompt,
+        )
+        self.assertIn("WHITE: Can't help this turn.", user_prompt)
+        self.assertIn(
+            "RED ended trade chat with no deal: No takers.",
+            user_prompt,
+        )
+
+    def test_trade_chat_owner_decision_prompt_omits_select_when_no_proposals(
+        self,
+    ) -> None:
         player = LLMPlayer(
             client=FakeLLMClient({"decision": "close"}),
             model="fake-model",
@@ -1115,9 +1264,14 @@ class LLMPlayerTests(unittest.TestCase):
         messages = player._messages_for_trade_chat_owner_decision(observation)
         user_prompt = messages[1]["content"]
 
-        self.assertIn("There are no valid concrete proposals to select right now.", user_prompt)
+        self.assertIn(
+            "There are no valid concrete proposals to select right now.", user_prompt
+        )
         self.assertIn("- `decision`: one of `continue` or `close`.", user_prompt)
-        self.assertIn("Do not return `select` because there are no concrete proposals in this room.", user_prompt)
+        self.assertIn(
+            "Do not return `select` because there are no concrete proposals in this room.",
+            user_prompt,
+        )
 
     def test_choose_action_prompt_renders_payloads_and_trade_template_constraints(
         self,
@@ -1819,7 +1973,11 @@ class LLMPlayerTests(unittest.TestCase):
                                     {
                                         "node_id": 27,
                                         "building": "SETTLEMENT",
-                                        "adjacent_tiles": ["ORE@6", "WHEAT@11", "BRICK@4"],
+                                        "adjacent_tiles": [
+                                            "ORE@6",
+                                            "WHEAT@11",
+                                            "BRICK@4",
+                                        ],
                                         "ports": ["ORE"],
                                     }
                                 ],

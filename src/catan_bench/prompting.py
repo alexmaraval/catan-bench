@@ -374,7 +374,12 @@ def fmt_event(event: object) -> str:
         return f"{actor}: {msg}" if msg else f"{actor} spoke publicly"
     if kind == "trade_chat_opened":
         req = fmt_resources(p.get("requested_resources", {}))
-        return f"{actor} opened trade chat requesting {req}"
+        msg = p.get("message", "")
+        return (
+            f"{actor} opened trade chat requesting {req}: {msg}"
+            if msg
+            else f"{actor} opened trade chat requesting {req}"
+        )
     if kind == "trade_chat_message":
         msg = p.get("message", "")
         offer = p.get("offer")
@@ -387,8 +392,20 @@ def fmt_event(event: object) -> str:
         speaker = p.get("speaker_player_id", actor)
         reason = p.get("reason", "invalid proposal")
         return f"SYSTEM: {speaker}'s proposal was rejected ({reason})"
+    if kind == "trade_chat_no_deal":
+        msg = p.get("message", "")
+        return (
+            f"{actor} ended trade chat with no deal: {msg}"
+            if msg
+            else f"{actor} ended trade chat with no deal"
+        )
     if kind == "trade_chat_closed":
         outcome = p.get("outcome", "?")
+        selected = p.get("selected_player_id")
+        if selected:
+            return (
+                f"{actor} closed trade chat (outcome: {outcome}, selected: {selected})"
+            )
         return f"{actor} closed trade chat (outcome: {outcome})"
     return f"{actor}: {kind.replace('_', ' ')}"
 

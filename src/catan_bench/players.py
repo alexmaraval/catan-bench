@@ -33,6 +33,17 @@ from .schemas import (
     TurnStartResponse,
 )
 
+_TRADE_CHAT_ROOM_EVENT_KINDS = frozenset(
+    {
+        "trade_chat_opened",
+        "trade_chat_message",
+        "trade_chat_proposal_rejected",
+        "trade_chat_quote_selected",
+        "trade_chat_no_deal",
+        "trade_chat_closed",
+    }
+)
+
 
 class Player(Protocol):
     def plan_opening_strategy(
@@ -436,7 +447,10 @@ class LLMPlayer:
                     stage=stage,
                 )
             except RuntimeError:
-                if not (salvage_on_error and self._should_salvage_invalid_response(trace_attempts)):
+                if not (
+                    salvage_on_error
+                    and self._should_salvage_invalid_response(trace_attempts)
+                ):
                     self._append_prompt_trace_entry(
                         player_id=observation.player_id,
                         history_index=observation.history_index,
@@ -448,7 +462,10 @@ class LLMPlayer:
                     )
                     raise
         except RuntimeError:
-            if not (salvage_on_error and self._should_salvage_invalid_response(trace_attempts)):
+            if not (
+                salvage_on_error
+                and self._should_salvage_invalid_response(trace_attempts)
+            ):
                 self._append_prompt_trace_entry(
                     player_id=observation.player_id,
                     history_index=observation.history_index,
@@ -490,7 +507,8 @@ class LLMPlayer:
         self, observation: OpeningStrategyObservation
     ) -> OpeningStrategyResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="opening_strategy",
+            observation=observation,
+            stage="opening_strategy",
             build_messages=self._messages_for_opening_strategy,
         )
         return OpeningStrategyResponse(
@@ -499,7 +517,8 @@ class LLMPlayer:
 
     def start_turn(self, observation: TurnStartObservation) -> TurnStartResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="turn_start",
+            observation=observation,
+            stage="turn_start",
             build_messages=self._messages_for_turn_start,
         )
         return TurnStartResponse(
@@ -509,7 +528,8 @@ class LLMPlayer:
 
     def choose_action(self, observation: ActionObservation) -> ActionDecision:
         payload, messages, attempts = self._traced_llm_call(
-            observation=observation, stage="choose_action",
+            observation=observation,
+            stage="choose_action",
             build_messages=self._messages_for_action,
             salvage_on_error=True,
         )
@@ -524,7 +544,8 @@ class LLMPlayer:
 
     def end_turn(self, observation: TurnEndObservation) -> TurnEndResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="turn_end",
+            observation=observation,
+            stage="turn_end",
             build_messages=self._messages_for_turn_end,
         )
         return TurnEndResponse(
@@ -534,7 +555,8 @@ class LLMPlayer:
 
     def respond_reactive(self, observation: ReactiveObservation) -> ActionDecision:
         payload, messages, attempts = self._traced_llm_call(
-            observation=observation, stage="reactive_action",
+            observation=observation,
+            stage="reactive_action",
             build_messages=self._messages_for_reactive,
             salvage_on_error=True,
         )
@@ -565,7 +587,8 @@ class LLMPlayer:
         self, observation: TradeChatObservation
     ) -> TradeChatOpenResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="trade_chat_open",
+            observation=observation,
+            stage="trade_chat_open",
             build_messages=self._messages_for_trade_chat_open,
             compact_retry=False,
         )
@@ -575,7 +598,8 @@ class LLMPlayer:
         self, observation: TradeChatObservation
     ) -> TradeChatReplyResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="trade_chat_reply",
+            observation=observation,
+            stage="trade_chat_reply",
             build_messages=self._messages_for_trade_chat_reply,
             compact_retry=False,
         )
@@ -588,7 +612,8 @@ class LLMPlayer:
         self, observation: TradeChatObservation
     ) -> TradeChatOwnerDecisionResponse:
         payload = self._traced_call_and_record(
-            observation=observation, stage="trade_chat_owner_decision",
+            observation=observation,
+            stage="trade_chat_owner_decision",
             build_messages=self._messages_for_trade_chat_owner_decision,
             compact_retry=False,
         )
@@ -883,6 +908,9 @@ class LLMPlayer:
     def _messages_for_trade_chat_open(
         self, observation: TradeChatObservation
     ) -> list[dict[str, object]]:
+        visible_public_history = self._tail_events(
+            observation.public_history, compact=False
+        )
         payload = {
             "history_index": observation.history_index,
             "player_id": observation.player_id,
@@ -894,10 +922,12 @@ class LLMPlayer:
             "round_index": observation.round_index,
             "public_state": observation.public_state,
             "private_state": observation.private_state,
-            "public_history": [
-                event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=False)
-            ],
+            "public_history": [event.to_dict() for event in visible_public_history],
+            "previous_trade_chat_attempts": self._previous_trade_chat_attempts(
+                visible_public_history,
+                turn_index=observation.turn_index,
+                current_attempt_index=observation.attempt_index,
+            ),
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
             "other_player_ids": list(observation.other_player_ids),
@@ -917,6 +947,35 @@ class LLMPlayer:
             game_rules=observation.game_rules,
         )
 
+    def _previous_trade_chat_attempts(
+        self,
+        public_history: tuple[Event, ...],
+        *,
+        turn_index: int,
+        current_attempt_index: int,
+    ) -> list[dict[str, object]]:
+        attempts: dict[int, list[Event]] = {}
+        for event in public_history:
+            if (
+                event.turn_index != turn_index
+                or event.kind not in _TRADE_CHAT_ROOM_EVENT_KINDS
+            ):
+                continue
+            attempt_index = event.payload.get("attempt_index")
+            if (
+                not isinstance(attempt_index, int)
+                or attempt_index >= current_attempt_index
+            ):
+                continue
+            attempts.setdefault(attempt_index, []).append(event)
+        return [
+            {
+                "attempt_index": attempt_index,
+                "events": [event.to_dict() for event in events],
+            }
+            for attempt_index, events in sorted(attempts.items())
+        ]
+
     def _messages_for_trade_chat_reply(
         self, observation: TradeChatObservation
     ) -> list[dict[str, object]]:
@@ -933,7 +992,9 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "public_history": [
                 event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=False)
+                for event in self._tail_events(
+                    observation.public_history, compact=False
+                )
             ],
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,
@@ -970,7 +1031,9 @@ class LLMPlayer:
             "private_state": observation.private_state,
             "public_history": [
                 event.to_dict()
-                for event in self._tail_events(observation.public_history, compact=False)
+                for event in self._tail_events(
+                    observation.public_history, compact=False
+                )
             ],
             "memory": observation.memory.to_dict(),
             "requested_resources": observation.requested_resources,

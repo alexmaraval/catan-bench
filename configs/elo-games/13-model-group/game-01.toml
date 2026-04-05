@@ -33,7 +33,7 @@ api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"
 
 [[players]]
 id = "WHITE"
@@ -44,4 +44,4 @@ api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 300
 temperature = 0.3
 top_p = 1.0
-reasoning_enabled = false
+reasoning_effort = "minimal"

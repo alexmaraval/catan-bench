@@ -12,6 +12,7 @@ from catan_bench.benchmark import (
     GameRecord,
     collect_game_records,
     compute_elo_ratings,
+    compute_pairwise_strength,
     main as benchmark_main,
 )
 from conftest import write_test_json as _write_json, write_test_jsonl as _write_jsonl
@@ -162,6 +163,37 @@ class BenchmarkCliTests(unittest.TestCase):
         for model in first_ratings:
             self.assertAlmostEqual(first_ratings[model], reversed_ratings[model])
 
+    def test_compute_pairwise_strength_is_invariant_to_game_order(self) -> None:
+        game_a = GameRecord(
+            game_id="game-a",
+            run_dir=Path("run-a"),
+            num_turns=10,
+            player_models={"RED": "A", "BLUE": "B", "ORANGE": "C", "WHITE": "D"},
+            winner_ids=["RED"],
+            player_vps={"RED": 10, "BLUE": 7, "ORANGE": 6, "WHITE": 5},
+            analysis=None,
+        )
+        game_b = GameRecord(
+            game_id="game-b",
+            run_dir=Path("run-b"),
+            num_turns=10,
+            player_models={"RED": "A", "BLUE": "B", "ORANGE": "E", "WHITE": "F"},
+            winner_ids=["BLUE"],
+            player_vps={"RED": 6, "BLUE": 10, "ORANGE": 8, "WHITE": 4},
+            analysis=None,
+        )
+
+        forward = compute_pairwise_strength([game_a, game_b])
+        reverse = compute_pairwise_strength([game_b, game_a])
+
+        self.assertEqual(forward.ratings.keys(), reverse.ratings.keys())
+        for model in forward.ratings:
+            self.assertAlmostEqual(forward.ratings[model], reverse.ratings[model])
+            self.assertAlmostEqual(forward.scores[model], reverse.scores[model])
+            self.assertEqual(forward.wins[model], reverse.wins[model])
+            self.assertEqual(forward.losses[model], reverse.losses[model])
+            self.assertEqual(forward.draws[model], reverse.draws[model])
+
     def test_benchmark_main_accepts_base_run_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
@@ -186,6 +218,11 @@ class BenchmarkCliTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["games_scanned"], 2)
             self.assertEqual(len(payload["leaderboard"]), 2)
+            self.assertIn("bt", payload["leaderboard"][0])
+            self.assertIn("pairwise_score", payload["leaderboard"][0])
+            self.assertIn("pairwise_wins", payload["leaderboard"][0])
+            self.assertIn("pairwise_losses", payload["leaderboard"][0])
+            self.assertIn("pairwise_draws", payload["leaderboard"][0])
 
 
 if __name__ == "__main__":

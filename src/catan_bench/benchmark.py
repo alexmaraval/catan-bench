@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -156,6 +157,17 @@ class EloState:
     total_vp: dict[str, int] = field(default_factory=dict)
     # history: list of (game_index, {model: rating}) for charting
     history: list[dict[str, float]] = field(default_factory=list)
+
+
+@dataclass
+class PairwiseStrengthState:
+    """Order-invariant strength estimates from aggregate pairwise outcomes."""
+
+    ratings: dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
+    wins: dict[str, int] = field(default_factory=dict)
+    losses: dict[str, int] = field(default_factory=dict)
+    draws: dict[str, int] = field(default_factory=dict)
 
 
 def _elo_expected(ra: float, rb: float) -> float:
@@ -497,8 +509,127 @@ def compute_head_to_head(
     return {k: dict(v) for k, v in h2h.items()}
 
 
+def compute_pairwise_strength(
+    games: list[GameRecord],
+    *,
+    initial_rating: float = DEFAULT_ELO,
+    prior_draw_weight: float = 1.0,
+    max_iterations: int = 1_000,
+    tolerance: float = 1e-10,
+) -> PairwiseStrengthState:
+    """Compute order-invariant pairwise metrics and a Bradley-Terry rating.
+
+    The Bradley-Terry fit uses aggregate pairwise outcomes, so it is invariant to
+    the order in which games are processed. Draws are treated as half a win for
+    each side, and each observed matchup gets one pseudo-draw by default to keep
+    small-sample ratings finite.
+    """
+
+    models = sorted({model for game in games for model in game.player_models.values()})
+    state = PairwiseStrengthState(
+        ratings={model: initial_rating for model in models},
+        scores={model: 0.0 for model in models},
+        wins={model: 0 for model in models},
+        losses={model: 0 for model in models},
+        draws={model: 0 for model in models},
+    )
+    if len(models) < 2:
+        return state
+
+    effective_wins: defaultdict[str, defaultdict[str, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    totals: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
+
+    for record in games:
+        for model_a, model_b, score_a in _generate_pairwise_outcomes(record):
+            totals[model_a][model_b] += 1
+            totals[model_b][model_a] += 1
+            if score_a == 1.0:
+                state.wins[model_a] += 1
+                state.losses[model_b] += 1
+                effective_wins[model_a][model_b] += 1.0
+            elif score_a == 0.0:
+                state.losses[model_a] += 1
+                state.wins[model_b] += 1
+                effective_wins[model_b][model_a] += 1.0
+            else:
+                state.draws[model_a] += 1
+                state.draws[model_b] += 1
+                effective_wins[model_a][model_b] += 0.5
+                effective_wins[model_b][model_a] += 0.5
+
+    for model in models:
+        total = state.wins[model] + state.losses[model] + state.draws[model]
+        state.scores[model] = (
+            0.0
+            if total == 0
+            else (state.wins[model] + 0.5 * state.draws[model]) / total
+        )
+
+    strengths = {model: 1.0 for model in models}
+    epsilon = 1e-12
+
+    for _ in range(max_iterations):
+        updated: dict[str, float] = {}
+        max_log_delta = 0.0
+
+        for model in models:
+            total_effective_wins = 0.0
+            denominator = 0.0
+
+            for opponent in models:
+                if opponent == model:
+                    continue
+                observed = totals[model].get(opponent, 0)
+                if observed <= 0:
+                    continue
+                total_games = observed + prior_draw_weight
+                total_effective_wins += (
+                    effective_wins[model].get(opponent, 0.0) + 0.5 * prior_draw_weight
+                )
+                denominator += total_games / (strengths[model] + strengths[opponent])
+
+            if denominator <= 0.0:
+                updated[model] = strengths[model]
+                continue
+
+            updated_strength = max(total_effective_wins / denominator, epsilon)
+            updated[model] = updated_strength
+            max_log_delta = max(
+                max_log_delta,
+                abs(math.log(updated_strength) - math.log(max(strengths[model], epsilon))),
+            )
+
+        if not updated:
+            break
+
+        log_mean = sum(math.log(max(value, epsilon)) for value in updated.values()) / len(
+            updated
+        )
+        scale = math.exp(log_mean)
+        strengths = {
+            model: max(updated.get(model, strengths[model]) / scale, epsilon)
+            for model in models
+        }
+
+        if max_log_delta < tolerance:
+            break
+
+    state.ratings = {
+        model: initial_rating + 400.0 * math.log10(max(strengths[model], epsilon))
+        for model in models
+    }
+    return state
+
+
 def _benchmark_summary_payload(
-    games: list[GameRecord], elo: EloState, rubrics: dict[str, RubricScores]
+    games: list[GameRecord],
+    elo: EloState,
+    pairwise: PairwiseStrengthState,
+    rubrics: dict[str, RubricScores],
 ) -> dict[str, Any]:
     ranked_models = sorted(
         elo.ratings.keys(), key=lambda model: elo.ratings[model], reverse=True
@@ -512,9 +643,14 @@ def _benchmark_summary_payload(
             {
                 "model": model,
                 "elo": round(elo.ratings[model], 2),
+                "bt": round(pairwise.ratings.get(model, DEFAULT_ELO), 2),
                 "games_played": games_played,
                 "wins": wins,
                 "avg_vp": 0.0 if games_played == 0 else total_vp / games_played,
+                "pairwise_score": pairwise.scores.get(model, 0.0),
+                "pairwise_wins": pairwise.wins.get(model, 0),
+                "pairwise_losses": pairwise.losses.get(model, 0),
+                "pairwise_draws": pairwise.draws.get(model, 0),
                 "rubric_overall": rubrics.get(model, RubricScores()).overall,
             }
         )
@@ -556,8 +692,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     elo = compute_elo_ratings(games)
+    pairwise = compute_pairwise_strength(games)
     rubrics = compute_rubric_scores(games)
-    summary = _benchmark_summary_payload(games, elo, rubrics)
+    summary = _benchmark_summary_payload(games, elo, pairwise, rubrics)
 
     if args.json_only:
         print(json.dumps(summary, indent=2, sort_keys=True))
@@ -567,7 +704,9 @@ def main(argv: list[str] | None = None) -> int:
     for index, row in enumerate(summary["leaderboard"], start=1):
         print(
             f"{index}. {row['model']}  ELO {round(row['elo'])}  "
+            f"BT {round(row['bt'])}  "
             f"games {row['games_played']}  wins {row['wins']}  "
+            f"pairwise {row['pairwise_wins']}-{row['pairwise_losses']}-{row['pairwise_draws']}  "
             f"avg VP {row['avg_vp']:.2f}  rubric {row['rubric_overall']:.1f}"
         )
     return 0

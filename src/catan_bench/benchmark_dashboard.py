@@ -12,10 +12,12 @@ import plotly.graph_objects as go
 from .benchmark import (
     EloState,
     GameRecord,
+    PairwiseStrengthState,
     RubricScores,
     collect_game_records,
     compute_elo_ratings,
     compute_head_to_head,
+    compute_pairwise_strength,
     compute_rubric_scores,
 )
 
@@ -49,15 +51,16 @@ def _model_color(index: int) -> str:
 
 def _load_benchmark_data(
     st: Any, base_run_dir: Path
-) -> tuple[list[GameRecord], EloState, dict[str, RubricScores]] | None:
+) -> tuple[list[GameRecord], EloState, PairwiseStrengthState, dict[str, RubricScores]] | None:
     """Load and compute benchmark data, cached by Streamlit."""
 
     @st.cache_data(ttl=30, show_spinner="Scanning games...")
-    def _cached_load(base_dir_str: str) -> tuple[list[dict], dict, dict] | None:
+    def _cached_load(base_dir_str: str) -> tuple[list[dict], dict, dict, dict] | None:
         games = collect_game_records(Path(base_dir_str))
         if not games:
             return None
         elo = compute_elo_ratings(games)
+        pairwise = compute_pairwise_strength(games)
         rubrics = compute_rubric_scores(games)
 
         # Serialize for caching (Streamlit cache requires picklable data)
@@ -80,16 +83,23 @@ def _load_benchmark_data(
             "total_vp": elo.total_vp,
             "history": elo.history,
         }
+        pairwise_ser = {
+            "ratings": pairwise.ratings,
+            "scores": pairwise.scores,
+            "wins": pairwise.wins,
+            "losses": pairwise.losses,
+            "draws": pairwise.draws,
+        }
         rubrics_ser = {
             m: r.as_dict() | {"overall": r.overall} for m, r in rubrics.items()
         }
-        return games_ser, elo_ser, rubrics_ser
+        return games_ser, elo_ser, pairwise_ser, rubrics_ser
 
     result = _cached_load(str(base_run_dir))
     if result is None:
         return None
 
-    games_ser, elo_ser, rubrics_ser = result
+    games_ser, elo_ser, pairwise_ser, rubrics_ser = result
 
     # Deserialize
     games = [
@@ -111,6 +121,13 @@ def _load_benchmark_data(
         total_vp=elo_ser["total_vp"],
         history=elo_ser["history"],
     )
+    pairwise = PairwiseStrengthState(
+        ratings=pairwise_ser["ratings"],
+        scores=pairwise_ser["scores"],
+        wins=pairwise_ser["wins"],
+        losses=pairwise_ser["losses"],
+        draws=pairwise_ser["draws"],
+    )
     rubrics = {}
     for m, rd in rubrics_ser.items():
         rubrics[m] = RubricScores(
@@ -120,7 +137,7 @@ def _load_benchmark_data(
             resource_management=rd["Resource Mgmt"],
             game_mechanics=rd["Game Mechanics"],
         )
-    return games, elo, rubrics
+    return games, elo, pairwise, rubrics
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +152,7 @@ def render_benchmark_tab(st: Any, *, base_run_dir: Path) -> None:
         st.info("No completed games found. Play some games and come back!")
         return
 
-    games, elo, rubrics = data
+    games, elo, pairwise, rubrics = data
 
     # Summary metrics
     total_games = len(games)
@@ -163,7 +180,7 @@ def render_benchmark_tab(st: Any, *, base_run_dir: Path) -> None:
         )
 
     # Leaderboard
-    _render_leaderboard(st, elo, rubrics)
+    _render_leaderboard(st, elo, pairwise, rubrics)
 
     # Charts side by side
     col_radar, col_elo = st.columns(2)
@@ -186,9 +203,16 @@ def render_benchmark_tab(st: Any, *, base_run_dir: Path) -> None:
 
 
 def _render_leaderboard(
-    st: Any, elo: EloState, rubrics: dict[str, RubricScores]
+    st: Any,
+    elo: EloState,
+    pairwise: PairwiseStrengthState,
+    rubrics: dict[str, RubricScores],
 ) -> None:
     st.subheader("ELO Leaderboard")
+    st.caption(
+        "BT is an order-invariant Bradley-Terry batch rating fit from aggregate "
+        "pairwise results. Pairwise score is wins plus half draws over all pairings."
+    )
 
     ranked_models = sorted(
         elo.ratings.keys(), key=lambda m: elo.ratings[m], reverse=True
@@ -206,9 +230,16 @@ def _render_leaderboard(
                 "Rank": rank,
                 "Model": _short_model_name(model),
                 "ELO": round(elo.ratings[model]),
+                "BT": round(pairwise.ratings.get(model, 1500)),
                 "Games": gp,
                 "Win Rate": (wins / max(gp, 1)) * 100,
                 "Avg VP": round(total_vp / max(gp, 1), 1),
+                "Pairwise": pairwise.scores.get(model, 0.0) * 100.0,
+                "W-L-D": (
+                    f"{pairwise.wins.get(model, 0)}-"
+                    f"{pairwise.losses.get(model, 0)}-"
+                    f"{pairwise.draws.get(model, 0)}"
+                ),
                 "Trading": round(rubric.trading, 1) if rubric else 0,
                 "Strategy": round(rubric.strategy, 1) if rubric else 0,
                 "Manipulation": round(rubric.manipulation, 1) if rubric else 0,
@@ -226,10 +257,15 @@ def _render_leaderboard(
             "Rank": st.column_config.NumberColumn(width="small"),
             "Model": st.column_config.TextColumn(width="medium"),
             "ELO": st.column_config.NumberColumn(format="%d"),
+            "BT": st.column_config.NumberColumn(format="%d"),
             "Win Rate": st.column_config.ProgressColumn(
                 min_value=0, max_value=100, format="%.2f%%"
             ),
             "Avg VP": st.column_config.NumberColumn(format="%.1f"),
+            "Pairwise": st.column_config.ProgressColumn(
+                min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "W-L-D": st.column_config.TextColumn(width="small"),
             "Trading": st.column_config.ProgressColumn(
                 min_value=0, max_value=100, format="%.1f%%"
             ),

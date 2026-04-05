@@ -54,18 +54,18 @@ To target another OpenAI-compatible provider or a local server, copy `configs/op
 
 ## Elo Snapshot
 
-Static snapshot from `runs/elo-games/1.0.0`, computed on April 5, 2026 from the same run artifacts used by the dashboard. This schedule contains 6 completed games across 8 models, with each model appearing in 3 games.
+Static snapshot from `runs/elo-games/1.0.0`, computed on April 5, 2026 from the same run artifacts used by the dashboard. This schedule contains 6 completed games across 8 models, with each model appearing in 3 games. `ELO` is sequential and order-sensitive; `BT` is an order-invariant Bradley-Terry batch fit from the same aggregate pairwise outcomes.
 
-| Rank | Model | ELO | Games | Wins | Win Rate | Avg VP |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | `deepseek/deepseek-v3.2` | 1592 | 3 | 2 | 66.67% | 8.7 |
-| 2 | `nvidia/nemotron-3-super-120b-a12b:free` | 1564 | 3 | 1 | 33.33% | 7.7 |
-| 3 | `x-ai/grok-4.1-fast` | 1509 | 3 | 1 | 33.33% | 6.0 |
-| 4 | `minimax/minimax-m2.7` | 1492 | 3 | 0 | 0.00% | 7.3 |
-| 5 | `z-ai/glm-5-turbo` | 1489 | 3 | 1 | 33.33% | 7.0 |
-| 6 | `xiaomi/mimo-v2-flash` | 1476 | 3 | 0 | 0.00% | 6.0 |
-| 7 | `arcee-ai/trinity-large-preview:free` | 1462 | 3 | 1 | 33.33% | 7.0 |
-| 8 | `qwen/qwen3-235b-a22b-2507` | 1418 | 3 | 0 | 0.00% | 5.7 |
+| Rank | Model | ELO | BT | Games | Wins | Win Rate | Avg VP | Pairwise W-L-D |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | `deepseek/deepseek-v3.2` | 1592 | 1647 | 3 | 2 | 66.67% | 8.7 | 8-1-0 |
+| 2 | `nvidia/nemotron-3-super-120b-a12b:free` | 1564 | 1578 | 3 | 1 | 33.33% | 7.7 | 6-2-1 |
+| 3 | `x-ai/grok-4.1-fast` | 1509 | 1506 | 3 | 1 | 33.33% | 6.0 | 4-4-1 |
+| 4 | `minimax/minimax-m2.7` | 1492 | 1485 | 3 | 0 | 0.00% | 7.3 | 4-4-1 |
+| 5 | `z-ai/glm-5-turbo` | 1489 | 1478 | 3 | 1 | 33.33% | 7.0 | 4-5-0 |
+| 6 | `xiaomi/mimo-v2-flash` | 1476 | 1471 | 3 | 0 | 0.00% | 6.0 | 3-5-1 |
+| 7 | `arcee-ai/trinity-large-preview:free` | 1462 | 1462 | 3 | 1 | 33.33% | 7.0 | 3-5-1 |
+| 8 | `qwen/qwen3-235b-a22b-2507` | 1418 | 1373 | 3 | 0 | 0.00% | 5.7 | 1-7-1 |
 
 Game winners:
 

@@ -9,7 +9,7 @@ type = "llm"
 model = "gpt-4o-mini"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
+timeout_seconds = 60
 
 [[players]]
 id = "BLUE"
@@ -17,7 +17,7 @@ type = "llm"
 model = "gpt-4o-mini"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
+timeout_seconds = 60
 
 [[players]]
 id = "ORANGE"
@@ -25,7 +25,7 @@ type = "llm"
 model = "gpt-4o-mini"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
+timeout_seconds = 60
 
 [[players]]
 id = "WHITE"
@@ -33,4 +33,4 @@ type = "llm"
 model = "gpt-4o-mini"
 api_base = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
-timeout_seconds = 300
+timeout_seconds = 60

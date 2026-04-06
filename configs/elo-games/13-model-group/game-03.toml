@@ -45,3 +45,5 @@ timeout_seconds = 120
 temperature = 0.3
 top_p = 1.0
 reasoning_effort = "minimal"
+json_response_format = false
+provider = { require_parameters = true, ignore = ["deepinfra"], sort = "throughput" }

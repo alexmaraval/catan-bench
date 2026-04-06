@@ -11,6 +11,7 @@ from catan_bench.config import (
     load_game_config_overrides,
     load_player_configs,
 )
+from catan_bench.llm import OpenAICompatibleChatClient
 from catan_bench.orchestrator import _resolve_run_dir
 from catan_bench.prompts import CATAN_RULES_SUMMARY
 from catan_bench.reporter import DebugTerminalReporter
@@ -182,6 +183,80 @@ class ConfigAndRunnerTests(unittest.TestCase):
             self.assertEqual(config[0].reasoning_effort, "low")
             self.assertIsNone(config[0].reasoning_enabled)
 
+    def test_load_player_config_with_provider_preferences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "stepfun/step-3.5-flash"\n'
+                    'api_base = "https://openrouter.ai/api/v1"\n'
+                    "json_response_format = false\n"
+                    "provider = { require_parameters = true, ignore = [\"deepinfra\"], "
+                    "sort = { by = \"latency\", partition = \"none\" } }\n\n"
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_player_configs(players_toml)
+
+            self.assertEqual(
+                config[0].provider,
+                {
+                    "require_parameters": True,
+                    "ignore": ["deepinfra"],
+                    "sort": {"by": "latency", "partition": "none"},
+                },
+            )
+            self.assertFalse(config[0].json_response_format)
+
+    def test_load_player_config_rejects_non_table_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "stepfun/step-3.5-flash"\n'
+                    'provider = "deepinfra"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "`provider` must be a TOML table"):
+                load_player_configs(players_toml)
+
+    def test_load_player_config_rejects_non_boolean_json_response_format(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "stepfun/step-3.5-flash"\n'
+                    'json_response_format = "false"\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "`json_response_format` must be true or false"
+            ):
+                load_player_configs(players_toml)
+
     def test_load_player_config_rejects_reasoning_enabled_and_effort_together(
         self,
     ) -> None:
@@ -215,6 +290,47 @@ class ConfigAndRunnerTests(unittest.TestCase):
         self.assertEqual(
             players["RED"].prompt_history_limit, game_config.prompt_history_limit
         )
+
+    def test_build_players_passes_provider_preferences_to_client(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            players_toml = Path(tmpdir) / "players.toml"
+            players_toml.write_text(
+                (
+                    "[[players]]\n"
+                    'id = "RED"\n'
+                    'type = "llm"\n'
+                    'model = "stepfun/step-3.5-flash"\n'
+                    'api_base = "https://openrouter.ai/api/v1"\n'
+                    "json_response_format = false\n"
+                    "provider = { require_parameters = true, ignore = [\"deepinfra\"], "
+                    'sort = "throughput" }\n\n'
+                    "[[players]]\n"
+                    'id = "BLUE"\n'
+                    'type = "random"\n'
+                ),
+                encoding="utf-8",
+            )
+
+            player_configs = load_player_configs(players_toml)
+            players = build_players(player_configs)
+
+            self.assertIsInstance(players["RED"].client, OpenAICompatibleChatClient)
+            self.assertEqual(
+                players["RED"].client.request_provider,
+                {
+                    "require_parameters": True,
+                    "ignore": ["deepinfra"],
+                    "sort": "throughput",
+                },
+            )
+            self.assertFalse(players["RED"].client.json_response_format)
+
+    def test_build_players_defaults_json_response_format_to_true(self) -> None:
+        game_config = load_game_config("configs/game.toml")
+        player_configs = load_player_configs("configs/openai-players.toml")
+        players = build_players(player_configs, game_config)
+
+        self.assertTrue(players["RED"].client.json_response_format)
 
     def test_runner_executes_game_from_toml_configs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

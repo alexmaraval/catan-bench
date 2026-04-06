@@ -103,6 +103,8 @@ def build_players(
                     api_base=player_config.api_base,
                     api_key_env=player_config.api_key_env,
                     timeout_seconds=player_config.timeout_seconds,
+                    json_response_format=player_config.json_response_format,
+                    request_provider=player_config.provider,
                 ),
                 model=player_config.model or "",
                 temperature=player_config.temperature,

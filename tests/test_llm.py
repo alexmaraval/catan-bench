@@ -231,6 +231,83 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", captured_body)
         self.assertNotIn("include_reasoning", captured_body)
 
+    def test_complete_includes_openrouter_provider_preferences(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+            request_provider={
+                "require_parameters": True,
+                "ignore": ["deepinfra"],
+                "sort": "throughput",
+            },
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="stepfun/step-3.5-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
+        self.assertEqual(
+            captured_body["provider"],
+            {
+                "require_parameters": True,
+                "ignore": ["deepinfra"],
+                "sort": "throughput",
+            },
+        )
+
+    def test_complete_omits_response_format_when_disabled(self) -> None:
+        captured_body: dict[str, object] = {}
+
+        def fake_urlopen(req, timeout):
+            nonlocal captured_body
+            captured_body = json.loads(req.data.decode("utf-8"))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+            json_response_format=False,
+            request_provider={"require_parameters": True},
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                client.complete(
+                    model="stepfun/step-3.5-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
+        self.assertNotIn("response_format", captured_body)
+        self.assertEqual(captured_body["provider"], {"require_parameters": True})
+
+    def test_complete_rejects_provider_preferences_for_non_openrouter_api(self) -> None:
+        client = OpenAICompatibleChatClient(
+            api_key_env="OPENAI_API_KEY",
+            request_provider={"ignore": ["deepinfra"]},
+        )
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with self.assertRaisesRegex(
+                ValueError, "only supported when `api_base` targets OpenRouter"
+            ):
+                client.complete(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
     def test_complete_rejects_reasoning_enabled_and_effort_together(self) -> None:
         client = OpenAICompatibleChatClient(api_key_env="OPENAI_API_KEY")
 
@@ -393,4 +470,105 @@ class OpenAICompatibleChatClientTests(unittest.TestCase):
         self.assertEqual(len(captured_bodies), 2)
         self.assertIn("response_format", captured_bodies[0])
         self.assertNotIn("response_format", captured_bodies[1])
+        self.assertIn("choices", response)
+
+    def test_complete_retries_without_json_mode_on_405_with_nested_provider_error(
+        self,
+    ) -> None:
+        captured_bodies: list[dict[str, object]] = []
+
+        def fake_urlopen(req, timeout):
+            captured_bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(captured_bodies) == 1:
+                raise error.HTTPError(
+                    req.full_url,
+                    405,
+                    "Method Not Allowed",
+                    hdrs=None,
+                    fp=io.BytesIO(
+                        json.dumps(
+                            {
+                                "error": {
+                                    "message": "Provider returned error",
+                                    "code": 405,
+                                    "metadata": {
+                                        "raw": json.dumps(
+                                            {
+                                                "detail": (
+                                                    "json_object response format is not "
+                                                    "supported for model: "
+                                                    "stepfun-ai/Step-3.5-Flash"
+                                                )
+                                            }
+                                        )
+                                    },
+                                }
+                            }
+                        ).encode("utf-8")
+                    ),
+                )
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(api_key_env="OPENAI_API_KEY")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                response = client.complete(
+                    model="stepfun/step-3.5-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
+        self.assertEqual(len(captured_bodies), 2)
+        self.assertIn("response_format", captured_bodies[0])
+        self.assertNotIn("response_format", captured_bodies[1])
+        self.assertIn("choices", response)
+
+    def test_complete_retries_without_json_mode_on_404_missing_parameter_endpoint(
+        self,
+    ) -> None:
+        captured_bodies: list[dict[str, object]] = []
+
+        def fake_urlopen(req, timeout):
+            captured_bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(captured_bodies) == 1:
+                raise error.HTTPError(
+                    req.full_url,
+                    404,
+                    "Not Found",
+                    hdrs=None,
+                    fp=io.BytesIO(
+                        json.dumps(
+                            {
+                                "error": {
+                                    "message": (
+                                        "No endpoints found that can handle the "
+                                        "requested parameters."
+                                    ),
+                                    "code": 404,
+                                }
+                            }
+                        ).encode("utf-8")
+                    ),
+                )
+            return _FakeHTTPResponse({"choices": [{"message": {"content": "{}"}}]})
+
+        client = OpenAICompatibleChatClient(
+            api_base="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
+            request_provider={"require_parameters": True},
+        )
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}, clear=True):
+            with patch("catan_bench.llm.request.urlopen", side_effect=fake_urlopen):
+                response = client.complete(
+                    model="stepfun/step-3.5-flash",
+                    messages=[{"role": "user", "content": "{}"}],
+                    temperature=0.1,
+                )
+
+        self.assertEqual(len(captured_bodies), 2)
+        self.assertIn("response_format", captured_bodies[0])
+        self.assertNotIn("response_format", captured_bodies[1])
+        self.assertEqual(captured_bodies[1]["provider"], {"require_parameters": True})
         self.assertIn("choices", response)

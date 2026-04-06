@@ -39,7 +39,33 @@ class PlayerConfig:
     top_p: float | None = None
     reasoning_enabled: bool | None = None
     reasoning_effort: str | None = None
+    json_response_format: bool = True
     timeout_seconds: float = 60.0
+    provider: dict[str, object] | None = None
+
+
+def _normalize_json_like_value(value: object, *, path: str) -> object:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [
+            _normalize_json_like_value(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, dict):
+        normalized: dict[str, object] = {}
+        for key, nested in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"`{path}` keys must be strings.")
+            normalized[key] = _normalize_json_like_value(
+                nested,
+                path=f"{path}.{key}",
+            )
+        return normalized
+    raise ValueError(
+        f"`{path}` must contain only JSON-like values "
+        "(strings, numbers, booleans, arrays, or tables)."
+    )
 
 
 def _parse_game_payload(payload: dict, defaults: GameConfig) -> GameConfig:
@@ -182,7 +208,23 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
             raise ValueError(
                 "Choose either `reasoning_enabled` or `reasoning_effort` in a player config, not both."
             )
+        if "json_response_format" in entry and not isinstance(
+            entry["json_response_format"], bool
+        ):
+            raise ValueError("`json_response_format` must be true or false.")
+        json_response_format = bool(entry.get("json_response_format", True))
         timeout_seconds = float(entry.get("timeout_seconds", 60.0))
+        provider = entry.get("provider")
+        if provider is not None:
+            if not isinstance(provider, dict):
+                raise ValueError("`provider` must be a TOML table when provided.")
+            normalized_provider = _normalize_json_like_value(
+                provider,
+                path="provider",
+            )
+            if not isinstance(normalized_provider, dict):  # pragma: no cover
+                raise ValueError("`provider` must be a TOML table when provided.")
+            provider = normalized_provider
         configs.append(
             PlayerConfig(
                 id=player_id,
@@ -195,7 +237,9 @@ def load_player_configs(path: str | Path) -> list[PlayerConfig]:
                 top_p=top_p,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
+                json_response_format=json_response_format,
                 timeout_seconds=timeout_seconds,
+                provider=provider,
             )
         )
 

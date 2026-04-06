@@ -33,6 +33,8 @@ class OpenAICompatibleChatClient:
     timeout_seconds: float = 60.0
     max_attempts: int = 3
     retry_backoff_seconds: float = 1.0
+    json_response_format: bool = True
+    request_provider: dict[str, object] | None = None
 
     def complete(
         self,
@@ -55,7 +57,7 @@ class OpenAICompatibleChatClient:
             )
 
         endpoint = self._chat_completions_endpoint()
-        use_json_response_format = True
+        use_json_response_format = self.json_response_format
         attempt_index = 0
         while attempt_index < self.max_attempts:
             req = self._build_request(
@@ -130,11 +132,19 @@ class OpenAICompatibleChatClient:
         reasoning_effort: str | None,
         use_json_response_format: bool,
     ) -> dict[str, object]:
+        provider_name = self._provider_name()
         body: dict[str, object] = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
         }
+        if self.request_provider is not None:
+            if provider_name != "openrouter":
+                raise ValueError(
+                    "`provider` request preferences are only supported when "
+                    "`api_base` targets OpenRouter."
+                )
+            body["provider"] = dict(self.request_provider)
         if use_json_response_format:
             body["response_format"] = {"type": "json_object"}
         if top_p is not None:
@@ -253,7 +263,7 @@ class OpenAICompatibleChatClient:
         details: str,
         use_json_response_format: bool,
     ) -> bool:
-        if exc.code != 400 or not use_json_response_format:
+        if exc.code not in {400, 404, 405} or not use_json_response_format:
             return False
         error_payload: dict[str, object] = {}
         try:
@@ -263,10 +273,47 @@ class OpenAICompatibleChatClient:
         if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
             error_payload = dict(parsed["error"])
         code = str(error_payload.get("code", "")).lower()
-        message = str(error_payload.get("message", "")).lower()
+        message_candidates = list(
+            OpenAICompatibleChatClient._iter_error_text_candidates(
+                parsed if parsed is not None else details
+            )
+        )
         if code == "json_validate_failed":
             return True
-        return "failed to validate json" in message or (
-            "response_format" in message
-            and ("unsupported" in message or "not supported" in message)
+        return any(
+            "failed to validate json" in candidate
+            or (
+                "no endpoints found" in candidate
+                and "requested parameters" in candidate
+            )
+            or (
+                ("response_format" in candidate or "response format" in candidate)
+                and ("unsupported" in candidate or "not supported" in candidate)
+            )
+            for candidate in message_candidates
         )
+
+    @staticmethod
+    def _iter_error_text_candidates(payload: object) -> tuple[str, ...]:
+        candidates: list[str] = []
+
+        def collect(value: object) -> None:
+            if isinstance(value, str):
+                normalized = value.lower()
+                candidates.append(normalized)
+                try:
+                    decoded = json.loads(value)
+                except json.JSONDecodeError:
+                    return
+                collect(decoded)
+                return
+            if isinstance(value, dict):
+                for nested in value.values():
+                    collect(nested)
+                return
+            if isinstance(value, list):
+                for nested in value:
+                    collect(nested)
+
+        collect(payload)
+        return tuple(candidates)

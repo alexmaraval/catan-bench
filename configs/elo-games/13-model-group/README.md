@@ -18,7 +18,7 @@ The schedule is built from a cyclic 4-player block design, so each game is just 
 ## Models
 
 - `nvidia/nemotron-3-super-120b-a12b:free`
-- `z-ai/glm-5-turbo`
+- `z-ai/glm-5`
 - `xiaomi/mimo-v2-flash`
 - `arcee-ai/trinity-large-thinking`
 - `mistralai/mistral-large-2512`

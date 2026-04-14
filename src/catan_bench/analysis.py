@@ -1296,6 +1296,67 @@ def compute_vp_progression(
     return [{"turn_index": t, "vp": v} for t, v in sorted(turn_max_vp.items())]
 
 
+def compute_dev_card_progression(
+    player_id: str,
+    events: list[Event],
+    state_snapshots: list[PublicStateSnapshot],
+) -> list[dict[str, Any]]:
+    """Track cumulative dev-card purchases and hidden VP cards by turn."""
+    bought_by_turn: dict[int, int] = {}
+    for event in events:
+        if event.kind != "action_taken" or event.actor_player_id != player_id:
+            continue
+        action = event.payload.get("action")
+        if not isinstance(action, dict):
+            continue
+        if action.get("action_type") != "BUY_DEVELOPMENT_CARD":
+            continue
+        bought_by_turn[event.turn_index] = bought_by_turn.get(event.turn_index, 0) + 1
+
+    dev_vp_by_turn: dict[int, int] = {}
+    for snap in state_snapshots:
+        players = snap.public_state.get("players")
+        if not isinstance(players, dict):
+            continue
+        player_data = players.get(player_id)
+        if not isinstance(player_data, dict):
+            continue
+
+        dev_vp = int(player_data.get("dev_victory_points", 0) or 0)
+        if (
+            "dev_victory_points" not in player_data
+            and "actual_victory_points" in player_data
+        ):
+            visible_vp = int(player_data.get("visible_victory_points", 0) or 0)
+            actual_vp = int(player_data.get("actual_victory_points", 0) or 0)
+            dev_vp = max(actual_vp - visible_vp, 0)
+
+        turn = snap.turn_index
+        if turn not in dev_vp_by_turn or dev_vp > dev_vp_by_turn[turn]:
+            dev_vp_by_turn[turn] = dev_vp
+
+    relevant_turns = sorted(set(bought_by_turn) | set(dev_vp_by_turn))
+    if not relevant_turns:
+        return []
+
+    progression: list[dict[str, Any]] = []
+    cards_bought = 0
+    dev_victory_points = 0
+    for turn in relevant_turns:
+        cards_bought += bought_by_turn.get(turn, 0)
+        if turn in dev_vp_by_turn:
+            dev_victory_points = dev_vp_by_turn[turn]
+        progression.append(
+            {
+                "turn_index": turn,
+                "cards_bought": cards_bought,
+                "dev_victory_points": dev_victory_points,
+            }
+        )
+
+    return progression
+
+
 def compute_road_progression(
     player_id: str,
     state_snapshots: list[PublicStateSnapshot],
@@ -1602,6 +1663,9 @@ def analyze_player(
     is_winner = player_id in winner_ids
 
     vp_progression = compute_vp_progression(player_id, state_snapshots)
+    dev_card_progression = compute_dev_card_progression(
+        player_id, events, state_snapshots
+    )
     road_progression = compute_road_progression(player_id, state_snapshots)
     army_progression = compute_army_progression(player_id, state_snapshots)
     trade = compute_trade_analysis(player_id, events)
@@ -1644,6 +1708,7 @@ def analyze_player(
         "final_vp": final_vp,
         "is_winner": is_winner,
         "vp_progression": vp_progression,
+        "dev_card_progression": dev_card_progression,
         "road_progression": road_progression,
         "army_progression": army_progression,
         "resource_production": compute_resource_production(

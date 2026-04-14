@@ -183,6 +183,193 @@ class DashboardTests(unittest.TestCase):
                 any("provisional" in body.lower() for body in st.caption_calls)
             )
 
+    def test_render_analysis_tab_adds_development_card_progression_chart(self) -> None:
+        class FakeColumn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def metric(self, label: str, value: object) -> None:
+                return None
+
+            def altair_chart(self, *args, **kwargs) -> None:
+                return None
+
+            def plotly_chart(self, *args, **kwargs) -> None:
+                return None
+
+        class FakeStreamlit:
+            def __init__(self) -> None:
+                self.columns_calls: list[int] = []
+                self.markdown_calls: list[str] = []
+                self.plotly_chart_calls = 0
+
+            def info(self, body: str) -> None:
+                return None
+
+            def caption(self, body: str) -> None:
+                return None
+
+            def subheader(self, body: str) -> None:
+                return None
+
+            def columns(self, n: int):
+                self.columns_calls.append(n)
+                return [FakeColumn() for _ in range(n)]
+
+            def metric(self, label: str, value: object) -> None:
+                return None
+
+            def button(self, *args, **kwargs) -> bool:
+                return False
+
+            def dataframe(self, *args, **kwargs) -> None:
+                return None
+
+            def altair_chart(self, *args, **kwargs) -> None:
+                return None
+
+            def plotly_chart(self, *args, **kwargs) -> None:
+                self.plotly_chart_calls += 1
+
+            def markdown(self, body: str, **kwargs) -> None:
+                self.markdown_calls.append(body)
+
+            def expander(self, *args, **kwargs):
+                class _Dummy:
+                    def __enter__(self_inner):
+                        return self_inner
+
+                    def __exit__(self_inner, exc_type, exc, tb):
+                        return False
+
+                return _Dummy()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            _write_json(
+                run_dir / "analysis.json",
+                {
+                    "game_summary": {
+                        "winner_ids": ["RED"],
+                        "num_turns": 5,
+                        "total_decisions": 10,
+                        "trade_activity_rate": 0.0,
+                        "trade_efficiency": 0.0,
+                        "trade_chat_no_deal_rate": 0.0,
+                        "public_chat_messages": 0,
+                        "public_chat_targeted_messages": 0,
+                    },
+                    "players": {
+                        "RED": {
+                            "final_vp": 5,
+                            "is_winner": True,
+                            "vp_progression": [
+                                {"turn_index": 0, "vp": 1},
+                                {"turn_index": 5, "vp": 5},
+                            ],
+                            "buildings": {
+                                "settlements": [{"turn_index": 0}],
+                                "cities": [],
+                                "roads": [{"turn_index": 1}],
+                                "counts": {
+                                    "settlements": 1,
+                                    "cities": 0,
+                                    "roads": 1,
+                                },
+                            },
+                            "road_progression": [
+                                {"turn_index": 0, "road_length": 1},
+                                {"turn_index": 5, "road_length": 5},
+                            ],
+                            "army_progression": [
+                                {"turn_index": 0, "knights": 0},
+                                {"turn_index": 5, "knights": 3},
+                            ],
+                            "dev_card_progression": [
+                                {
+                                    "turn_index": 0,
+                                    "cards_bought": 0,
+                                    "dev_victory_points": 0,
+                                },
+                                {
+                                    "turn_index": 3,
+                                    "cards_bought": 2,
+                                    "dev_victory_points": 1,
+                                },
+                            ],
+                            "trade": {},
+                            "trade_chat": {},
+                            "public_chat": {},
+                            "achievements": {},
+                            "robber": {},
+                            "dev_cards": {},
+                            "decision_quality": {},
+                        },
+                        "BLUE": {
+                            "final_vp": 3,
+                            "is_winner": False,
+                            "vp_progression": [
+                                {"turn_index": 0, "vp": 1},
+                                {"turn_index": 5, "vp": 3},
+                            ],
+                            "buildings": {
+                                "settlements": [{"turn_index": 0}],
+                                "cities": [],
+                                "roads": [{"turn_index": 2}],
+                                "counts": {
+                                    "settlements": 1,
+                                    "cities": 0,
+                                    "roads": 1,
+                                },
+                            },
+                            "road_progression": [
+                                {"turn_index": 0, "road_length": 1},
+                                {"turn_index": 5, "road_length": 3},
+                            ],
+                            "army_progression": [
+                                {"turn_index": 0, "knights": 0},
+                                {"turn_index": 5, "knights": 1},
+                            ],
+                            "dev_card_progression": [
+                                {
+                                    "turn_index": 0,
+                                    "cards_bought": 0,
+                                    "dev_victory_points": 0,
+                                }
+                            ],
+                            "trade": {},
+                            "trade_chat": {},
+                            "public_chat": {},
+                            "achievements": {},
+                            "robber": {},
+                            "dev_cards": {},
+                            "decision_quality": {},
+                        },
+                    },
+                },
+            )
+
+            snapshot = DashboardSnapshot(
+                run_dir=run_dir,
+                metadata={},
+                player_ids=("RED", "BLUE"),
+                public_events=(),
+                public_state_snapshots=(),
+                memory_traces_by_player={},
+                prompt_traces_by_player={},
+                result=None,
+            )
+            st = FakeStreamlit()
+
+            _render_analysis_tab(st, snapshot)
+
+            self.assertIn(4, st.columns_calls)
+            self.assertIn("**🃏 Development Cards**", st.markdown_calls)
+            self.assertEqual(st.plotly_chart_calls, 4)
+
     def test_event_body_formats_public_chat_message(self) -> None:
         body = _event_body(
             Event(

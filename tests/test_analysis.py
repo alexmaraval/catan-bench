@@ -17,6 +17,7 @@ from catan_bench.analysis import (
     compute_building_timeline,
     compute_decision_quality,
     compute_dev_card_analysis,
+    compute_dev_card_progression,
     compute_discard_analysis,
     compute_game_summary,
     compute_phase_analysis,
@@ -342,6 +343,75 @@ class TestComputeDevCardAnalysis(unittest.TestCase):
         result = compute_dev_card_analysis("RED", [], None)
         self.assertEqual(result["cards_played"], 0)
         self.assertEqual(result["cards_held_at_end"], 0)
+
+
+class TestComputeDevCardProgression(unittest.TestCase):
+    def test_tracks_cumulative_buys_and_dev_vp(self) -> None:
+        events = [
+            _event(
+                "action_taken",
+                actor="RED",
+                turn=2,
+                action={"action_type": "BUY_DEVELOPMENT_CARD", "payload": {}},
+            ),
+            _event(
+                "action_taken",
+                actor="RED",
+                turn=4,
+                action={"action_type": "BUY_DEVELOPMENT_CARD", "payload": {}},
+            ),
+            _event(
+                "action_taken",
+                actor="BLUE",
+                turn=5,
+                action={"action_type": "BUY_DEVELOPMENT_CARD", "payload": {}},
+            ),
+        ]
+        snapshots = [
+            _snapshot(
+                0,
+                1,
+                players={"RED": {"visible_victory_points": 2, "dev_victory_points": 0}},
+            ),
+            _snapshot(
+                4,
+                2,
+                players={"RED": {"visible_victory_points": 3, "dev_victory_points": 0}},
+            ),
+            _snapshot(
+                6,
+                3,
+                players={"RED": {"visible_victory_points": 4, "dev_victory_points": 1}},
+            ),
+        ]
+
+        result = compute_dev_card_progression("RED", events, snapshots)
+
+        self.assertEqual(
+            result,
+            [
+                {"turn_index": 0, "cards_bought": 0, "dev_victory_points": 0},
+                {"turn_index": 2, "cards_bought": 1, "dev_victory_points": 0},
+                {"turn_index": 4, "cards_bought": 2, "dev_victory_points": 0},
+                {"turn_index": 6, "cards_bought": 2, "dev_victory_points": 1},
+            ],
+        )
+
+    def test_falls_back_to_actual_minus_visible_vp(self) -> None:
+        snapshots = [
+            _snapshot(
+                3,
+                1,
+                players={"RED": {"actual_victory_points": 5, "visible_victory_points": 4}},
+            ),
+        ]
+
+        result = compute_dev_card_progression("RED", [], snapshots)
+
+        self.assertEqual(
+            result,
+            [{"turn_index": 3, "cards_bought": 0, "dev_victory_points": 1}],
+        )
 
 
 # ── Trade analysis tests ──────────────────────────────────────────────────────
@@ -1351,6 +1421,7 @@ class TestAnalyzeGameIntegration(unittest.TestCase):
                 players["RED"]["strategy"]["final_strategy"], "Pivot to city strategy"
             )
             self.assertIn("strategy_stability", players["RED"]["strategy"])
+            self.assertIn("dev_card_progression", players["RED"])
             self.assertIn("market", analysis)
 
             # analysis.json was written

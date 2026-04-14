@@ -2937,9 +2937,12 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 else:
                     st.info("No targeted public chat heatmap yet.")
 
-    # ── Building Timeline + Longest Road + Largest Army ──
+    # ── Building Timeline + Longest Road + Largest Army + Dev Cards ──
     st.subheader("Building & Achievement Progression")
+    from .analysis import compute_dev_card_progression as _compute_dev_card_progression
+
     _build_events: list[dict] = []
+    _dev_card_progressions: dict[str, list[dict]] = {}
     for pid, pdata in players.items():
         buildings = pdata.get("buildings", {})
         for s in buildings.get("settlements", []):
@@ -2957,6 +2960,15 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
                 _build_events.append(
                     {"player": pid, "turn": r["turn_index"], "type": "Road"}
                 )
+        stored_dev_progression = pdata.get("dev_card_progression")
+        if isinstance(stored_dev_progression, list):
+            _dev_card_progressions[pid] = stored_dev_progression
+        else:
+            _dev_card_progressions[pid] = _compute_dev_card_progression(
+                pid,
+                list(snapshot.public_events),
+                list(snapshot.public_state_snapshots),
+            )
 
     _game_max_turn = gs.get("num_turns", 0)
     _plotly_layout_base = dict(
@@ -2974,7 +2986,27 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
         hovermode="x unified",
     )
 
-    _build_col, _road_col, _army_col = st.columns(3)
+    def _dense_progression_series(
+        progression: list[dict], value_key: str, max_turn: int
+    ) -> tuple[list[int], list[int]]:
+        by_turn: dict[int, int] = {}
+        for entry in progression:
+            turn = entry.get("turn_index")
+            value = entry.get(value_key)
+            if not isinstance(turn, int) or not isinstance(value, (int, float)):
+                continue
+            by_turn[turn] = max(by_turn.get(turn, 0), int(value))
+
+        turns = list(range(max_turn + 1))
+        values: list[int] = []
+        current = 0
+        for turn in turns:
+            if turn in by_turn:
+                current = by_turn[turn]
+            values.append(current)
+        return turns, values
+
+    _build_col, _road_col, _army_col, _dev_col = st.columns(4)
 
     # (a) Building timeline
     with _build_col:
@@ -3156,6 +3188,86 @@ def _render_analysis_tab(st, snapshot: DashboardSnapshot) -> None:
             st.plotly_chart(_army_fig, width="stretch")
         else:
             st.info("No army progression data — regenerate analysis.json.")
+
+    # (d) Development card progression
+    with _dev_col:
+        st.markdown("**🃏 Development Cards**")
+        _dev_fig = go.Figure()
+        _has_dev_data = False
+        _dev_max_turn = max(
+            _game_max_turn,
+            max(
+                (
+                    max(
+                        (
+                            int(entry.get("turn_index", 0))
+                            for entry in progression
+                            if isinstance(entry.get("turn_index"), int)
+                        ),
+                        default=0,
+                    )
+                    for progression in _dev_card_progressions.values()
+                ),
+                default=0,
+            ),
+        )
+        for pid in sorted(players.keys()):
+            _pcolor = PLAYER_COLORS.get(pid, NEUTRAL_COLORS)[0]
+            dev_prog = _dev_card_progressions.get(pid, [])
+            if not dev_prog:
+                continue
+            _has_dev_data = True
+            turns, cards_bought = _dense_progression_series(
+                dev_prog, "cards_bought", _dev_max_turn
+            )
+            _, dev_vp = _dense_progression_series(
+                dev_prog, "dev_victory_points", _dev_max_turn
+            )
+            _dev_fig.add_trace(
+                go.Scatter(
+                    x=turns,
+                    y=cards_bought,
+                    mode="lines",
+                    name=f"{pid} cards bought",
+                    line=dict(color=_pcolor, width=2),
+                    showlegend=False,
+                    hovertemplate=f"<b>{pid}</b> cards bought<br>Turn %{{x}}: %{{y}}<extra></extra>",
+                )
+            )
+            _dev_fig.add_trace(
+                go.Scatter(
+                    x=turns,
+                    y=dev_vp,
+                    mode="lines",
+                    name=f"{pid} dev-card VP",
+                    line=dict(color=_pcolor, width=2, dash="dot"),
+                    showlegend=False,
+                    hovertemplate=f"<b>{pid}</b> dev-card VP<br>Turn %{{x}}: %{{y}}<extra></extra>",
+                )
+            )
+        if _has_dev_data:
+            _dev_fig.update_layout(
+                **{**_plotly_layout_base, "margin": dict(l=40, r=10, t=50, b=40)},
+                showlegend=False,
+                yaxis=dict(
+                    title="Cumulative count", gridcolor="#1e293b", color="#94a3b8"
+                ),
+                annotations=[
+                    dict(
+                        text="━━ Cards bought &nbsp;&nbsp; - - VP from dev cards",
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=1.12,
+                        showarrow=False,
+                        font=dict(color="#94a3b8", size=10),
+                        xanchor="center",
+                    ),
+                ],
+            )
+            st.plotly_chart(_dev_fig, width="stretch")
+        else:
+            st.info("No development card progression data available.")
 
     # ── Per-Player Summary Cards ──
     st.subheader("Player Summary")
